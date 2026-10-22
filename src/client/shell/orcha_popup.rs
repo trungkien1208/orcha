@@ -20,6 +20,13 @@ pub(crate) enum OrchaPopup {
     Accounts { selected: usize, pane: Option<String> },
     /// Continue `pane`'s conversation with another agent.
     Handoff { selected: usize, pane: String },
+    /// Start an agent on an account in a new tab of `workspace`.
+    NewAgent {
+        selected: usize,
+        workspace: String,
+        project: String,
+        cwd: String,
+    },
 }
 
 /// Click targets of the open popup.
@@ -311,32 +318,6 @@ fn render_accounts(
             break;
         }
         let rect = Rect::new(frame.body.x, y, frame.body.width, row_height);
-        let fill = row_box(buffer, rect, account.current, index == selected, t);
-        let x = rect.x + 3;
-        // line 1: logo chip, name, badge … action
-        let logo = brutal::agent_logo(Some(&account.kind), config.icon_font);
-        let chip_width = brutal::chip(
-            buffer,
-            x,
-            y + 1,
-            4,
-            logo,
-            t.chip_text,
-            t.agent(Some(&account.kind)),
-        );
-        let name_x = x + chip_width + 1;
-        let name_width = display_width(&account.label).min(30);
-        put_text(
-            buffer,
-            name_x,
-            y + 1,
-            name_width,
-            &account.label,
-            Style::default()
-                .fg(t.ink)
-                .bg(fill)
-                .add_modifier(Modifier::BOLD),
-        );
         let badge = if account.current {
             Some(("IN USE", t.card, t.ink))
         } else if Some(index) == best {
@@ -344,9 +325,6 @@ fn render_accounts(
         } else {
             None
         };
-        if let Some((text, fg, bg)) = badge {
-            brutal::chip(buffer, name_x + name_width + 1, y + 1, 12, text, fg, bg);
-        }
         let signed_out = account.error.is_some() && account.windows.is_empty();
         let (label, kind) = if account.current {
             ("IN USE", ButtonKind::Muted)
@@ -357,52 +335,195 @@ fn render_accounts(
         } else {
             ("SWITCH", ButtonKind::Plain)
         };
-        let action = button(buffer, rect.right() - 1, y + 1, label, kind, fill, t);
-        if !account.current {
-            hits.actions.push((action, index));
-        }
-        // line 2: email, then the gauges
-        let email = account
-            .email
-            .clone()
-            .or_else(|| account.error.clone())
-            .unwrap_or_default();
-        let gauges_width = account.windows.iter().take(2).count() as u16 * 22;
-        let email_width = rect.width.saturating_sub(gauges_width + 8);
+        account_row(
+            buffer,
+            rect,
+            account,
+            index,
+            AccountRow {
+                current: account.current,
+                cursor: index == selected,
+                badge,
+                action: (label, kind),
+                clickable: !account.current,
+            },
+            config,
+            t,
+            hits,
+        );
+        y += row_height + 1;
+    }
+    Some(())
+}
+
+struct AccountRow<'a> {
+    current: bool,
+    cursor: bool,
+    badge: Option<(&'a str, ratatui::style::Color, ratatui::style::Color)>,
+    action: (&'a str, ButtonKind),
+    clickable: bool,
+}
+
+/// One account: logo chip, name and badge, action button; email and the
+/// fuel gauges under them.
+#[allow(clippy::too_many_arguments)] // one row, all inputs are distinct facts
+fn account_row(
+    buffer: &mut Buffer,
+    rect: Rect,
+    account: &Account,
+    index: usize,
+    row: AccountRow<'_>,
+    config: &ClientShellConfig,
+    t: &Brutal,
+    hits: &mut PopupHits,
+) {
+    let y = rect.y;
+    let fill = row_box(buffer, rect, row.current, row.cursor, t);
+    let x = rect.x + 3;
+    let logo = brutal::agent_logo(Some(&account.kind), config.icon_font);
+    let chip_width = brutal::chip(buffer, x, y + 1, 4, logo, t.chip_text, t.agent(Some(&account.kind)));
+    let name_x = x + chip_width + 1;
+    let name_width = display_width(&account.label).min(30);
+    put_text(
+        buffer,
+        name_x,
+        y + 1,
+        name_width,
+        &account.label,
+        Style::default()
+            .fg(t.ink)
+            .bg(fill)
+            .add_modifier(Modifier::BOLD),
+    );
+    if let Some((text, fg, bg)) = row.badge {
+        brutal::chip(buffer, name_x + name_width + 1, y + 1, 12, text, fg, bg);
+    }
+    let (label, kind) = row.action;
+    let action = button(buffer, rect.right() - 1, y + 1, label, kind, fill, t);
+    if row.clickable {
+        hits.actions.push((action, index));
+    }
+    let email = account
+        .email
+        .clone()
+        .or_else(|| account.error.clone())
+        .unwrap_or_default();
+    let gauges_width = account.windows.iter().take(2).count() as u16 * 22;
+    let email_width = rect.width.saturating_sub(gauges_width + 8);
+    put_text(
+        buffer,
+        x,
+        y + 2,
+        email_width,
+        &brutal::clip(&email, usize::from(email_width)),
+        Style::default().fg(t.muted).bg(fill),
+    );
+    let mut gx = rect.right().saturating_sub(gauges_width + 2);
+    for window in account.windows.iter().take(2) {
+        put_text(buffer, gx, y + 2, 5, &window.label, Style::default().fg(t.muted).bg(fill));
+        super::git_panel::draw_gauge(buffer, gx + 5, y + 2, window.left, fill, t);
         put_text(
             buffer,
-            x,
+            gx + 16,
             y + 2,
-            email_width,
-            &brutal::clip(&email, usize::from(email_width)),
-            Style::default().fg(t.muted).bg(fill),
+            5,
+            &format!("{:>3}%", window.left),
+            Style::default()
+                .fg(if window.left < 20 { t.red } else { t.ink })
+                .bg(fill)
+                .add_modifier(Modifier::BOLD),
         );
-        let mut gx = rect.right().saturating_sub(gauges_width + 2);
-        for window in account.windows.iter().take(2) {
-            put_text(
-                buffer,
-                gx,
-                y + 2,
-                5,
-                &window.label,
-                Style::default().fg(t.muted).bg(fill),
-            );
-            super::git_panel::draw_gauge(buffer, gx + 5, y + 2, window.left, fill, t);
-            put_text(
-                buffer,
-                gx + 16,
-                y + 2,
-                5,
-                &format!("{:>3}%", window.left),
-                Style::default()
-                    .fg(if window.left < 20 { t.red } else { t.ink })
-                    .bg(fill)
-                    .add_modifier(Modifier::BOLD),
-            );
-            gx += 22;
+        gx += 22;
+    }
+    hits.rows.push((rect, index));
+}
+
+/// NEW AGENT: which agent and account starts in a new tab of the project.
+/// Rows are the accounts (with their fuel), then a plain shell.
+fn render_new_agent(
+    buffer: &mut Buffer,
+    selected: usize,
+    project: &str,
+    accounts: Option<&[Account]>,
+    config: &ClientShellConfig,
+    t: &Brutal,
+    hits: &mut PopupHits,
+) -> Option<()> {
+    let accounts = accounts.unwrap_or(&[]);
+    let row_height = 4;
+    let rows = accounts.len() as u16 + 1;
+    let frame = popup_frame(
+        buffer,
+        84,
+        rows * (row_height + 1),
+        "NEW AGENT",
+        &format!("new tab in {project}"),
+        &[("↵", "start"), ("↑↓", "choose"), ("P", "new project")],
+        "esc close",
+        t,
+        hits,
+    )?;
+    let most = accounts
+        .iter()
+        .enumerate()
+        .filter(|(_, account)| account.error.is_none() || !account.windows.is_empty())
+        .max_by_key(|(_, account)| account.lowest().unwrap_or(0))
+        .map(|(index, _)| index);
+    let mut y = frame.body.y;
+    for (index, account) in accounts.iter().enumerate() {
+        if y + row_height > frame.body.bottom() + 1 {
+            break;
         }
-        hits.rows.push((rect, index));
+        let rect = Rect::new(frame.body.x, y, frame.body.width, row_height);
+        let signed_out = account.error.is_some() && account.windows.is_empty();
+        let action = if signed_out {
+            ("SIGN IN", ButtonKind::Plain)
+        } else if index == selected {
+            ("START ↵", ButtonKind::Primary)
+        } else {
+            ("START", ButtonKind::Plain)
+        };
+        let badge = (Some(index) == most).then_some(("MOST FUEL", t.chip_text, t.green));
+        account_row(
+            buffer,
+            rect,
+            account,
+            index,
+            AccountRow {
+                current: false,
+                cursor: index == selected,
+                badge,
+                action,
+                clickable: true,
+            },
+            config,
+            t,
+            hits,
+        );
         y += row_height + 1;
+    }
+    // a plain shell, last
+    let index = accounts.len();
+    if y + 3 <= frame.body.bottom() + 1 {
+        let rect = Rect::new(frame.body.x, y, frame.body.width, 3);
+        let fill = row_box(buffer, rect, false, index == selected, t);
+        let chip_width = brutal::chip(buffer, rect.x + 3, y + 1, 4, "▶", t.chip_text, t.rail_ahead);
+        put_text(
+            buffer,
+            rect.x + 4 + chip_width,
+            y + 1,
+            20,
+            "Shell",
+            Style::default().fg(t.ink).bg(fill).add_modifier(Modifier::BOLD),
+        );
+        let kind = if index == selected {
+            ButtonKind::Primary
+        } else {
+            ButtonKind::Plain
+        };
+        let action = button(buffer, rect.right() - 1, y + 1, "OPEN", kind, fill, t);
+        hits.actions.push((action, index));
+        hits.rows.push((rect, index));
     }
     Some(())
 }
@@ -514,6 +635,11 @@ pub(super) fn render_popup(
         }
         OrchaPopup::Handoff { selected, pane } => {
             let _ = render_handoff(buffer, *selected, pane, snapshot, config, &t, &mut hits);
+        }
+        OrchaPopup::NewAgent {
+            selected, project, ..
+        } => {
+            let _ = render_new_agent(buffer, *selected, project, accounts, config, &t, &mut hits);
         }
     }
     hits

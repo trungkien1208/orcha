@@ -407,6 +407,7 @@ pub(super) fn render_git_panel(
     fuel: Option<&super::accounts::Account>,
     config: &ClientShellConfig,
     ui: &super::OrchaUiState,
+    arrived: bool,
     hits: &mut ShellHitMap,
 ) {
     if area.width < 12 || area.height < 4 {
@@ -434,7 +435,13 @@ pub(super) fn render_git_panel(
     let fixed = 2 + fuel_rows + branch_rows + 2 + history_rows + 1 + worktree_rows;
     let file_count = data.map_or(0, |d| d.files.len()) as u16;
     let file_rows = file_count.min(area.height.saturating_sub(1).saturating_sub(fixed));
-    let changes_rows = if data.is_some() { 1 + file_rows.max(1) } else { 0 };
+    // the train arrived: its changes get DIFF / COMMIT / PR
+    let arrived = arrived && data.is_some_and(|d| !d.files.is_empty());
+    let changes_rows = if data.is_some() {
+        1 + file_rows.max(1) + u16::from(arrived)
+    } else {
+        0
+    };
     let height = (fixed + changes_rows).min(area.height.saturating_sub(1));
     let rect = Rect::new(area.x + 1, area.y, area.width.saturating_sub(2), height);
     brutal::draw_box(buffer, rect, Edge::Light, t.line, t.card);
@@ -601,6 +608,36 @@ pub(super) fn render_git_panel(
         y += 1;
     }
     if data.files.is_empty() {
+        y += 1;
+    }
+    if arrived && y < bottom {
+        let mut bx = x;
+        for (index, label) in [" ◇ DIFF ", " ✓ COMMIT ", " ↗ PR "].iter().enumerate() {
+            let width = display_width(label);
+            if bx + width > x + inner_width {
+                break;
+            }
+            let (fg, bg) = if index == 1 {
+                (t.chip_text, t.green)
+            } else {
+                (t.ink, t.frame)
+            };
+            put_text(
+                buffer,
+                bx,
+                y,
+                width,
+                label,
+                Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
+            );
+            let hit = Rect::new(bx, y, width, 1);
+            match index {
+                0 => hits.orcha.diff = hit,
+                1 => hits.orcha.commit = hit,
+                _ => hits.orcha.pull_request = hit,
+            }
+            bx += width + 1;
+        }
         y += 1;
     }
     if y >= bottom {

@@ -350,6 +350,8 @@ pub struct OrchaConfig {
     pub open_command: String,
     /// Sign an account in, in a new pane: `{id}`.
     pub login_command: String,
+    /// Start an account's agent in a new tab: `{id}`, `{workspace}`, `{cwd}`.
+    pub new_agent_command: String,
     /// Continue `{pane}`'s chat with another agent: `{agent}` and `{mode}`
     /// ("full" or "summary").
     pub handoff_command: String,
@@ -372,6 +374,8 @@ impl Default for OrchaConfig {
             switch_command: "~/.config/orcha/scripts/limits.py switch {id} {pane}".into(),
             open_command: "~/.config/orcha/scripts/limits.py open {id}".into(),
             login_command: "~/.config/orcha/scripts/limits.py login-pane {id}".into(),
+            new_agent_command: "~/.config/orcha/scripts/limits.py new {id} {workspace} {cwd}"
+                .into(),
             handoff_command: "~/.config/orcha/scripts/handoff.py {pane} {agent} {mode}".into(),
             ide: String::new(),
             git_gui: String::new(),

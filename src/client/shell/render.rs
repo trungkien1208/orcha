@@ -364,6 +364,7 @@ pub(super) fn render_shell(
             state.fuel,
             config,
             state.orcha_ui,
+            focused_agent_arrived(snapshot),
             &mut hits,
         );
     }
@@ -387,6 +388,17 @@ pub(super) fn render_shell(
         hits.pane_splits.clear();
     }
     hits
+}
+
+/// orcha: the focused pane runs an agent that finished its turn.
+fn focused_agent_arrived(snapshot: &ClientShellSnapshot) -> bool {
+    use crate::api::schema::AgentStatus;
+    let Some(focused) = snapshot.focused_pane_id.as_deref() else {
+        return false;
+    };
+    snapshot.agents.iter().any(|agent| {
+        agent.pane_id == focused && matches!(agent.agent_status, AgentStatus::Done | AgentStatus::Idle)
+    })
 }
 
 pub(super) fn put_right_text(buffer: &mut Buffer, area: Rect, y: u16, text: &str, style: Style) {

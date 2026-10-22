@@ -179,6 +179,18 @@ fn accounts_popup_lists_fuel() {
     assert!(all.contains("switch this chat"));
     assert_eq!(state.hits.orcha.popup.actions.len(), 1, "only the other account switches");
     assert!(state.update_low_fuel_hint(), "8% left offers a switch");
+
+    // NEW: the accounts plus a plain shell, the one with most fuel picked
+    state.orcha_ui.popup = None;
+    state.open_new_agent_popup();
+    let frame = state.compose(140, 40).expect("frame");
+    let all = frame_rows(&frame).join("\n");
+    assert!(all.contains("NEW AGENT") && all.contains("Shell") && all.contains("START"));
+    assert_eq!(state.hits.orcha.popup.rows.len(), 3);
+    assert!(matches!(
+        state.orcha_ui.popup,
+        Some(crate::client::shell::orcha_popup::OrchaPopup::NewAgent { selected: 1, .. })
+    ));
 }
 
 #[test]

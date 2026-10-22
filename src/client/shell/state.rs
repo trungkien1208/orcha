@@ -109,6 +109,10 @@ pub(super) struct OrchaHits {
     pub(super) new_worktree: Rect,
     pub(super) ide: Rect,
     pub(super) git_gui: Rect,
+    /// DIFF / COMMIT / PR once the focused agent has finished.
+    pub(super) diff: Rect,
+    pub(super) commit: Rect,
+    pub(super) pull_request: Rect,
     pub(super) popup: super::orcha_popup::PopupHits,
 }
 

@@ -52,6 +52,11 @@ fn spawn_with_env(command: &str, path: &str, line: u32) {
 impl ClientShellState {
     /// Clicks on the orcha chrome. Returns true when one was handled.
     pub(super) fn handle_orcha_click(&mut self, point: (u16, u16), outcome: &mut ClientShellInput) -> bool {
+        if self.config.sidebar_tree && super::contains(self.hits.new_workspace, point) {
+            self.open_new_agent_popup();
+            outcome.repaint = true;
+            return true;
+        }
         let hits = &self.hits.orcha;
         if super::contains(hits.settings, point) {
             self.record_binding(
@@ -95,8 +100,31 @@ impl ClientShellState {
             );
             return true;
         }
+        let ask = if super::contains(hits.commit, point) {
+            Some("Commit the changes with a clear, conventional commit message.")
+        } else if super::contains(hits.pull_request, point) {
+            Some("Push this branch and open a pull request with a short summary of the changes.")
+        } else {
+            None
+        };
+        if let Some(prompt) = ask {
+            // the agent that made the changes does the commit / PR
+            if let Some(pane) = self.snapshot.as_deref().and_then(|s| s.focused_pane_id.clone()) {
+                let quoted = |text: &str| format!("'{}'", text.replace('\'', "'\\''"));
+                run_detached(
+                    format!(
+                        "herdr pane send-text {pane} {text} && herdr pane send-keys {pane} enter",
+                        pane = quoted(&pane),
+                        text = quoted(prompt)
+                    ),
+                    &[],
+                );
+            }
+            return true;
+        }
         let ide = super::contains(hits.ide, point);
-        if ide || super::contains(hits.git_gui, point) {
+        let diff = super::contains(hits.diff, point);
+        if ide || diff || super::contains(hits.git_gui, point) {
             if let Some(root) = self.git_panel.data().map(|data| data.root.clone()) {
                 let configured = if ide {
                     &self.config.orcha.ide
@@ -198,6 +226,9 @@ impl ClientShellState {
             Some(super::orcha_popup::OrchaPopup::Handoff { .. }) => {
                 super::orcha_popup::HANDOFF_TARGETS.len()
             }
+            Some(super::orcha_popup::OrchaPopup::NewAgent { .. }) => {
+                self.accounts.data().map_or(0, <[_]>::len) + 1
+            }
             None => 0,
         }
     }
@@ -206,7 +237,8 @@ impl ClientShellState {
         match &mut self.orcha_ui.popup {
             Some(
                 super::orcha_popup::OrchaPopup::Accounts { selected, .. }
-                | super::orcha_popup::OrchaPopup::Handoff { selected, .. },
+                | super::orcha_popup::OrchaPopup::Handoff { selected, .. }
+                | super::orcha_popup::OrchaPopup::NewAgent { selected, .. },
             ) => *selected = index,
             None => {}
         }
@@ -216,14 +248,51 @@ impl ClientShellState {
         match &self.orcha_ui.popup {
             Some(
                 super::orcha_popup::OrchaPopup::Accounts { selected, .. }
-                | super::orcha_popup::OrchaPopup::Handoff { selected, .. },
+                | super::orcha_popup::OrchaPopup::Handoff { selected, .. }
+                | super::orcha_popup::OrchaPopup::NewAgent { selected, .. },
             ) => *selected,
             None => 0,
         }
     }
 
+    /// NEW: pick the agent and account for a new tab of the selected project.
+    pub(super) fn open_new_agent_popup(&mut self) {
+        let Some(snapshot) = self.snapshot.as_deref() else {
+            return;
+        };
+        let Some(workspace) = snapshot.workspaces.iter().find(|workspace| workspace.focused) else {
+            return;
+        };
+        let cwd = snapshot
+            .focused_pane_id
+            .as_deref()
+            .and_then(|focused| snapshot.panes.iter().find(|pane| pane.pane_id == focused))
+            .and_then(|pane| pane.foreground_cwd.clone().or_else(|| pane.cwd.clone()))
+            .unwrap_or_else(|| workspace.new_workspace_cwd.clone());
+        // start on the account with the most fuel
+        let selected = self
+            .accounts
+            .data()
+            .and_then(|accounts| {
+                accounts
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, account)| !account.windows.is_empty())
+                    .max_by_key(|(_, account)| account.lowest().unwrap_or(0))
+                    .map(|(index, _)| index)
+            })
+            .unwrap_or(0);
+        self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::NewAgent {
+            selected,
+            workspace: workspace.workspace_id.clone(),
+            project: workspace.label.clone(),
+            cwd,
+        });
+        self.accounts.refresh_soon();
+    }
+
     /// The popup's primary action on row `index`; `alternate` is ⌥↵.
-    fn popup_activate(&mut self, index: usize, alternate: bool) {
+    fn popup_activate(&mut self, index: usize, alternate: bool, outcome: &mut ClientShellInput) {
         let Some(popup) = self.orcha_ui.popup.clone() else {
             return;
         };
@@ -265,6 +334,28 @@ impl ClientShellState {
                 run_detached(command, &env);
                 self.accounts.refresh_soon();
             }
+            super::orcha_popup::OrchaPopup::NewAgent { workspace, cwd, .. } => {
+                let account = self.accounts.data().and_then(|data| data.get(index)).cloned();
+                self.orcha_ui.popup = None;
+                match account {
+                    Some(account) if account.error.is_some() && account.windows.is_empty() => {
+                        run_detached(fill(&orcha.login_command, &[("id", &account.id)]), &[]);
+                    }
+                    Some(account) => run_detached(
+                        fill(
+                            &orcha.new_agent_command,
+                            &[("id", &account.id), ("workspace", &workspace), ("cwd", &cwd)],
+                        ),
+                        &[],
+                    ),
+                    // the last row: a plain shell tab
+                    None => self.record_binding(
+                        crate::input::KeybindMatch::Action(crate::input::KeybindAction::NewTab),
+                        outcome,
+                    ),
+                }
+                return;
+            }
             super::orcha_popup::OrchaPopup::Handoff { pane, .. } => {
                 let Some((agent, mode, _)) = super::orcha_popup::HANDOFF_TARGETS.get(index) else {
                     return;
@@ -300,7 +391,19 @@ impl ClientShellState {
             }
             KeyCode::Enter => {
                 let alternate = key.modifiers.contains(KeyModifiers::ALT);
-                self.popup_activate(selected, alternate);
+                self.popup_activate(selected, alternate, outcome);
+            }
+            KeyCode::Char('p') | KeyCode::Char('P')
+                if matches!(
+                    self.orcha_ui.popup,
+                    Some(super::orcha_popup::OrchaPopup::NewAgent { .. })
+                ) =>
+            {
+                self.orcha_ui.popup = None;
+                self.record_binding(
+                    crate::input::KeybindMatch::Action(crate::input::KeybindAction::NewWorkspace),
+                    outcome,
+                );
             }
             KeyCode::Char('h') | KeyCode::Char('H')
                 if matches!(
@@ -333,7 +436,7 @@ impl ClientShellState {
             return;
         }
         if let Some((_, index)) = hits.actions.iter().find(|(rect, _)| super::contains(*rect, point)) {
-            self.popup_activate(*index, false);
+            self.popup_activate(*index, false, outcome);
             return;
         }
         if let Some((_, index)) = hits.rows.iter().find(|(rect, _)| super::contains(*rect, point)) {
