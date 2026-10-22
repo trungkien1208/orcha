@@ -22,6 +22,8 @@ pub const THEME_NAMES: &[&str] = &[
     "vesper",
     "brutal",
     "brutal-dark",
+    "brutal-matcha",
+    "brutal-ocean",
 ];
 
 pub(crate) fn canonical_theme_name(name: &str) -> Option<&'static str> {
@@ -46,6 +48,8 @@ pub(crate) fn canonical_theme_name(name: &str) -> Option<&'static str> {
         "vesper" => Some("vesper"),
         "brutal" | "brutal-light" | "orcha" => Some("brutal"),
         "brutal-dark" | "brutal-night" | "orcha-dark" => Some("brutal-dark"),
+        "brutal-matcha" | "matcha" => Some("brutal-matcha"),
+        "brutal-ocean" | "ocean" => Some("brutal-ocean"),
         _ => None,
     }
 }
@@ -90,13 +94,47 @@ impl ThemeConfig {
         .into_iter()
         .filter_map(|(field, value, fallback)| {
             let value = value?;
-            canonical_theme_name(value).is_none().then(|| {
+            (canonical_theme_name(value).is_none() && !style_file_exists(value)).then(|| {
                 format!(
                     "unknown theme name {field} = {value:?}; using {fallback:?}; valid themes: {valid}"
                 )
             })
         })
         .collect()
+    }
+}
+
+/// orcha: a style file, `~/.config/orcha/styles/<name>.toml`: the token
+/// overrides of [theme.custom] on top of a built-in `base` (default
+/// "brutal"), so a custom style keeps the neo-brutal shapes.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct StyleFile {
+    pub base: Option<String>,
+    #[serde(flatten)]
+    pub colors: CustomThemeColors,
+}
+
+pub fn style_file_path(name: &str) -> Option<std::path::PathBuf> {
+    // a plain name only: no path tricks
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return None;
+    }
+    Some(super::config_dir().join("styles").join(format!("{name}.toml")))
+}
+
+pub(crate) fn style_file_exists(name: &str) -> bool {
+    style_file_path(name).is_some_and(|path| path.is_file())
+}
+
+pub fn load_style_file(name: &str) -> Option<StyleFile> {
+    let text = std::fs::read_to_string(style_file_path(name)?).ok()?;
+    match toml::from_str(&text) {
+        Ok(style) => Some(style),
+        Err(err) => {
+            warn!(style = name, err = %err, "invalid style file");
+            None
+        }
     }
 }
 
@@ -226,6 +264,16 @@ pub fn parse_color(s: &str) -> ratatui::style::Color {
 mod tests {
     use super::*;
     use crate::config::Config;
+
+    #[test]
+    fn style_files_parse_a_base_and_tokens() {
+        let style: StyleFile =
+            toml::from_str("base = \"brutal-dark\"\nsidebar_bg = \"#102030\"\nmauve = \"#ff00aa\"\n")
+                .expect("style");
+        assert_eq!(style.base.as_deref(), Some("brutal-dark"));
+        assert_eq!(style.colors.sidebar_bg.as_deref(), Some("#102030"));
+        assert!(style_file_path("../etc/passwd").is_none());
+    }
 
     #[test]
     fn theme_name_parses() {

@@ -21,10 +21,12 @@ const KNOWN_TOP_LEVEL_CONFIG_KEYS: &[&str] = &[
 ];
 
 pub fn app_dir_name() -> &'static str {
-    if cfg!(debug_assertions) {
-        "herdr-dev"
-    } else {
-        "herdr"
+    // orcha keeps its own config and sessions next to herdr's
+    match (crate::orcha_app::is_orcha(), cfg!(debug_assertions)) {
+        (true, true) => "orcha-dev",
+        (true, false) => "orcha",
+        (false, true) => "herdr-dev",
+        (false, false) => "herdr",
     }
 }
 

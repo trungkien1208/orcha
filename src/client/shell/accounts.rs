@@ -63,6 +63,10 @@ pub(super) fn orcha_command(command: &str) -> Command {
             crate::api::SOCKET_PATH_ENV_VAR,
             crate::session::active_api_socket_path(),
         );
+    // the scripts drive this app's CLI, whatever `herdr` on PATH is
+    if let Ok(exe) = std::env::current_exe() {
+        cmd.env("HERDR_BIN_PATH", exe);
+    }
     cmd
 }
 

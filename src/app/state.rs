@@ -574,9 +574,51 @@ impl Palette {
         }
     }
 
+    /// orcha Brutal matcha — green tea paper, same ink and shapes.
+    pub fn brutal_matcha() -> Self {
+        Self {
+            sidebar_bg: Color::Rgb(232, 240, 208),
+            active_row_bg: Color::Rgb(219, 232, 190),
+            surface0: Color::Rgb(219, 232, 190),
+            surface1: Color::Rgb(178, 196, 150),
+            surface_dim: Color::Rgb(205, 220, 178),
+            overlay0: Color::Rgb(88, 104, 70),
+            mauve: Color::Rgb(255, 143, 171),
+            accent: Color::Rgb(255, 143, 171),
+            green: Color::Rgb(127, 194, 74),
+            ..Self::brutal()
+        }
+    }
+
+    /// orcha Brutal ocean — pale sea paper, same ink and shapes.
+    pub fn brutal_ocean() -> Self {
+        Self {
+            sidebar_bg: Color::Rgb(220, 236, 248),
+            active_row_bg: Color::Rgb(203, 224, 242),
+            surface0: Color::Rgb(203, 224, 242),
+            surface1: Color::Rgb(160, 186, 210),
+            surface_dim: Color::Rgb(190, 212, 232),
+            overlay0: Color::Rgb(70, 92, 112),
+            mauve: Color::Rgb(255, 122, 182),
+            blue: Color::Rgb(78, 120, 255),
+            ..Self::brutal()
+        }
+    }
+
     /// Resolve a theme by name. Returns None for unknown names.
     pub fn from_name(name: &str) -> Option<Self> {
-        match crate::config::canonical_theme_name(name)? {
+        let Some(canonical) = crate::config::canonical_theme_name(name) else {
+            // orcha: a style file of that name
+            let style = crate::config::load_style_file(name)?;
+            let base = style
+                .base
+                .as_deref()
+                .and_then(|base| crate::config::canonical_theme_name(base))
+                .and_then(Self::from_name)
+                .unwrap_or_else(Self::brutal);
+            return Some(base.with_overrides(&style.colors));
+        };
+        match canonical {
             "catppuccin" => Some(Self::catppuccin()),
             "catppuccin-latte" => Some(Self::catppuccin_latte()),
             "terminal" => Some(Self::terminal()),
@@ -597,6 +639,8 @@ impl Palette {
             "vesper" => Some(Self::vesper()),
             "brutal" => Some(Self::brutal()),
             "brutal-dark" => Some(Self::brutal_dark()),
+            "brutal-matcha" => Some(Self::brutal_matcha()),
+            "brutal-ocean" => Some(Self::brutal_ocean()),
             _ => None,
         }
     }

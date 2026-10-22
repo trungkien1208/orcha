@@ -33,6 +33,7 @@ mod layout;
 mod logging;
 mod metadata_tokens;
 mod noninteractive_process;
+mod orcha_app;
 mod pane;
 use ghostty_vt::pane_graphics_files;
 mod persist;
@@ -517,6 +518,13 @@ fn main() -> io::Result<()> {
             std::process::exit(2);
         }
     };
+    orcha_app::claim_identity();
+    if let Some(code) = orcha_app::maybe_run_config_tool(&raw_args) {
+        std::process::exit(code);
+    }
+    if let Some(imported) = orcha_app::import_from_herdr_once() {
+        eprintln!("orcha: imported {imported} from herdr (agents start fresh; herdr keeps its own).");
+    }
     #[cfg(windows)]
     if let Some(result) = platform::maybe_activate_desktop_notification(&raw_args) {
         return result;
@@ -605,7 +613,13 @@ fn main() -> io::Result<()> {
 
     if args.iter().any(|a| a == "--help" || a == "-h") {
         platform::begin_cli_output();
-        println!("herdr — terminal workspace manager for AI coding agents");
+        if orcha_app::is_orcha() {
+            println!("orcha — a calm terminal for your coding agents (built on herdr)");
+            println!();
+            println!("       orcha setup | menu | edit | apply   orcha-config: setup, settings, apply");
+        } else {
+            println!("herdr — terminal workspace manager for AI coding agents");
+        }
         println!();
         println!("Usage: herdr [options]");
         println!("       herdr --session <name> [options]");

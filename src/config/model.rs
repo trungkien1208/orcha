@@ -40,7 +40,8 @@ impl Default for UpdateConfig {
     fn default() -> Self {
         Self {
             channel: default_update_channel(),
-            version_check: true,
+            // orcha is not released through herdr's channels
+            version_check: !crate::orcha_app::is_orcha(),
             manifest_check: true,
         }
     }
