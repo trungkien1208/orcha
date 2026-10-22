@@ -11,7 +11,7 @@ use std::process::Command;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
-use super::render::put_text;
+use super::render::{put_right_text, put_text};
 use super::*;
 
 const REFRESH: Duration = Duration::from_secs(3);
@@ -210,18 +210,43 @@ fn clip_right(text: &str, width: usize) -> String {
     out
 }
 
+/// A section label like every orcha region uses: muted, bold, a note on the right.
+fn section(buffer: &mut Buffer, area: Rect, y: u16, title: &str, note: &str, palette: &Palette) {
+    let bg = palette.sidebar_bg;
+    put_text(
+        buffer,
+        area.x + 2,
+        y,
+        area.width.saturating_sub(3),
+        title,
+        Style::default()
+            .fg(palette.overlay0)
+            .bg(bg)
+            .add_modifier(Modifier::BOLD),
+    );
+    if !note.is_empty() {
+        put_right_text(
+            buffer,
+            Rect::new(area.x, y, area.width.saturating_sub(2), 1),
+            y,
+            note,
+            Style::default().fg(palette.overlay0).bg(bg),
+        );
+    }
+}
+
 pub(super) fn render_git_panel(
     buffer: &mut Buffer,
     area: Rect,
     data: Option<&GitPanelData>,
     palette: &Palette,
 ) {
-    if area.width < 4 || area.height == 0 {
+    if area.width < 8 || area.height == 0 {
         return;
     }
     let bg = palette.sidebar_bg;
     buffer.set_style(area, Style::default().bg(bg));
-    // a thin divider against the panes
+    // the same thin divider the left sidebar has against the panes
     for y in area.y..area.bottom() {
         put_text(
             buffer,
@@ -232,117 +257,243 @@ pub(super) fn render_git_panel(
             Style::default().fg(palette.surface1).bg(bg),
         );
     }
-    let x = area.x.saturating_add(2);
-    let width = area.width.saturating_sub(3);
+    let x = area.x + 2;
+    let width = area.width.saturating_sub(4);
     let w = usize::from(width);
     let mut y = area.y;
-    let line = |buffer: &mut Buffer, text: &str, style: Style, y: &mut u16| {
-        if *y < area.bottom() {
-            put_text(buffer, x, *y, width, text, style.bg(bg));
-            *y += 1;
-        }
-    };
-    let muted = Style::default().fg(palette.overlay0);
-    let heading = Style::default()
-        .fg(palette.overlay1)
-        .add_modifier(Modifier::BOLD);
+    let fits = |y: u16| y < area.bottom();
 
     let Some(data) = data else {
-        y += 1;
-        line(buffer, "Not a git repository", muted, &mut y);
+        section(buffer, area, y, "TRACKS", "", palette);
+        put_text(
+            buffer,
+            x,
+            y + 2,
+            width,
+            "Not a git repository",
+            Style::default().fg(palette.overlay0).bg(bg),
+        );
         return;
     };
 
+    // TRACKS: the branch leaves main as a spur, one stop per commit to push
+    let sync = match (&data.upstream, data.ahead, data.behind) {
+        (None, _, _) => "not pushed".to_owned(),
+        (Some(_), 0, 0) => "in sync".to_owned(),
+        (Some(_), a, 0) => format!("↑{a} to push"),
+        (Some(_), 0, b) => format!("↓{b} to pull"),
+        (Some(_), a, b) => format!("↑{a} ↓{b}"),
+    };
+    section(buffer, area, y, "TRACKS", &sync, palette);
     y += 1;
     let branch = if data.branch.is_empty() {
         "(no branch)"
     } else {
         &data.branch
     };
-    line(
-        buffer,
-        &format!("⎇ {}", clip_right(branch, w.saturating_sub(2))),
-        Style::default()
-            .fg(palette.accent)
-            .add_modifier(Modifier::BOLD),
-        &mut y,
-    );
-    let sync = match (&data.upstream, data.ahead, data.behind) {
-        (None, _, _) => "not pushed".to_owned(),
-        (Some(_), 0, 0) => "✓ in sync".to_owned(),
-        (Some(_), a, 0) => format!("↑{a} to push"),
-        (Some(_), 0, b) => format!("↓{b} to pull"),
-        (Some(_), a, b) => format!("↑{a} ↓{b}"),
-    };
-    let sync_color = if data.upstream.is_none() || data.ahead > 0 {
-        palette.yellow
+    let trunk = matches!(branch, "main" | "master" | "develop");
+    let muted = Style::default().fg(palette.overlay1).bg(bg);
+    let rail = Style::default().fg(palette.accent).bg(bg);
+    if trunk {
+        if fits(y) {
+            let main = format!(
+                "{branch} {}●",
+                "━".repeat(w.saturating_sub(branch.chars().count() + 2))
+            );
+            put_text(
+                buffer,
+                x,
+                y,
+                width,
+                &main,
+                rail.add_modifier(Modifier::BOLD),
+            );
+            y += 1;
+        }
     } else {
-        palette.overlay1
-    };
-    line(buffer, &sync, Style::default().fg(sync_color), &mut y);
+        if fits(y) {
+            let main = format!("main ━━┳{}", "━".repeat(w.saturating_sub(8)));
+            put_text(buffer, x, y, width, &main, muted);
+            y += 1;
+        }
+        if fits(y) {
+            put_text(buffer, x, y, 7, "       ", muted);
+            put_text(buffer, x + 7, y, 1, "┗", muted);
+            let stops = data.ahead.min(5);
+            let mut spur = String::from("━━");
+            for _ in 0..stops {
+                spur.push_str("━●");
+            }
+            spur.push_str(if data.upstream.is_none() || data.ahead > 0 {
+                "━▶"
+            } else {
+                "━●"
+            });
+            put_text(buffer, x + 8, y, width.saturating_sub(8), &spur, rail);
+            y += 1;
+        }
+        if fits(y) {
+            put_text(
+                buffer,
+                x + 8,
+                y,
+                width.saturating_sub(8),
+                &clip_right(branch, w.saturating_sub(8)),
+                Style::default()
+                    .fg(palette.accent)
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
+            );
+            y += 1;
+        }
+    }
 
+    // CHANGES
     y += 1;
     let count = data.files.len();
-    line(
-        buffer,
-        &if count == 0 {
-            "Changes".to_owned()
-        } else {
-            format!("Changes  {count}")
-        },
-        heading,
-        &mut y,
-    );
-    if count == 0 {
-        line(buffer, "clean", muted, &mut y);
+    if fits(y) {
+        section(
+            buffer,
+            area,
+            y,
+            "CHANGES",
+            &if count == 0 {
+                "clean".to_owned()
+            } else {
+                format!("{count} files")
+            },
+            palette,
+        );
+        y += 1;
     }
-    // leave room for the worktree list under the changes
-    let worktree_rows = data.worktrees.len().min(6) + 2;
-    let room = usize::from(area.bottom().saturating_sub(y)).saturating_sub(worktree_rows);
+    // leave room for the depots under the changes
+    let depot_rows = if data.worktrees.len() > 1 {
+        data.worktrees.len().min(6) + 2
+    } else {
+        0
+    };
+    let room = usize::from(area.bottom().saturating_sub(y)).saturating_sub(depot_rows);
     for (index, (code, path)) in data.files.iter().enumerate() {
-        if index >= room.max(1) {
+        if index >= room || !fits(y) {
             break;
         }
         if index + 1 == room && count > room {
-            line(buffer, &format!("… {} more", count - index), muted, &mut y);
+            put_text(
+                buffer,
+                x,
+                y,
+                width,
+                &format!("… {} more", count - index),
+                Style::default().fg(palette.overlay0).bg(bg),
+            );
+            y += 1;
             break;
         }
         let (mark, color) = match code.chars().next().unwrap_or(' ') {
-            '?' => ("+", palette.green),
-            'A' => ("+", palette.green),
-            'D' => ("−", palette.red),
-            'R' => ("→", palette.blue),
+            '?' | 'A' => ("A", palette.green),
+            'D' => ("D", palette.red),
+            'R' => ("R", palette.blue),
             'U' => ("!", palette.red),
-            _ => ("●", palette.yellow),
+            _ => ("M", palette.yellow),
         };
-        if y >= area.bottom() {
-            break;
-        }
-        put_text(buffer, x, y, 2, mark, Style::default().fg(color).bg(bg));
+        put_text(
+            buffer,
+            x,
+            y,
+            1,
+            mark,
+            Style::default()
+                .fg(color)
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        );
+        let shown = clip_left(path, w.saturating_sub(2));
+        let (dir, name) = match shown.rfind('/') {
+            Some(cut) => shown.split_at(cut + 1),
+            None => ("", shown.as_str()),
+        };
+        let dir_width = dir.chars().count() as u16;
         put_text(
             buffer,
             x + 2,
             y,
-            width.saturating_sub(2),
-            &clip_left(path, w.saturating_sub(2)),
+            dir_width,
+            dir,
+            Style::default().fg(palette.overlay0).bg(bg),
+        );
+        put_text(
+            buffer,
+            x + 2 + dir_width,
+            y,
+            width.saturating_sub(2 + dir_width),
+            name,
             Style::default().fg(palette.subtext0).bg(bg),
         );
         y += 1;
     }
 
+    // DEPOTS: worktrees, the one this pane is in highlighted
     if data.worktrees.len() > 1 {
         y += 1;
-        line(buffer, "Worktrees", heading, &mut y);
+        if fits(y) {
+            section(
+                buffer,
+                area,
+                y,
+                "DEPOTS",
+                &data.worktrees.len().to_string(),
+                palette,
+            );
+            y += 1;
+        }
         for (name, current) in data.worktrees.iter().take(6) {
+            if !fits(y) {
+                break;
+            }
+            let row_bg = if *current { palette.selection_bg } else { bg };
+            buffer.set_style(
+                Rect::new(area.x + 1, y, area.width.saturating_sub(2), 1),
+                Style::default().bg(row_bg),
+            );
+            let (mark, mark_color) = if *current {
+                ("●", palette.accent)
+            } else {
+                ("○", palette.overlay0)
+            };
+            put_text(
+                buffer,
+                x,
+                y,
+                1,
+                mark,
+                Style::default().fg(mark_color).bg(row_bg),
+            );
             let style = if *current {
                 Style::default()
                     .fg(palette.text)
+                    .bg(row_bg)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(palette.subtext0)
+                Style::default().fg(palette.subtext0).bg(row_bg)
             };
-            let text = format!("{} {}", if *current { "●" } else { "○" }, name);
-            line(buffer, &clip_right(&text, w), style, &mut y);
+            put_text(
+                buffer,
+                x + 2,
+                y,
+                width.saturating_sub(7),
+                &clip_right(name, w.saturating_sub(7)),
+                style,
+            );
+            if *current {
+                put_right_text(
+                    buffer,
+                    Rect::new(area.x, y, area.width.saturating_sub(2), 1),
+                    y,
+                    "here",
+                    Style::default().fg(palette.overlay0).bg(row_bg),
+                );
+            }
+            y += 1;
         }
     }
 }

@@ -15,7 +15,13 @@ pub(crate) fn render_tab_bar(
     hits: &mut ShellHitMap,
 ) {
     let palette = &config.palette;
-    buffer.set_style(area, Style::default().bg(palette.panel_bg));
+    // orcha: header, sidebars and status bar share one chrome color
+    let chrome = if config.status_bar {
+        palette.sidebar_bg
+    } else {
+        palette.panel_bg
+    };
+    buffer.set_style(area, Style::default().bg(chrome));
     let tabs = snapshot
         .tabs
         .iter()

@@ -28,7 +28,7 @@ fn orcha_state(right_panel: bool, status_bar: bool) -> ClientShellState {
         tab_id: tab.clone(),
         name: None,
         display_agent: Some(name.into()),
-        agent: None,
+        agent: Some(name.to_lowercase()),
         title: None,
         terminal_title: None,
         terminal_title_stripped: None,
@@ -90,17 +90,17 @@ fn five_regions_compose() {
         "the tab row no longer holds them"
     );
     let panel: String = rows.join("\n");
-    assert!(panel.contains("⎇ feature/42-dark-menu"));
+    assert!(panel.contains("feature/42-dark-menu"));
     assert!(panel.contains("↑2 to push"));
     assert!(panel.contains("…ings/Menu.tsx") || panel.contains("Menu.tsx"));
-    assert!(panel.contains("Worktrees"));
+    assert!(panel.contains("DEPOTS") && panel.contains("TRACKS") && panel.contains("CHANGES"));
     assert!(
-        rows[0].contains("projects"),
-        "one tree, no spaces/agents split"
+        rows[0].contains("LINES"),
+        "one tree of lines, no spaces/agents split"
     );
     assert!(!panel.contains(" agents "));
     assert!(panel.contains("Claude") && panel.contains("Codex"));
-    assert!(panel.contains("+ New") && panel.contains("Menu"));
+    assert!(panel.contains("+ New train") && panel.contains("Menu"));
     assert!(
         state.hits.agents.iter().any(|(_, pane)| pane == "pane_2"),
         "agent rows are clickable"
