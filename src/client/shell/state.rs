@@ -67,6 +67,8 @@ pub(super) struct ClientShellLayout {
     pub status_bar: Rect,
     /// Right-edge git panel (orcha), empty when off or too narrow.
     pub right_panel: Rect,
+    /// orcha wordmark at the left of the full-width header, empty otherwise.
+    pub brand: Rect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

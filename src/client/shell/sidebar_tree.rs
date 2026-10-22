@@ -36,12 +36,12 @@ struct Train {
 
 fn line_color(index: usize, palette: &Palette) -> Color {
     let colors = [
-        palette.peach,
+        palette.red,
         palette.blue,
         palette.green,
         palette.mauve,
         palette.teal,
-        palette.yellow,
+        palette.peach,
     ];
     colors[index % colors.len()]
 }
@@ -255,9 +255,11 @@ fn render_train(buffer: &mut Buffer, rect: Rect, train: &Train, line: Color, pal
     );
 
     // line 2: the track with the train at its station, the station's name right
+    let arrived = matches!(train.status, AgentStatus::Done)
+        || (train.station == STATIONS.len() - 1 && train.status != AgentStatus::Working);
     let (glyph, color, label) = match train.status {
         AgentStatus::Blocked => ("!", palette.red, "needs you".to_owned()),
-        AgentStatus::Done => ("✓", palette.green, "arrived".to_owned()),
+        _ if arrived => ("✓", palette.green, "arrived".to_owned()),
         AgentStatus::Working => ("▶", palette.yellow, STATIONS[train.station].to_owned()),
         _ => ("■", palette.overlay0, "in depot".to_owned()),
     };
@@ -305,6 +307,38 @@ fn render_train(buffer: &mut Buffer, rect: Rect, train: &Train, line: Color, pal
         y,
         &label,
         Style::default().fg(color).bg(bg),
+    );
+}
+
+/// The orcha wordmark at the left of the full-width header.
+pub(crate) fn render_brand(buffer: &mut Buffer, area: Rect, palette: &Palette) {
+    buffer.set_style(area, Style::default().bg(palette.sidebar_bg));
+    put_text(
+        buffer,
+        area.x + 2,
+        area.y,
+        1,
+        "◉",
+        Style::default().fg(palette.accent).bg(palette.sidebar_bg),
+    );
+    put_text(
+        buffer,
+        area.x + 4,
+        area.y,
+        5,
+        "orcha",
+        Style::default()
+            .fg(palette.accent)
+            .bg(palette.sidebar_bg)
+            .add_modifier(Modifier::BOLD),
+    );
+    put_text(
+        buffer,
+        area.x + 10,
+        area.y,
+        5,
+        "METRO",
+        Style::default().fg(palette.overlay0).bg(palette.sidebar_bg),
     );
 }
 

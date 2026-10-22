@@ -331,6 +331,9 @@ pub(super) fn render_shell(
             &mut hits,
         );
     }
+    if layout.brand.width > 0 {
+        super::sidebar_tree::render_brand(buffer, layout.brand, &config.palette);
+    }
     if layout.right_panel.width > 0 {
         super::git_panel::render_git_panel(
             buffer,

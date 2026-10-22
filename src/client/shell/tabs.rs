@@ -236,46 +236,99 @@ pub(crate) fn render_tab_bar(
     }
 }
 
-/// orcha: the `tab_bar_right` entries in a full-width bottom bar, left to right.
+/// orcha: the `tab_bar_right` entries in a full-width bottom bar. Entries
+/// (and parts of one entry split by " · ") are grouped: what you are working
+/// on on the left (the task, with its `#id` as a badge, and changed files),
+/// the ambient facts (usage, timers, weather, clock) on the right, groups
+/// split by a line-colored │.
 pub(crate) fn render_status_bar(
     buffer: &mut Buffer,
     area: Rect,
     snapshot: &ClientShellSnapshot,
     palette: &Palette,
 ) {
-    buffer.set_style(area, Style::default().bg(palette.sidebar_bg));
-    let separator_width = display_width(&snapshot.tab_bar_right_separator);
-    let mut x = area.x.saturating_add(1);
-    for (index, segment) in snapshot.tab_bar_right.iter().enumerate() {
-        if segment.text.is_empty() {
-            continue;
+    let bg = palette.sidebar_bg;
+    buffer.set_style(area, Style::default().bg(bg));
+    let mut parts: Vec<&str> = Vec::new();
+    for segment in &snapshot.tab_bar_right {
+        for part in segment.text.split(" · ") {
+            let part = part.trim();
+            if !part.is_empty() {
+                parts.push(part);
+            }
         }
-        if index > 0 && separator_width > 0 && x > area.x.saturating_add(1) {
-            let width = separator_width.min(area.right().saturating_sub(x));
+    }
+    let is_left =
+        |index: usize, part: &str| index == 0 && part.contains('#') || part.starts_with('✎');
+    let left: Vec<&str> = parts
+        .iter()
+        .enumerate()
+        .filter(|(i, p)| is_left(*i, p))
+        .map(|(_, p)| *p)
+        .collect();
+    let right: Vec<&str> = parts
+        .iter()
+        .enumerate()
+        .filter(|(i, p)| !is_left(*i, p))
+        .map(|(_, p)| *p)
+        .collect();
+    let text = Style::default().fg(palette.subtext0).bg(bg);
+    let divider = Style::default().fg(palette.surface1).bg(bg);
+
+    let mut x = area.x.saturating_add(1);
+    for (index, part) in left.iter().enumerate() {
+        if index > 0 {
+            put_text(buffer, x, area.y, 3, " │ ", divider);
+            x = x.saturating_add(3);
+        }
+        // "󰄬 #42 Title ● State": the id as an accent badge, the rest plain
+        let mut rest = *part;
+        if let Some(hash) = part.find('#') {
+            let id_end = part[hash + 1..]
+                .find(|c: char| !c.is_ascii_alphanumeric() && c != '-')
+                .map_or(part.len(), |end| hash + 1 + end);
+            let badge = format!(" {} ", &part[hash..id_end]);
+            let width = display_width(&badge).min(area.right().saturating_sub(x));
             put_text(
                 buffer,
                 x,
                 area.y,
                 width,
-                &snapshot.tab_bar_right_separator,
-                Style::default().fg(palette.overlay0).bg(palette.sidebar_bg),
+                &badge,
+                Style::default()
+                    .fg(panel_contrast_fg(palette))
+                    .bg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
             );
-            x = x.saturating_add(width);
+            x = x.saturating_add(width).saturating_add(1);
+            rest = part[id_end..].trim_start();
         }
-        let width = display_width(&segment.text).min(area.right().saturating_sub(x));
-        if width == 0 {
-            break;
-        }
-        let style = if segment.accent {
-            Style::default()
-                .fg(panel_contrast_fg(palette))
-                .bg(palette.accent)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(palette.subtext0).bg(palette.sidebar_bg)
-        };
-        put_text(buffer, x, area.y, width, &segment.text, style);
+        let width = display_width(rest).min(area.right().saturating_sub(x));
+        put_text(buffer, x, area.y, width, rest, text.fg(palette.text));
         x = x.saturating_add(width);
+    }
+
+    // right group, laid out from the right edge
+    let joined = right.join(" │ ");
+    let width = display_width(&joined);
+    let start = area
+        .right()
+        .saturating_sub(width.saturating_add(1))
+        .max(x.saturating_add(2));
+    let mut cx = start;
+    for (index, part) in right.iter().enumerate() {
+        if index > 0 {
+            put_text(buffer, cx, area.y, 3, " │ ", divider);
+            cx = cx.saturating_add(3);
+        }
+        let w = display_width(part).min(area.right().saturating_sub(cx));
+        let style = if index + 1 == right.len() {
+            text.fg(palette.text).add_modifier(Modifier::BOLD)
+        } else {
+            text
+        };
+        put_text(buffer, cx, area.y, w, part, style);
+        cx = cx.saturating_add(w);
     }
 }
 
