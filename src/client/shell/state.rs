@@ -21,6 +21,10 @@ pub(crate) struct ClientShellConfig {
     pub(super) mobile_width_threshold: u16,
     pub(super) tab_bar_position: TabBarPositionConfig,
     pub(super) hide_tab_bar_when_single_tab: bool,
+    pub(super) status_bar: bool,
+    pub(super) right_panel: bool,
+    pub(super) right_panel_width: u16,
+    pub(super) sidebar_tree: bool,
     pub(super) spaces: SpacesSidebarConfig,
     pub(super) agents: crate::config::AgentsSidebarConfig,
     pub(super) agent_panel_sort: crate::config::AgentPanelSortConfig,
@@ -59,6 +63,10 @@ pub(super) struct ClientShellLayout {
     pub tab_bar: Rect,
     pub mobile_header: Rect,
     pub pane_surface: Rect,
+    /// Full-width bottom row for the `tab_bar_right` entries (orcha), empty when off.
+    pub status_bar: Rect,
+    /// Right-edge git panel (orcha), empty when off or too narrow.
+    pub right_panel: Rect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -895,6 +903,8 @@ pub(crate) struct ClientShellState {
     pub(super) last_composed_size: Option<(u16, u16)>,
     pub(super) last_composed_at: Option<std::time::Instant>,
     pub(super) selection_repaint_deadline: Option<std::time::Instant>,
+    /// orcha: git facts for the right panel, refreshed in the background.
+    pub(super) git_panel: super::git_panel::GitPanelPoller,
     pub(super) hits: ShellHitMap,
     pub(super) endpoints: Vec<ClientShellEndpoint>,
     pub(super) active_endpoint_id: ClientEndpointId,
@@ -1069,6 +1079,7 @@ impl ClientShellState {
             last_composed_size: None,
             last_composed_at: None,
             selection_repaint_deadline: None,
+            git_panel: Default::default(),
             hits: ShellHitMap::default(),
             endpoints: vec![local_endpoint()],
             active_endpoint_id: ClientEndpointId::Local,

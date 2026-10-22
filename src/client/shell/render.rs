@@ -11,7 +11,7 @@ pub(super) use super::agent_sidebar::{ordered_agent_pane_ids, render_agent_panel
 pub(super) use super::aggregate_navigation::navigator_rows as client_navigator_rows;
 pub(super) use overlays::{render_client_overlay, render_context_menu, render_global_menu};
 pub(super) use sidebar::{render_collapsed_sidebar, render_sidebar, workspace_entries};
-pub(super) use tabs::{render_tab_bar, tab_bar_status_width};
+pub(super) use tabs::{render_status_bar, render_tab_bar, tab_bar_status_width};
 
 pub(in crate::client::shell) fn render_sidebar_background(
     buffer: &mut Buffer,
@@ -230,6 +230,7 @@ pub(super) fn render_mode_bar(
 }
 
 pub(super) struct ShellRenderState<'a> {
+    pub(super) git_panel: Option<&'a super::git_panel::GitPanelData>,
     pub(super) machine_diagnostics: &'a super::machine_diagnostics::MachineDiagnostics,
     pub(super) endpoints: &'a [ClientShellEndpoint],
     pub(super) active_endpoint_id: &'a ClientEndpointId,
@@ -298,6 +299,15 @@ pub(super) fn render_shell(
                     .map(|target| target.workspace_id.as_str()),
                 &mut hits,
             );
+        } else if config.sidebar_tree {
+            super::sidebar_tree::render_sidebar_tree(
+                buffer,
+                layout.sidebar,
+                snapshot,
+                config,
+                &mut state,
+                &mut hits,
+            );
         } else {
             render_sidebar(
                 buffer,
@@ -320,6 +330,17 @@ pub(super) fn render_shell(
             state.tab_drag_insert_index,
             &mut hits,
         );
+    }
+    if layout.right_panel.width > 0 {
+        super::git_panel::render_git_panel(
+            buffer,
+            layout.right_panel,
+            state.git_panel,
+            &config.palette,
+        );
+    }
+    if layout.status_bar.height > 0 {
+        render_status_bar(buffer, layout.status_bar, snapshot, &config.palette);
     }
     if !config.mouse_capture {
         hits.sidebar_divider = Rect::default();

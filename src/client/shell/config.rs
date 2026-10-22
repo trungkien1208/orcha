@@ -121,6 +121,10 @@ impl ClientShellConfig {
             mobile_width_threshold: config.ui.mobile_width_threshold,
             tab_bar_position: config.ui.tab_bar_position,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
+            status_bar: config.ui.status_bar,
+            right_panel: config.ui.right_panel,
+            right_panel_width: config.ui.right_panel_width,
+            sidebar_tree: config.ui.sidebar_tree,
             spaces: config.ui.sidebar.spaces.clone(),
             agents: config.ui.sidebar.agents.clone(),
             agent_panel_sort: config.ui.agent_panel_sort,
@@ -348,6 +352,10 @@ impl ClientShellConfig {
                 self.mobile_width_threshold = ui.mobile_width_threshold;
                 self.tab_bar_position = ui.tab_bar_position;
                 self.hide_tab_bar_when_single_tab = ui.hide_tab_bar_when_single_tab;
+                self.status_bar = ui.status_bar;
+                self.right_panel = ui.right_panel;
+                self.right_panel_width = ui.right_panel_width;
+                self.sidebar_tree = ui.sidebar_tree;
                 self.spaces = ui.sidebar.spaces.clone();
                 self.agents = ui.sidebar.agents.clone();
                 self.agent_panel_sort = ui.agent_panel_sort;
@@ -397,6 +405,8 @@ impl ClientShellConfig {
                 tab_bar: Rect::default(),
                 mobile_header: Rect::new(0, 0, cols, header_height),
                 pane_surface: Rect::new(0, header_height, cols, rows.saturating_sub(header_height)),
+                status_bar: Rect::default(),
+                right_panel: Rect::default(),
             };
         }
 
@@ -414,7 +424,25 @@ impl ClientShellConfig {
             sidebar_width.clamp(min, max)
         }
         .min(cols.saturating_sub(1));
-        let main = Rect::new(sidebar_width, 0, cols.saturating_sub(sidebar_width), rows);
+        // orcha: the status bar takes the last row across the whole width
+        let status_height = u16::from(self.status_bar && rows > 3);
+        let status_bar = Rect::new(0, rows.saturating_sub(status_height), cols, status_height);
+        let rows = rows.saturating_sub(status_height);
+        // orcha: the git panel on the right, only when the panes keep room
+        let full_main = cols.saturating_sub(sidebar_width);
+        let panel_width =
+            if self.right_panel && full_main >= self.right_panel_width.saturating_add(60) {
+                self.right_panel_width.clamp(20, 60)
+            } else {
+                0
+            };
+        let right_panel = Rect::new(cols.saturating_sub(panel_width), 0, panel_width, rows);
+        let main = Rect::new(
+            sidebar_width,
+            0,
+            full_main.saturating_sub(panel_width),
+            rows,
+        );
         let show_tab_bar = rows > 1 && !(self.hide_tab_bar_when_single_tab && tab_count == 1);
         let tab_height = u16::from(show_tab_bar);
         let (tab_bar, pane_surface) = match self.tab_bar_position {
@@ -443,6 +471,8 @@ impl ClientShellConfig {
             tab_bar,
             mobile_header: Rect::default(),
             pane_surface,
+            status_bar,
+            right_panel,
         }
     }
 

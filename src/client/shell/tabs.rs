@@ -28,7 +28,12 @@ pub(crate) fn render_tab_bar(
             display_width(&label).saturating_add(4).max(MIN_TAB_WIDTH)
         })
         .collect::<Vec<_>>();
-    let content = tab_bar_content_area(snapshot, area);
+    // orcha: with the status bar on, its entries live there and the tabs get the whole row
+    let content = if config.status_bar {
+        area
+    } else {
+        tab_bar_content_area(snapshot, area)
+    };
     let mouse_chrome = config.mouse_capture;
     let new_tab_width = if mouse_chrome { NEW_TAB_WIDTH } else { 0 };
     let desired_total = desired_widths
@@ -220,7 +225,52 @@ pub(crate) fn render_tab_bar(
             );
         }
     }
-    render_tab_bar_status(buffer, area, snapshot, palette);
+    if !config.status_bar {
+        render_tab_bar_status(buffer, area, snapshot, palette);
+    }
+}
+
+/// orcha: the `tab_bar_right` entries in a full-width bottom bar, left to right.
+pub(crate) fn render_status_bar(
+    buffer: &mut Buffer,
+    area: Rect,
+    snapshot: &ClientShellSnapshot,
+    palette: &Palette,
+) {
+    buffer.set_style(area, Style::default().bg(palette.sidebar_bg));
+    let separator_width = display_width(&snapshot.tab_bar_right_separator);
+    let mut x = area.x.saturating_add(1);
+    for (index, segment) in snapshot.tab_bar_right.iter().enumerate() {
+        if segment.text.is_empty() {
+            continue;
+        }
+        if index > 0 && separator_width > 0 && x > area.x.saturating_add(1) {
+            let width = separator_width.min(area.right().saturating_sub(x));
+            put_text(
+                buffer,
+                x,
+                area.y,
+                width,
+                &snapshot.tab_bar_right_separator,
+                Style::default().fg(palette.overlay0).bg(palette.sidebar_bg),
+            );
+            x = x.saturating_add(width);
+        }
+        let width = display_width(&segment.text).min(area.right().saturating_sub(x));
+        if width == 0 {
+            break;
+        }
+        let style = if segment.accent {
+            Style::default()
+                .fg(panel_contrast_fg(palette))
+                .bg(palette.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(palette.subtext0).bg(palette.sidebar_bg)
+        };
+        put_text(buffer, x, area.y, width, &segment.text, style);
+        x = x.saturating_add(width);
+    }
 }
 
 pub(crate) fn tab_bar_status_width(snapshot: &ClientShellSnapshot) -> u16 {

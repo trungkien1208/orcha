@@ -934,6 +934,9 @@ impl<'de> Deserialize<'de> for PaneBordersConfig {
     }
 }
 
+/// orcha: default for the status bar, right git panel and sidebar tree.
+const ORCHA_LAYOUT_DEFAULT: bool = !cfg!(test);
+
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
@@ -986,6 +989,17 @@ pub struct UiConfig {
     pub tab_bar_position: TabBarPositionConfig,
     /// Ordered entries shown at the right edge of the desktop tab row. Empty by default.
     pub tab_bar_right: Vec<TabBarRightEntryConfig>,
+    /// Show the `tab_bar_right` entries in a full-width status bar at the
+    /// bottom of the screen instead of in the tab row. Default: true (orcha).
+    pub status_bar: bool,
+    /// Show the git panel (branch, changed files, worktrees of the focused
+    /// pane's folder) at the right edge. Default: true (orcha).
+    pub right_panel: bool,
+    /// Width of the right git panel in columns. Default: 34.
+    pub right_panel_width: u16,
+    /// Show projects and their agents as one tree in the left sidebar instead
+    /// of separate spaces and agents sections. Default: true (orcha).
+    pub sidebar_tree: bool,
     /// Text inserted between visible right-side tab bar entries. Default: one space.
     pub tab_bar_right_separator: String,
     /// Format for the outer terminal window title. Empty leaves the title alone.
@@ -1221,6 +1235,12 @@ impl Default for UiConfig {
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
             tab_bar_right: Vec::new(),
+            // orcha's regions are on for users; upstream tests keep describing
+            // herdr's own layout, and orcha's tests turn them on explicitly
+            status_bar: ORCHA_LAYOUT_DEFAULT,
+            right_panel: ORCHA_LAYOUT_DEFAULT,
+            right_panel_width: 34,
+            sidebar_tree: ORCHA_LAYOUT_DEFAULT,
             tab_bar_right_separator: " ".into(),
             window_title: super::window_title::default_window_title(),
             agent_panel_sort: AgentPanelSortConfig::Spaces,

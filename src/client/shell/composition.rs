@@ -56,6 +56,7 @@ impl ClientShellState {
         });
         let mut render_state = render::ShellRenderState {
             machine_diagnostics: &self.machine_diagnostics,
+            git_panel: self.git_panel.data(),
             endpoints: &self.endpoints,
             active_endpoint_id: &self.active_endpoint_id,
             collapsed_endpoints: &self.collapsed_endpoints,
@@ -212,6 +213,7 @@ impl ClientShellState {
             &self.config,
             render::ShellRenderState {
                 machine_diagnostics: &self.machine_diagnostics,
+                git_panel: self.git_panel.data(),
                 endpoints: &self.endpoints,
                 active_endpoint_id: &self.active_endpoint_id,
                 collapsed_endpoints: &self.collapsed_endpoints,
