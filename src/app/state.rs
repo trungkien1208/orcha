@@ -524,6 +524,56 @@ impl Palette {
         }
     }
 
+    /// orcha Brutal — neo-brutal light: cream paper, white cards, black ink.
+    pub fn brutal() -> Self {
+        Self {
+            accent: Color::Rgb(255, 122, 182),
+            panel_bg: Color::Rgb(255, 255, 255),
+            sidebar_bg: Color::Rgb(255, 244, 214),
+            active_row_bg: Color::Rgb(244, 234, 208),
+            selection_bg: Color::Rgb(255, 229, 138),
+            surface0: Color::Rgb(244, 234, 208),
+            surface1: Color::Rgb(201, 194, 173),
+            surface_dim: Color::Rgb(228, 220, 196),
+            overlay0: Color::Rgb(107, 101, 86),
+            overlay1: Color::Rgb(74, 70, 60),
+            text: Color::Rgb(17, 17, 17),
+            subtext0: Color::Rgb(58, 55, 47),
+            mauve: Color::Rgb(255, 122, 182),
+            green: Color::Rgb(123, 224, 173),
+            yellow: Color::Rgb(255, 210, 63),
+            red: Color::Rgb(229, 72, 77),
+            blue: Color::Rgb(108, 140, 255),
+            teal: Color::Rgb(92, 200, 208),
+            peach: Color::Rgb(255, 159, 67),
+        }
+    }
+
+    /// orcha Brutal dark — charcoal paper, black lines, never bright borders.
+    pub fn brutal_dark() -> Self {
+        Self {
+            accent: Color::Rgb(240, 122, 174),
+            panel_bg: Color::Rgb(46, 42, 37),
+            sidebar_bg: Color::Rgb(31, 28, 25),
+            active_row_bg: Color::Rgb(38, 35, 32),
+            selection_bg: Color::Rgb(90, 74, 30),
+            surface0: Color::Rgb(41, 38, 31),
+            surface1: Color::Rgb(79, 73, 63),
+            surface_dim: Color::Rgb(58, 53, 46),
+            overlay0: Color::Rgb(179, 168, 145),
+            overlay1: Color::Rgb(207, 196, 171),
+            text: Color::Rgb(242, 232, 211),
+            subtext0: Color::Rgb(216, 204, 178),
+            mauve: Color::Rgb(240, 122, 174),
+            green: Color::Rgb(116, 211, 163),
+            yellow: Color::Rgb(242, 197, 61),
+            red: Color::Rgb(242, 100, 100),
+            blue: Color::Rgb(127, 155, 255),
+            teal: Color::Rgb(111, 208, 214),
+            peach: Color::Rgb(245, 166, 91),
+        }
+    }
+
     /// Resolve a theme by name. Returns None for unknown names.
     pub fn from_name(name: &str) -> Option<Self> {
         match crate::config::canonical_theme_name(name)? {
@@ -545,6 +595,8 @@ impl Palette {
             "rose-pine" => Some(Self::rose_pine()),
             "rose-pine-dawn" => Some(Self::rose_pine_dawn()),
             "vesper" => Some(Self::vesper()),
+            "brutal" => Some(Self::brutal()),
+            "brutal-dark" => Some(Self::brutal_dark()),
             _ => None,
         }
     }
@@ -1458,7 +1510,11 @@ mod tests {
 
     #[test]
     fn built_in_themes_leave_sidebar_background_unset() {
-        for name in crate::config::THEME_NAMES {
+        // orcha's brutal themes paint their own paper
+        for name in crate::config::THEME_NAMES
+            .iter()
+            .filter(|name| !name.starts_with("brutal"))
+        {
             let palette = Palette::from_name(name).unwrap();
             assert_eq!(
                 palette.sidebar_bg,

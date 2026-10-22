@@ -236,19 +236,21 @@ pub(crate) fn render_tab_bar(
     }
 }
 
-/// orcha: the `tab_bar_right` entries in a full-width bottom bar. Entries
-/// (and parts of one entry split by " · ") are grouped: what you are working
-/// on on the left (the task, with its `#id` as a badge, and changed files),
-/// the ambient facts (usage, timers, weather, clock) on the right, groups
-/// split by a line-colored │.
+/// orcha: the `tab_bar_right` entries in a full-width black bar at the
+/// bottom. What you are working on sits on the left (the task with its `#id`
+/// as a pink chip, its state after `●` in green, changed files muted); the
+/// ambient facts (timers, clock) sit on the right, the clock in bold. FUEL
+/// joins them when it is placed in the status bar.
 pub(crate) fn render_status_bar(
     buffer: &mut Buffer,
     area: Rect,
     snapshot: &ClientShellSnapshot,
-    palette: &Palette,
+    config: &ClientShellConfig,
+    fuel: Option<&super::super::accounts::Account>,
 ) {
-    let bg = palette.sidebar_bg;
-    buffer.set_style(area, Style::default().bg(bg));
+    let t = super::super::brutal::Brutal::new(&config.palette);
+    let bg = t.status_bg;
+    buffer.set_style(area, Style::default().bg(bg).fg(t.status_text));
     let mut parts: Vec<&str> = Vec::new();
     for segment in &snapshot.tab_bar_right {
         for part in segment.text.split(" · ") {
@@ -272,16 +274,14 @@ pub(crate) fn render_status_bar(
         .filter(|(i, p)| !is_left(*i, p))
         .map(|(_, p)| *p)
         .collect();
-    let text = Style::default().fg(palette.subtext0).bg(bg);
-    let divider = Style::default().fg(palette.surface1).bg(bg);
+    let text = Style::default().fg(t.status_text).bg(bg);
+    let muted = Style::default().fg(t.muted).bg(bg);
 
     let mut x = area.x.saturating_add(1);
     for (index, part) in left.iter().enumerate() {
         if index > 0 {
-            put_text(buffer, x, area.y, 3, " │ ", divider);
-            x = x.saturating_add(3);
+            x = x.saturating_add(2);
         }
-        // "󰄬 #42 Title ● State": the id as an accent badge, the rest plain
         let mut rest = *part;
         if let Some(hash) = part.find('#') {
             let id_end = part[hash + 1..]
@@ -296,39 +296,87 @@ pub(crate) fn render_status_bar(
                 width,
                 &badge,
                 Style::default()
-                    .fg(panel_contrast_fg(palette))
-                    .bg(palette.accent)
+                    .fg(t.chip_text)
+                    .bg(t.pink)
                     .add_modifier(Modifier::BOLD),
             );
             x = x.saturating_add(width).saturating_add(1);
             rest = part[id_end..].trim_start();
         }
-        let width = display_width(rest).min(area.right().saturating_sub(x));
-        put_text(buffer, x, area.y, width, rest, text.fg(palette.text));
-        x = x.saturating_add(width);
+        // "Title ● State": the title bold, the state green
+        let (title, state) = match rest.split_once('●') {
+            Some((title, state)) => (title.trim_end(), Some(state.trim())),
+            None => (rest, None),
+        };
+        let edit = title.starts_with('✎');
+        let style = if edit {
+            muted
+        } else {
+            text.add_modifier(Modifier::BOLD)
+        };
+        x = put_segment(buffer, x, area.y, area.right(), title, style);
+        if let Some(state) = state {
+            x = put_segment(
+                buffer,
+                x.saturating_add(2),
+                area.y,
+                area.right(),
+                &format!("● {}", state.to_lowercase()),
+                Style::default().fg(t.green).bg(bg),
+            );
+        }
     }
 
     // right group, laid out from the right edge
-    let joined = right.join(" │ ");
-    let width = display_width(&joined);
+    let fuel_text = fuel
+        .filter(|_| config.orcha.fuel == crate::config::FuelPlacement::StatusBar)
+        .map(|account| {
+            let who = account.email.clone().unwrap_or_else(|| account.label.clone());
+            (who, account.windows.iter().take(2).cloned().collect::<Vec<_>>())
+        });
+    let fuel_width = fuel_text.as_ref().map_or(0, |(who, windows)| {
+        display_width(who) + 2 + windows.iter().map(|w| display_width(&w.label) + 17).sum::<u16>()
+    });
+    let joined = right.join("  ");
+    let width = display_width(&joined) + fuel_width;
     let start = area
         .right()
         .saturating_sub(width.saturating_add(1))
         .max(x.saturating_add(2));
     let mut cx = start;
+    if let Some((who, windows)) = fuel_text {
+        cx = put_segment(buffer, cx, area.y, area.right(), &who, muted);
+        cx += 2;
+        for window in windows {
+            cx = put_segment(buffer, cx, area.y, area.right(), &window.label, text);
+            cx += 1;
+            super::super::git_panel::draw_gauge(buffer, cx, area.y, window.left, bg, &t);
+            cx += 11;
+            let pct = format!("{:>3}%", window.left);
+            cx = put_segment(
+                buffer,
+                cx,
+                area.y,
+                area.right(),
+                &pct,
+                Style::default()
+                    .fg(super::super::git_panel::fuel_color(window.left, &t))
+                    .bg(bg)
+                    .add_modifier(Modifier::BOLD),
+            );
+            cx += 1;
+        }
+    }
     for (index, part) in right.iter().enumerate() {
         if index > 0 {
-            put_text(buffer, cx, area.y, 3, " │ ", divider);
-            cx = cx.saturating_add(3);
+            cx = cx.saturating_add(2);
         }
-        let w = display_width(part).min(area.right().saturating_sub(cx));
         let style = if index + 1 == right.len() {
-            text.fg(palette.text).add_modifier(Modifier::BOLD)
+            text.add_modifier(Modifier::BOLD)
         } else {
-            text
+            muted
         };
-        put_text(buffer, cx, area.y, w, part, style);
-        cx = cx.saturating_add(w);
+        cx = put_segment(buffer, cx, area.y, area.right(), part, style);
     }
 }
 

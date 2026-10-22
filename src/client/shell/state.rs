@@ -25,6 +25,9 @@ pub(crate) struct ClientShellConfig {
     pub(super) right_panel: bool,
     pub(super) right_panel_width: u16,
     pub(super) sidebar_tree: bool,
+    pub(super) orcha: crate::config::OrchaConfig,
+    /// The "Agent Icons" font (agent logos, the orcha whale) is installed.
+    pub(super) icon_font: bool,
     pub(super) spaces: SpacesSidebarConfig,
     pub(super) agents: crate::config::AgentsSidebarConfig,
     pub(super) agent_panel_sort: crate::config::AgentPanelSortConfig,
@@ -67,8 +70,10 @@ pub(super) struct ClientShellLayout {
     pub status_bar: Rect,
     /// Right-edge git panel (orcha), empty when off or too narrow.
     pub right_panel: Rect,
-    /// orcha wordmark at the left of the full-width header, empty otherwise.
-    pub brand: Rect,
+    /// orcha: the full-width header row, empty otherwise.
+    pub header: Rect,
+    /// orcha: the main frame around the panes (tabs sit in its top edge).
+    pub main_frame: Rect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,8 +96,41 @@ pub(super) enum ClientMobileTarget {
     Menu(usize),
 }
 
+/// orcha: click targets of the orcha chrome.
+#[derive(Default)]
+pub(super) struct OrchaHits {
+    pub(super) settings: Rect,
+    pub(super) fuel: Rect,
+    pub(super) fuel_hint: Rect,
+    /// ▸/▾ of a project: open or fold it without selecting it.
+    pub(super) project_toggles: Vec<(Rect, String)>,
+    pub(super) history_toggle: Rect,
+    pub(super) worktrees_toggle: Rect,
+    pub(super) new_worktree: Rect,
+    pub(super) ide: Rect,
+    pub(super) git_gui: Rect,
+    pub(super) popup: super::orcha_popup::PopupHits,
+}
+
+/// orcha: presentation state of the orcha chrome (client only).
+#[derive(Default)]
+pub(crate) struct OrchaUiState {
+    /// Projects expanded in the sidebar besides the selected one.
+    pub(super) open_projects: HashSet<String>,
+    pub(super) history_open: bool,
+    pub(super) worktrees_open: bool,
+    /// Animation frame of the PROCESS trains.
+    pub(super) process_frame: u64,
+    pub(super) next_process_tick: Option<std::time::Instant>,
+    /// The open orcha popup (accounts, hand off).
+    pub(super) popup: Option<super::orcha_popup::OrchaPopup>,
+    /// The header's low-fuel offer, when the current account runs low.
+    pub(super) low_fuel_hint: Option<String>,
+}
+
 #[derive(Default)]
 pub(super) struct ShellHitMap {
+    pub(super) orcha: OrchaHits,
     pub(super) machines: Vec<MachineHit>,
     pub(super) workspaces: Vec<WorkspaceHit>,
     pub(super) workspace_body: Rect,
@@ -907,6 +945,9 @@ pub(crate) struct ClientShellState {
     pub(super) selection_repaint_deadline: Option<std::time::Instant>,
     /// orcha: git facts for the right panel, refreshed in the background.
     pub(super) git_panel: super::git_panel::GitPanelPoller,
+    pub(super) orcha_ui: OrchaUiState,
+    /// orcha: accounts and their fuel, refreshed in the background.
+    pub(super) accounts: super::accounts::AccountsPoller,
     pub(super) hits: ShellHitMap,
     pub(super) endpoints: Vec<ClientShellEndpoint>,
     pub(super) active_endpoint_id: ClientEndpointId,
@@ -1082,6 +1123,8 @@ impl ClientShellState {
             last_composed_at: None,
             selection_repaint_deadline: None,
             git_panel: Default::default(),
+            orcha_ui: Default::default(),
+            accounts: Default::default(),
             hits: ShellHitMap::default(),
             endpoints: vec![local_endpoint()],
             active_endpoint_id: ClientEndpointId::Local,

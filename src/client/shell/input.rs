@@ -635,6 +635,12 @@ impl ClientShellState {
         if self.popup_pending {
             return None;
         }
+        if self.orcha_ui.popup.is_some() {
+            if key.kind == KeyEventKind::Press {
+                self.route_orcha_popup_key(key, outcome);
+            }
+            return None;
+        }
         if self.overlay.is_some() {
             self.route_overlay_key(key, outcome);
             return None;
@@ -711,6 +717,15 @@ impl ClientShellState {
                 }
                 self.mode = return_mode;
                 outcome.repaint = true;
+                // orcha keys after the prefix, where no binding claimed them
+                if self.config.sidebar_tree {
+                    match key.code {
+                        KeyCode::Char('u') => self.open_accounts_overlay(),
+                        KeyCode::Char('o') => self.open_handoff_popup(),
+                        KeyCode::Char('!') => self.jump_to_needs_you(outcome),
+                        _ => {}
+                    }
+                }
                 None
             }
             ClientShellMode::Navigate => {

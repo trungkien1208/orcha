@@ -125,6 +125,8 @@ impl ClientShellConfig {
             right_panel: config.ui.right_panel,
             right_panel_width: config.ui.right_panel_width,
             sidebar_tree: config.ui.sidebar_tree,
+            orcha: config.orcha.clone(),
+            icon_font: super::brutal::icon_font_installed(),
             spaces: config.ui.sidebar.spaces.clone(),
             agents: config.ui.sidebar.agents.clone(),
             agent_panel_sort: config.ui.agent_panel_sort,
@@ -356,6 +358,7 @@ impl ClientShellConfig {
                 self.right_panel = ui.right_panel;
                 self.right_panel_width = ui.right_panel_width;
                 self.sidebar_tree = ui.sidebar_tree;
+                self.orcha = config.orcha.clone();
                 self.spaces = ui.sidebar.spaces.clone();
                 self.agents = ui.sidebar.agents.clone();
                 self.agent_panel_sort = ui.agent_panel_sort;
@@ -407,7 +410,8 @@ impl ClientShellConfig {
                 pane_surface: Rect::new(0, header_height, cols, rows.saturating_sub(header_height)),
                 status_bar: Rect::default(),
                 right_panel: Rect::default(),
-                brand: Rect::default(),
+                header: Rect::default(),
+                main_frame: Rect::default(),
             };
         }
 
@@ -446,18 +450,31 @@ impl ClientShellConfig {
         );
         let show_tab_bar = rows > 1 && !(self.hide_tab_bar_when_single_tab && tab_count == 1);
         let tab_height = u16::from(show_tab_bar);
-        // orcha: one header row across the whole width (wordmark over the
-        // sidebar, tabs over panes and git panel); every region starts below it
-        if self.status_bar && self.tab_bar_position == TabBarPositionConfig::Top && rows > 2 {
+        // orcha: one header row across the whole width; below it the sidebar,
+        // the main frame (tabs in its top edge, a hard shadow right and under
+        // it) and the right panel
+        if self.status_bar && self.tab_bar_position == TabBarPositionConfig::Top && rows > 5 {
             let body_rows = rows.saturating_sub(1);
+            let frame = Rect::new(
+                main.x.saturating_add(1),
+                1,
+                main.width.saturating_sub(3),
+                body_rows.saturating_sub(1),
+            );
             return ClientShellLayout {
                 sidebar: Rect::new(0, 1, sidebar_width, body_rows),
-                tab_bar: Rect::new(sidebar_width, 0, cols.saturating_sub(sidebar_width), 1),
+                tab_bar: Rect::new(frame.x.saturating_add(2), frame.y, frame.width.saturating_sub(4), 1),
                 mobile_header: Rect::default(),
-                pane_surface: Rect::new(main.x, 1, main.width, body_rows),
+                pane_surface: Rect::new(
+                    frame.x.saturating_add(2),
+                    frame.y.saturating_add(1),
+                    frame.width.saturating_sub(4),
+                    frame.height.saturating_sub(2),
+                ),
                 status_bar,
                 right_panel: Rect::new(right_panel.x, 1, right_panel.width, body_rows),
-                brand: Rect::new(0, 0, sidebar_width, 1),
+                header: Rect::new(0, 0, cols, 1),
+                main_frame: frame,
             };
         }
         let (tab_bar, pane_surface) = match self.tab_bar_position {
@@ -488,7 +505,8 @@ impl ClientShellConfig {
             pane_surface,
             status_bar,
             right_panel,
-            brand: Rect::default(),
+            header: Rect::default(),
+            main_frame: Rect::default(),
         }
     }
 

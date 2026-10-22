@@ -57,6 +57,8 @@ impl ClientShellState {
         let mut render_state = render::ShellRenderState {
             machine_diagnostics: &self.machine_diagnostics,
             git_panel: self.git_panel.data(),
+            orcha_ui: &self.orcha_ui,
+            fuel: self.accounts.current(),
             endpoints: &self.endpoints,
             active_endpoint_id: &self.active_endpoint_id,
             collapsed_endpoints: &self.collapsed_endpoints,
@@ -214,6 +216,8 @@ impl ClientShellState {
             render::ShellRenderState {
                 machine_diagnostics: &self.machine_diagnostics,
                 git_panel: self.git_panel.data(),
+                orcha_ui: &self.orcha_ui,
+                fuel: self.accounts.current(),
                 endpoints: &self.endpoints,
                 active_endpoint_id: &self.active_endpoint_id,
                 collapsed_endpoints: &self.collapsed_endpoints,
@@ -346,6 +350,15 @@ impl ClientShellState {
             frame.cells[start..start + usize::from(bar.width)].to_vec()
         });
         blit_pane_surface(&mut frame, &surface.frame, layout.pane_surface);
+        if !layout.main_frame.is_empty() {
+            super::orcha_chrome::dress_panes(
+                &mut frame,
+                layout.pane_surface,
+                &self.hits.panes,
+                snapshot,
+                &self.config,
+            );
+        }
         restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
         let mut occlusion = crate::kitty_graphics::surface::Occlusion::default();
         let has_selection = self
@@ -702,6 +715,20 @@ impl ClientShellState {
                 rendered.cursor
             };
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
+        }
+        self.hits.orcha.popup = Default::default();
+        if let Some(popup) = self.orcha_ui.popup.as_ref() {
+            let mut composed = frame.to_ratatui_buffer()?;
+            let rendered = super::orcha_popup::render_popup(
+                &mut composed,
+                popup,
+                self.accounts.data(),
+                snapshot,
+                &self.config,
+            );
+            occlusion.cover(composed.area);
+            self.hits.orcha.popup = rendered;
+            frame.replace_from_ratatui_buffer_preserving_effects(&composed, None);
         }
         if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
             help.scroll = help.scroll.min(self.hits.help_max_scroll);

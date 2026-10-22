@@ -323,6 +323,62 @@ pub struct Config {
     pub advanced: AdvancedConfig,
     pub experimental: ExperimentalConfig,
     pub remote: RemoteConfig,
+    pub orcha: OrchaConfig,
+}
+
+/// Where the FUEL gauges live (never both).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FuelPlacement {
+    #[default]
+    Panel,
+    StatusBar,
+}
+
+/// orcha's own settings (`[orcha]`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct OrchaConfig {
+    /// FUEL gauges in the right panel ("panel") or the status bar ("status_bar").
+    pub fuel: FuelPlacement,
+    /// Command printing the accounts and their plan limits as JSON
+    /// (`[{id, agent, name, email, current, windows: [{key, left, reset}]}]`).
+    pub accounts_command: String,
+    /// Continue a pane's chat on another account: `{id}` account, `{pane}` pane.
+    pub switch_command: String,
+    /// Open an account in a new pane continuing its last chat: `{id}`.
+    pub open_command: String,
+    /// Sign an account in, in a new pane: `{id}`.
+    pub login_command: String,
+    /// Continue `{pane}`'s chat with another agent: `{agent}` and `{mode}`
+    /// ("full" or "summary").
+    pub handoff_command: String,
+    /// Command opening a folder in the IDE; `{path}` is replaced. Empty: detect.
+    pub ide: String,
+    /// Command opening a folder in the Git GUI; `{path}` is replaced. Empty: detect.
+    pub git_gui: String,
+    /// Paint pane cells that use the terminal's default colors with the
+    /// style's pane colors (white panes in Brutal light). Default: true.
+    pub pane_paper: bool,
+    /// Under this % left of a plan window, offer to switch accounts. Default: 10.
+    pub low_fuel_percent: u8,
+}
+
+impl Default for OrchaConfig {
+    fn default() -> Self {
+        Self {
+            fuel: FuelPlacement::Panel,
+            accounts_command: "~/.config/herdr/scripts/limits.py json".into(),
+            switch_command: "~/.config/herdr/scripts/limits.py switch {id} {pane}".into(),
+            open_command: "~/.config/herdr/scripts/limits.py open {id}".into(),
+            login_command: "~/.config/herdr/scripts/limits.py login-pane {id}".into(),
+            handoff_command: "~/.config/herdr/scripts/handoff.py {pane} {agent} {mode}".into(),
+            ide: String::new(),
+            git_gui: String::new(),
+            pane_paper: true,
+            low_fuel_percent: 10,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1227,7 +1283,12 @@ impl Default for UiConfig {
             confirm_close: true,
             prompt_new_tab_name: true,
             prompt_new_workspace_name: false,
-            pane_borders: PaneBordersConfig::Auto,
+            // orcha frames every pane so its title bar can carry the agent's color
+            pane_borders: if ORCHA_LAYOUT_DEFAULT {
+                PaneBordersConfig::Always
+            } else {
+                PaneBordersConfig::Auto
+            },
             pane_outer_borders: true,
             pane_scrollbars: true,
             pane_gaps: true,
