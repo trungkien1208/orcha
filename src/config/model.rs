@@ -368,11 +368,11 @@ impl Default for OrchaConfig {
     fn default() -> Self {
         Self {
             fuel: FuelPlacement::Panel,
-            accounts_command: "~/.config/herdr/scripts/limits.py json".into(),
-            switch_command: "~/.config/herdr/scripts/limits.py switch {id} {pane}".into(),
-            open_command: "~/.config/herdr/scripts/limits.py open {id}".into(),
-            login_command: "~/.config/herdr/scripts/limits.py login-pane {id}".into(),
-            handoff_command: "~/.config/herdr/scripts/handoff.py {pane} {agent} {mode}".into(),
+            accounts_command: "~/.config/orcha/scripts/limits.py json".into(),
+            switch_command: "~/.config/orcha/scripts/limits.py switch {id} {pane}".into(),
+            open_command: "~/.config/orcha/scripts/limits.py open {id}".into(),
+            login_command: "~/.config/orcha/scripts/limits.py login-pane {id}".into(),
+            handoff_command: "~/.config/orcha/scripts/handoff.py {pane} {agent} {mode}".into(),
             ide: String::new(),
             git_gui: String::new(),
             pane_paper: true,

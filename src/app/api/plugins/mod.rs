@@ -319,7 +319,7 @@ impl App {
         params: PaneLinkActivateParams,
     ) -> String {
         match self.read_checked_pane_link(&id, &params, "resolution", |runtime, col, row| {
-            runtime.link_regions_at(col, row, crate::app::actions::url_byte_range)
+            runtime.link_regions_at(col, row, crate::app::actions::link_byte_range)
         }) {
             Ok((_, regions)) => encode_success(id, ResponseResult::PaneLinkResolved { regions }),
             Err(error) => error,
@@ -341,6 +341,8 @@ impl App {
                 Err(error) => return error,
             };
         let handled = match url.as_deref() {
+            // orcha: paths are opened by the client, which knows the pane's folder
+            Some(url) if url.starts_with(crate::app::actions::PATH_LINK_PREFIX) => false,
             Some(url) => match self.invoke_plugin_link_handler_for_url(url, pane_id) {
                 Ok(handled) => handled,
                 Err(err) => {

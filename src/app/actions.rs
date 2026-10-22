@@ -1041,13 +1041,78 @@ impl AppState {
     }
 }
 
-pub(super) fn url_from_link_target(target: crate::ghostty::LinkTarget) -> Option<String> {
+pub(crate) fn url_from_link_target(target: crate::ghostty::LinkTarget) -> Option<String> {
     match target {
         crate::ghostty::LinkTarget::Uri(uri) => Some(uri),
-        crate::ghostty::LinkTarget::Text { text, clicked_byte } => {
-            url_at_byte(&text, clicked_byte).map(str::to_owned)
-        }
+        crate::ghostty::LinkTarget::Text { text, clicked_byte } => url_at_byte(&text, clicked_byte)
+            .map(str::to_owned)
+            .or_else(|| {
+                path_byte_range(&text, clicked_byte)
+                    .and_then(|range| text.get(range))
+                    .map(|path| format!("{PATH_LINK_PREFIX}{path}"))
+            }),
     }
+}
+
+/// orcha: a clicked file or folder path comes back to the client as
+/// `orcha-path:<path as printed>`; the client resolves it against the pane's
+/// folder and opens it (folder: Finder, file: the editor, at `:line`).
+pub(crate) const PATH_LINK_PREFIX: &str = "orcha-path:";
+
+/// A web URL or a file path under the click (link hover and Ctrl+click).
+pub(crate) fn link_byte_range(text: &str, clicked_byte: usize) -> Option<std::ops::Range<usize>> {
+    url_byte_range(text, clicked_byte).or_else(|| path_byte_range(text, clicked_byte))
+}
+
+/// Looks like a path: has a slash, starts with `~`/`.`, or is `name.ext`,
+/// optionally followed by `:line[:col]`. Quotes, brackets and trailing
+/// punctuation are not part of it.
+pub(crate) fn path_byte_range(text: &str, clicked_byte: usize) -> Option<std::ops::Range<usize>> {
+    let is_path_char = |c: char| c.is_alphanumeric() || "/._-~:+@%".contains(c);
+    if !text.is_char_boundary(clicked_byte) {
+        return None;
+    }
+    let clicked = text[clicked_byte..].chars().next()?;
+    if !is_path_char(clicked) {
+        return None;
+    }
+    let start = text[..clicked_byte]
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| is_path_char(*c))
+        .last()
+        .map_or(clicked_byte, |(i, _)| i);
+    let end = text[clicked_byte..]
+        .char_indices()
+        .take_while(|(_, c)| is_path_char(*c))
+        .last()
+        .map_or(clicked_byte, |(i, c)| clicked_byte + i + c.len_utf8());
+    let mut token = &text[start..end];
+    // trailing sentence punctuation and a dangling ':'
+    while let Some(last) = token.chars().last().filter(|c| ".:,".contains(*c)) {
+        token = &token[..token.len() - last.len_utf8()];
+    }
+    if token.len() < 2 || token.contains("://") || token.starts_with("--") {
+        return None;
+    }
+    let name = token.split(':').next().unwrap_or(token);
+    let has_slash = name.contains('/');
+    let anchored = name.starts_with('~') || name.starts_with("./") || name.starts_with("../");
+    let file_like = name
+        .rsplit_once('.')
+        .is_some_and(|(stem, ext)| {
+            !stem.is_empty()
+                && (1..=8).contains(&ext.len())
+                && ext.chars().all(|c| c.is_ascii_alphanumeric())
+                && ext.chars().any(|c| c.is_ascii_alphabetic())
+        });
+    if !(has_slash || anchored || file_like) || name.chars().all(|c| c == '/' || c == '.') {
+        return None;
+    }
+    if clicked_byte >= start + token.len() {
+        return None;
+    }
+    Some(start..start + token.len())
 }
 
 pub(crate) fn safe_web_url(url: &str) -> Option<&str> {
@@ -2181,6 +2246,28 @@ mod tests {
     fn selected_word(row: &str, col: u16) -> Option<String> {
         let (start, end) = word_bounds_at_column(row, col)?;
         Some(text_in_cell_range(row, start, end))
+    }
+
+    fn clicked_path(row: &str, click: &str) -> Option<String> {
+        let byte = row.find(click)?;
+        path_byte_range(row, byte).map(|range| row[range].to_owned())
+    }
+
+    #[test]
+    fn paths_are_links() {
+        assert_eq!(
+            clicked_path("● Update(src/Menu.tsx)", "Menu").as_deref(),
+            Some("src/Menu.tsx")
+        );
+        assert_eq!(
+            clicked_path("error at src/theme.ts:12:4.", "theme").as_deref(),
+            Some("src/theme.ts:12:4")
+        );
+        assert_eq!(clicked_path("see ~/notes for more", "notes").as_deref(), Some("~/notes"));
+        assert_eq!(clicked_path("Read README.md now", "README").as_deref(), Some("README.md"));
+        assert_eq!(clicked_path("version 1.2 of it", "1.2"), None, "numbers are not files");
+        assert_eq!(clicked_path("just words here", "words"), None);
+        assert_eq!(clicked_path("https://example.com/a", "example"), None);
     }
 
     fn selected_url<'a>(row: &'a str, click: &str) -> Option<&'a str> {

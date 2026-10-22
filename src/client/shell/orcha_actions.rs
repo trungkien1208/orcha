@@ -8,13 +8,32 @@ const DETECT_IDE: &str = r#"for c in cursor code zed subl idea; do command -v "$
 /// Opens a folder in a Git GUI: the first app found, else the folder.
 const DETECT_GIT_GUI: &str = r#"for a in Fork SourceTree "GitHub Desktop" Tower GitKraken; do [ -d "/Applications/$a.app" ] && exec open -a "$a" "$P"; done; command -v gitk >/dev/null 2>&1 && cd "$P" && exec gitk --all; open "$P" 2>/dev/null || xdg-open "$P""#;
 
+/// Opens a file in the editor at `$L` (line) when it knows how, else with
+/// the system's default handler.
+const OPEN_FILE: &str = r#"for c in cursor code; do command -v "$c" >/dev/null 2>&1 && exec "$c" -g "$P:$L"; done; command -v zed >/dev/null 2>&1 && exec zed "$P:$L"; open "$P" 2>/dev/null || xdg-open "$P""#;
+/// Opens a folder in the file manager (Finder on macOS).
+const OPEN_FOLDER: &str = r#"open "$P" 2>/dev/null || xdg-open "$P""#;
+
+/// "src/a.ts:12:4" → ("src/a.ts", Some(12)).
+fn split_line(text: &str) -> (&str, Option<u32>) {
+    let mut parts = text.splitn(3, ':');
+    let path = parts.next().unwrap_or(text);
+    let line = parts.next().and_then(|line| line.parse().ok());
+    (path, line)
+}
+
 /// Runs `command` with `$P` (and `{path}`) set to `path`, without waiting.
 pub(super) fn spawn_with_path(command: &str, path: &str) {
+    spawn_with_env(command, path, 1);
+}
+
+fn spawn_with_env(command: &str, path: &str, line: u32) {
     let script = command.replace("{path}", "\"$P\"");
     let child = std::process::Command::new("sh")
         .arg("-c")
         .arg(script)
         .env("P", path)
+        .env("L", line.to_string())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -380,5 +399,63 @@ impl ClientShellState {
             outcome,
         );
         outcome.repaint = true;
+    }
+
+    /// Ctrl+click on a path in a pane: a folder opens in Finder, a file in
+    /// the editor (at its `:line`). Relative paths are the pane's. Returns
+    /// false when nothing exists there.
+    pub(super) fn open_path_link(&mut self, pane_id: &str, text: &str) -> bool {
+        let (raw, line) = split_line(text);
+        let home = std::env::var("HOME").unwrap_or_default();
+        let expanded = match raw.strip_prefix('~') {
+            Some(rest) => format!("{home}{rest}"),
+            None => raw.to_owned(),
+        };
+        let mut path = std::path::PathBuf::from(&expanded);
+        if path.is_relative() {
+            let cwd = self.snapshot.as_deref().and_then(|snapshot| {
+                snapshot
+                    .panes
+                    .iter()
+                    .find(|pane| pane.pane_id == pane_id)
+                    .and_then(|pane| pane.foreground_cwd.clone().or_else(|| pane.cwd.clone()))
+            });
+            let Some(cwd) = cwd else {
+                return false;
+            };
+            path = std::path::Path::new(&cwd).join(path);
+            // agents print paths from the repository root
+            if !path.exists() {
+                if let Some(root) = self.git_panel.data().map(|data| data.root.clone()) {
+                    path = std::path::Path::new(&root).join(&expanded);
+                }
+            }
+        }
+        if !path.exists() {
+            return false;
+        }
+        let shown = path.to_string_lossy().into_owned();
+        if path.is_dir() {
+            spawn_with_env(OPEN_FOLDER, &shown, 1);
+        } else {
+            let command = if self.config.orcha.ide.trim().is_empty() {
+                OPEN_FILE
+            } else {
+                self.config.orcha.ide.as_str()
+            };
+            spawn_with_env(command, &shown, line.unwrap_or(1));
+        }
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths_keep_their_line() {
+        assert_eq!(split_line("src/a.ts:12:4"), ("src/a.ts", Some(12)));
+        assert_eq!(split_line("src/a.ts"), ("src/a.ts", None));
     }
 }

@@ -699,6 +699,19 @@ impl ClientShellState {
                     Ok(crate::api::schema::ResponseResult::PaneLinkActivated {
                         url: Some(url),
                         handled: false,
+                    }) if url.starts_with(crate::app::actions::PATH_LINK_PREFIX)
+                        && replay.is_some() =>
+                    {
+                        self.url_click_consumes_until_up = completed_before_release;
+                        let path = &url[crate::app::actions::PATH_LINK_PREFIX.len()..];
+                        if !self.open_path_link(&pane_id, path) {
+                            return (false, replay_action(replay));
+                        }
+                        (false, Vec::new())
+                    }
+                    Ok(crate::api::schema::ResponseResult::PaneLinkActivated {
+                        url: Some(url),
+                        handled: false,
                     }) if crate::app::actions::safe_web_url(&url).is_some() && replay.is_some() => {
                         self.url_click_consumes_until_up = completed_before_release;
                         (false, vec![ClientShellAction::OpenSafeWebUrl(url)])
