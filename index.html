@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#fff4d6" />
+    <meta name="theme-color" content="#1f1c19" />
     <meta name="description" content="Orcha brings coding agents, projects, account fuel and Git context into one calm terminal workspace." />
     <title>Orcha — a calm workspace for coding agents</title>
     <link rel="icon" type="image/svg+xml" href="assets/orcha-mark.svg" />
@@ -12,8 +12,8 @@
     <script>
       try {
         const savedTheme = localStorage.getItem("orcha-theme");
-        const systemTheme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-        document.documentElement.dataset.theme = savedTheme || systemTheme;
+        // dark by default; the theme button remembers a switch to light
+        document.documentElement.dataset.theme = savedTheme || "dark";
         if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
           document.documentElement.classList.add("intro-active");
         }
