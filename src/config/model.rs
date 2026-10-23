@@ -1273,9 +1273,10 @@ impl Default for WorktreesConfig {
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
-            sidebar_width: 26,
+            // orcha's cards and PROCESS rails need room
+            sidebar_width: if ORCHA_LAYOUT_DEFAULT { 38 } else { 26 },
             sidebar_min_width: 18,
-            sidebar_max_width: 36,
+            sidebar_max_width: if ORCHA_LAYOUT_DEFAULT { 52 } else { 36 },
             sidebar_start_collapsed: false,
             sidebar_collapsed_mode: SidebarCollapsedModeConfig::Compact,
             mobile_width_threshold: DEFAULT_MOBILE_WIDTH_THRESHOLD,

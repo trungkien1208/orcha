@@ -420,7 +420,7 @@ pub(super) fn render_git_panel(
     let w = usize::from(inner_width);
 
     // rows each section needs, so the box hugs its content
-    let fuel_rows = fuel.map_or(0, |account| 2 + account.windows.len().min(2) as u16);
+    let fuel_rows = fuel.map_or(0, |account| 2 + account.windows.len().clamp(1, 2) as u16);
     let branch_rows = if data.is_some() { 4 } else { 3 };
     let history_rows = 1 + if ui.history_open {
         data.map_or(0, |d| d.history.len().min(14) as u16)
@@ -442,7 +442,13 @@ pub(super) fn render_git_panel(
     } else {
         0
     };
-    let height = (fixed + changes_rows).min(area.height.saturating_sub(1));
+    let height = if data.is_some() {
+        fixed + changes_rows
+    } else {
+        // no repository: FUEL and the BRANCH note only
+        2 + fuel_rows + 2
+    }
+    .min(area.height.saturating_sub(1));
     let rect = Rect::new(area.x + 1, area.y, area.width.saturating_sub(2), height);
     brutal::draw_box(buffer, rect, Edge::Light, t.line, t.card);
     let x = rect.x + 2;
@@ -477,6 +483,19 @@ pub(super) fn render_git_panel(
                     .fg(if window.left < 20 { t.red } else { t.ink })
                     .bg(t.card)
                     .add_modifier(Modifier::BOLD),
+            );
+            y += 1;
+        }
+        if account.windows.is_empty() && y < bottom {
+            // signed out or expired: say so, the popup offers SIGN IN
+            let note = account.error.clone().unwrap_or_else(|| "no data".to_owned());
+            put_text(
+                buffer,
+                x,
+                y,
+                inner_width,
+                &clip_right(&note, w),
+                Style::default().fg(t.red).bg(t.card),
             );
             y += 1;
         }

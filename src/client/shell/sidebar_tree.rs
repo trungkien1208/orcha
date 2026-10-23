@@ -404,7 +404,13 @@ fn render_process(
     );
     y += 1;
     let leg = (width / 4).max(4);
-    for (index, name) in STATIONS.iter().enumerate() {
+    // a narrow sidebar gets short station names
+    let names: [&str; 4] = if leg >= 6 {
+        STATIONS
+    } else {
+        ["THK", "COD", "TST", "END"]
+    };
+    for (index, name) in names.iter().enumerate() {
         let lx = x + leg * index as u16;
         let style = Style::default()
             .fg(t.ink)
