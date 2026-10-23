@@ -4,7 +4,7 @@
 
 use crate::protocol::{color_to_u32, modifier_to_u16, FrameData};
 
-use super::brutal::{self, Brutal, Edge};
+use super::brutal::{self, Brutal};
 use super::render::{display_width, put_text};
 use super::*;
 
@@ -98,22 +98,6 @@ pub(super) fn render_frame_and_tabs(
     )
     .intersection(buffer.area);
     buffer.set_style(paper, Style::default().bg(t.bg));
-    brutal::draw_box(buffer, frame, Edge::Heavy, t.line, t.frame, t.bg);
-    brutal::draw_box_shadow(buffer, frame, t.shadow, t.bg);
-    // the top edge runs along the top of its row, right under the tabs, so
-    // they sit on it; its corners carry the side lines up to it
-    let top_edge = Style::default().fg(t.line).bg(t.frame);
-    put_text(buffer, frame.x, frame.y, 1, "▕", Style::default().fg(t.line).bg(t.bg));
-    put_text(
-        buffer,
-        frame.x + 1,
-        frame.y,
-        frame.width.saturating_sub(2),
-        &"▔".repeat(usize::from(frame.width.saturating_sub(2))),
-        top_edge,
-    );
-    put_text(buffer, frame.right().saturating_sub(1), frame.y, 1, "▏", Style::default().fg(t.line).bg(t.bg));
-
     let tabs: Vec<&ClientShellTab> = snapshot
         .tabs
         .iter()
@@ -193,10 +177,7 @@ pub(super) fn render_frame_and_tabs(
         let above = y.saturating_sub(1);
         if open {
             put_text(buffer, x + 1, above, w - 2, &"▂".repeat(usize::from(w - 2)), Style::default().fg(t.yellow).bg(t.bg));
-            // the frame's top edge opens under it
-            for cx in x + 1..x + w - 1 {
-                put_text(buffer, cx, frame.y, 1, " ", top_edge);
-            }
+
         } else {
             put_text(buffer, x + 1, above, w - 2, &"▁".repeat(usize::from(w - 2)), edge);
         }
@@ -280,6 +261,7 @@ pub(super) fn dress_panes(
         color_to_u32(t.line),
         color_to_u32(t.frame),
     );
+    let (shadow, page) = (color_to_u32(t.shadow), color_to_u32(t.bg));
     let inside = |rect: Rect, x: u16, y: u16| {
         x >= rect.x && x < rect.right() && y >= rect.y && y < rect.bottom()
     };
@@ -307,7 +289,15 @@ pub(super) fn dress_panes(
                     // the pane's edge hugs its paper: eighth blocks on the frame;
                     // other border cells (a scrollbar) keep their glyph on paper
                     let r = pane.rect;
-                    let glyph = if y + 1 == r.bottom() {
+                    let on_shadow = x + 1 == surface.right() || y + 1 == surface.bottom();
+                    let glyph = if on_shadow {
+                        // the frame's shadow: a heavy half down the right, along the bottom
+                        Some(if x + 1 == surface.right() && y + 1 != surface.bottom() {
+                            "▌"
+                        } else {
+                            "▀"
+                        })
+                    } else if y + 1 == r.bottom() {
                         Some("▔")
                     } else if x == r.x {
                         Some("▕")
@@ -321,8 +311,8 @@ pub(super) fn dress_panes(
                     match glyph {
                         Some(glyph) => {
                             // black like the mockup; focus shows in the title bar
-                            cell.fg = line;
-                            cell.bg = frame_bg;
+                            cell.fg = if on_shadow { shadow } else { line };
+                            cell.bg = if on_shadow { page } else { frame_bg };
                             cell.symbol = glyph.to_owned();
                         }
                         None => {
