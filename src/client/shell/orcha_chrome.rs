@@ -159,7 +159,7 @@ pub(super) fn render_frame_and_tabs(
     let y = tab_area.y;
     let right = tab_area.right();
     let reserve = 12;
-    // the first tab starts on the frame's edge; tabs sit side by side
+    // the first tab starts on the frame's edge; a column between tabs
     let mut x = frame.x;
     if *tab_scroll > 0 {
         let more = format!("‹{}", *tab_scroll);
@@ -185,10 +185,10 @@ pub(super) fn render_frame_and_tabs(
         let edge = Style::default().fg(t.line).bg(t.bg);
         let above = y.saturating_sub(1);
         if open {
-            put_text(buffer, x + 1, above, w - 2, &"▂".repeat(usize::from(w - 2)), Style::default().fg(t.yellow).bg(t.bg));
+            put_text(buffer, x, above, w, &"▂".repeat(usize::from(w)), Style::default().fg(t.yellow).bg(t.bg));
 
         } else {
-            put_text(buffer, x + 1, above, w - 2, &"▁".repeat(usize::from(w - 2)), edge);
+            put_text(buffer, x, above, w, &"▁".repeat(usize::from(w)), edge);
         }
         let name = label(tab);
         let mut style = Style::default()
@@ -211,7 +211,7 @@ pub(super) fn render_frame_and_tabs(
             Style::default().fg(color).bg(fill),
         );
         hits.tabs.push((rect, tab.tab_id.clone()));
-        x += w;
+        x += w + 1;
         shown_until = index + 1;
     }
     let hidden = tabs.len().saturating_sub(shown_until);
