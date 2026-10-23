@@ -392,19 +392,12 @@ pub(crate) fn render_sidebar_tree(
     let content = |agents: &Vec<&ClientShellAgent>, kind: Card| {
         1 + if kind == Card::Folded { 0 } else { agents.len() as u16 }
     };
-    // a card right under the raised one starts on that one's shadow row
+    // every card: the line row over it (shared with the card above), its
+    // rows, and a bottom line row after the last; the same gap everywhere
     let heights: Vec<u16> = items
         .iter()
         .enumerate()
-        .map(|(index, (_, agents, kind))| {
-            let last = index + 1 == items.len();
-            let under_raised = index > 0 && items[index - 1].2 == Card::Selected;
-            // cards that are not raised join the one above when it is not raised either
-            let joined = *kind != Card::Selected && index > 0 && items[index - 1].2 != Card::Selected;
-            u16::from(!under_raised && !joined)
-                + content(agents, *kind)
-                + u16::from(last || *kind == Card::Selected)
-        })
+        .map(|(index, (_, agents, kind))| 1 + content(agents, *kind) + u16::from(index + 1 == items.len()))
         .collect();
     let gaps = vec![0; items.len()];
     let body = Rect::new(x, label_y + 1, width, process.y.saturating_sub(label_y + 1));
@@ -435,43 +428,49 @@ pub(crate) fn render_sidebar_tree(
         .saturating_sub(metrics.offset_from_bottom);
 
     let card_width = width.saturating_sub(1);
-    let line = Style::default().fg(t.line).bg(t.bg);
     let mut y = body.y;
-    let mut previous_raised = true;
     for (index, (workspace, agents, kind)) in items.iter().enumerate().skip(*state.workspace_scroll) {
         let height = heights[index];
         if y.saturating_add(height) > body.bottom() {
             break;
         }
         let rows = content(agents, *kind);
-        let under_raised = index > 0 && items[index - 1].2 == Card::Selected;
-        let joined = *kind != Card::Selected && index > 0 && items[index - 1].2 != Card::Selected;
-        // the line over it: shared with the card above; under the raised
-        // card its shadow row is the gap; folded cards join without one
-        if !under_raised && !joined {
-            let top = if previous_raised { "▁" } else { "\u{1FB80}" };
-            put_text(buffer, x, y, card_width, &top.repeat(usize::from(card_width)), line);
-        }
-        // `top` is the row over its body (its own line row, or the shadow row)
-        let top = if under_raised || joined { y.saturating_sub(1) } else { y };
-        let body_rect = Rect::new(x, top + 1, card_width, rows);
+        let first = index == *state.workspace_scroll;
+        let selected = *kind == Card::Selected;
+        let above_selected = !first && items[index - 1].2 == Card::Selected;
+        // the shared row: the card above's bottom line and this one's top line;
+        // yellow when it edges the selected card
+        let glyph = if first { "▁" } else { "\u{1FB80}" };
+        let color = if selected || above_selected { t.yellow } else { t.line };
+        put_text(
+            buffer,
+            x,
+            y,
+            card_width,
+            &glyph.repeat(usize::from(card_width)),
+            Style::default().fg(color).bg(t.bg),
+        );
+        let body_rect = Rect::new(x, y + 1, card_width, rows);
         match kind {
             Card::Folded => render_folded_row(buffer, body_rect, workspace, agents, &t, hits),
             _ => render_project_card(buffer, body_rect, workspace, agents, *kind, &t, hits),
         }
-        let below = top + 1 + rows;
-        if *kind == Card::Selected {
-            // raised: a thick bottom line and a shadow down the right
-            brutal::draw_box_shadow(
-                buffer,
-                Rect::new(x, top, card_width, rows + 2),
-                t.shadow,
-                t.bg,
-            );
-        } else if index + 1 == items.len() {
-            put_text(buffer, x, below, card_width, &"▔".repeat(usize::from(card_width)), line);
+        if selected {
+            // raised: a shadow down its right side, no extra row
+            for row in body_rect.y..body_rect.bottom() {
+                put_text(buffer, x + card_width, row, 1, "▌", Style::default().fg(t.shadow).bg(t.bg));
+            }
         }
-        previous_raised = *kind == Card::Selected;
+        if index + 1 == items.len() {
+            put_text(
+                buffer,
+                x,
+                body_rect.bottom(),
+                card_width,
+                &"▔".repeat(usize::from(card_width)),
+                Style::default().fg(if selected { t.yellow } else { t.line }).bg(t.bg),
+            );
+        }
         y += height;
     }
     if metrics.max_offset_from_bottom > 0 {
@@ -524,6 +523,10 @@ fn render_project_card(
     for row in rect.y..rect.bottom() {
         brutal::pill(buffer, Rect::new(rect.x, row, rect.width, 1), "", t.ink, fill, true, t);
         if selected {
+            // highlighted: yellow lines and a yellow bar inside the left one
+            let edge = Style::default().fg(t.yellow).bg(fill);
+            put_text(buffer, rect.x, row, 1, "▏", edge);
+            put_text(buffer, rect.right().saturating_sub(1), row, 1, "▕", edge);
             put_text(buffer, rect.x + 1, row, 1, "▌", Style::default().fg(t.yellow).bg(fill));
         }
     }
