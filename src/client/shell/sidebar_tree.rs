@@ -399,8 +399,8 @@ pub(crate) fn render_sidebar_tree(
         .map(|(index, (_, agents, kind))| {
             let last = index + 1 == items.len();
             let under_raised = index > 0 && items[index - 1].2 == Card::Selected;
-            // folded cards right under folded cards join them, no line between
-            let joined = *kind == Card::Folded && index > 0 && items[index - 1].2 == Card::Folded;
+            // cards that are not raised join the one above when it is not raised either
+            let joined = *kind != Card::Selected && index > 0 && items[index - 1].2 != Card::Selected;
             u16::from(!under_raised && !joined)
                 + content(agents, *kind)
                 + u16::from(last || *kind == Card::Selected)
@@ -445,7 +445,7 @@ pub(crate) fn render_sidebar_tree(
         }
         let rows = content(agents, *kind);
         let under_raised = index > 0 && items[index - 1].2 == Card::Selected;
-        let joined = *kind == Card::Folded && index > 0 && items[index - 1].2 == Card::Folded;
+        let joined = *kind != Card::Selected && index > 0 && items[index - 1].2 != Card::Selected;
         // the line over it: shared with the card above; under the raised
         // card its shadow row is the gap; folded cards join without one
         if !under_raised && !joined {
