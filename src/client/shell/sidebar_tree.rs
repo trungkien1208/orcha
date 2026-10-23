@@ -389,12 +389,16 @@ pub(crate) fn render_sidebar_tree(
     let content = |agents: &Vec<&ClientShellAgent>, kind: Card| {
         1 + if kind == Card::Folded { 0 } else { agents.len() as u16 }
     };
+    // a card right under the raised one starts on that one's shadow row
     let heights: Vec<u16> = items
         .iter()
         .enumerate()
         .map(|(index, (_, agents, kind))| {
             let last = index + 1 == items.len();
-            1 + content(agents, *kind) + u16::from(last || *kind == Card::Selected)
+            let under_raised = index > 0 && items[index - 1].2 == Card::Selected;
+            u16::from(!under_raised)
+                + content(agents, *kind)
+                + u16::from(last || *kind == Card::Selected)
         })
         .collect();
     let gaps = vec![0; items.len()];
@@ -435,20 +439,26 @@ pub(crate) fn render_sidebar_tree(
             break;
         }
         let rows = content(agents, *kind);
-        // the line over it: shared with the card above unless that one is raised
-        let top = if previous_raised { "▁" } else { "\u{1FB80}" };
-        put_text(buffer, x, y, card_width, &top.repeat(usize::from(card_width)), line);
-        let body_rect = Rect::new(x, y + 1, card_width, rows);
+        let under_raised = index > 0 && items[index - 1].2 == Card::Selected;
+        // the line over it: shared with the card above; under the raised
+        // card its shadow row is the gap
+        if !under_raised {
+            let top = if previous_raised { "▁" } else { "\u{1FB80}" };
+            put_text(buffer, x, y, card_width, &top.repeat(usize::from(card_width)), line);
+        }
+        // `top` is the row over its body (its own line row, or the shadow row)
+        let top = if under_raised { y.saturating_sub(1) } else { y };
+        let body_rect = Rect::new(x, top + 1, card_width, rows);
         match kind {
             Card::Folded => render_folded_row(buffer, body_rect, workspace, agents, &t, hits),
             _ => render_project_card(buffer, body_rect, workspace, agents, *kind, &t, hits),
         }
-        let below = y + 1 + rows;
+        let below = top + 1 + rows;
         if *kind == Card::Selected {
             // raised: a thick bottom line and a shadow down the right
             brutal::draw_box_shadow(
                 buffer,
-                Rect::new(x, y, card_width, rows + 2),
+                Rect::new(x, top, card_width, rows + 2),
                 t.shadow,
                 t.bg,
             );
