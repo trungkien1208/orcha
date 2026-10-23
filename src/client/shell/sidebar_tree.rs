@@ -347,7 +347,23 @@ pub(crate) fn render_sidebar_tree(
         );
     }
 
-    // PROJECTS: one card, a row per project, its agents under it when open
+    // PROJECTS: a card per project; the selected one raised, an open one
+    // outlined dim, folded ones stacked a hair apart
+    let label_y = area.y + 2;
+    put_text(
+        buffer,
+        x,
+        label_y,
+        width,
+        &format!("PROJECTS · {}", snapshot.workspaces.len()),
+        Style::default()
+            .fg(t.muted)
+            .bg(t.bg)
+            .add_modifier(Modifier::BOLD),
+    );
+    hits.sidebar_toggle = Rect::new(x + width.saturating_sub(2), label_y, 1, 1);
+    put_text(buffer, hits.sidebar_toggle.x, label_y, 1, "«", Style::default().fg(t.muted).bg(t.bg));
+
     let entries = super::sidebar::workspace_entries(snapshot, state.collapsed_groups);
     let mut items = Vec::new();
     for entry in &entries {
@@ -359,53 +375,34 @@ pub(crate) fn render_sidebar_tree(
             .iter()
             .filter(|agent| agent.workspace_id == workspace.workspace_id)
             .collect();
-        let open = workspace.focused || state.orcha_ui.open_projects.contains(&workspace.workspace_id);
-        items.push((workspace, agents, open));
+        let kind = if workspace.focused {
+            Card::Selected
+        } else if state.orcha_ui.open_projects.contains(&workspace.workspace_id) {
+            Card::Open
+        } else {
+            Card::Folded
+        };
+        items.push((workspace, agents, kind));
     }
+    let folded = |index: usize| items.get(index).is_some_and(|(_, _, kind)| *kind == Card::Folded);
     let heights: Vec<u16> = items
         .iter()
-        .map(|(_, agents, open)| 1 + if *open { agents.len() as u16 } else { 0 })
+        .enumerate()
+        .map(|(index, (_, agents, kind))| match kind {
+            // its edge row above, its row, and the run's bottom edge after the last
+            Card::Folded => 2 + u16::from(!folded(index + 1)),
+            // edges, name, agents, and the shadow's row
+            Card::Selected => 4 + agents.len() as u16,
+            Card::Open => 3 + agents.len() as u16,
+        })
         .collect();
-    let content: u16 = heights.iter().sum();
-    let top = area.y + 2;
-    let room = process.y.saturating_sub(top + 1);
-    // edges, the title row, the rows
-    let card = Rect::new(x, top, width.saturating_sub(1), (content + 3).min(room));
-    if card.height < 4 {
-        return;
-    }
-    brutal::draw_box(buffer, card, Edge::Light, t.line, t.card, t.bg);
-    let x0 = card.x + 1;
-    let inner = card.width.saturating_sub(2);
-    let title_y = card.y + 1;
-    put_text(
-        buffer,
-        x0 + 1,
-        title_y,
-        inner,
-        &format!("PROJECTS · {}", snapshot.workspaces.len()),
-        Style::default()
-            .fg(t.muted)
-            .bg(t.card)
-            .add_modifier(Modifier::BOLD),
-    );
-    hits.sidebar_toggle = Rect::new(x0 + inner.saturating_sub(2), title_y, 1, 1);
-    put_text(
-        buffer,
-        hits.sidebar_toggle.x,
-        title_y,
-        1,
-        "«",
-        Style::default().fg(t.muted).bg(t.card),
-    );
-
-    let body = Rect::new(x0, title_y + 1, inner, card.height.saturating_sub(3));
-    hits.workspace_body = body;
     let gaps = vec![0; items.len()];
+    let body = Rect::new(x, label_y + 1, width, process.y.saturating_sub(label_y + 1));
+    hits.workspace_body = body;
     let mut metrics =
         super::scroll::list_scroll_metrics(&heights, &gaps, body.height, *state.workspace_scroll);
     if !body.is_empty() && std::mem::take(state.reveal_focused_workspace) {
-        if let Some(target) = items.iter().position(|(workspace, _, _)| workspace.focused) {
+        if let Some(target) = items.iter().position(|(_, _, kind)| *kind == Card::Selected) {
             *state.workspace_scroll = super::scroll::list_scroll_start_to_reveal(
                 &heights,
                 &gaps,
@@ -427,21 +424,48 @@ pub(crate) fn render_sidebar_tree(
         .max_offset_from_bottom
         .saturating_sub(metrics.offset_from_bottom);
 
+    let card_width = width.saturating_sub(1);
     let mut y = body.y;
-    for (index, (workspace, agents, open)) in items.iter().enumerate().skip(*state.workspace_scroll)
-    {
-        if y.saturating_add(heights[index]) > body.bottom() {
+    for (index, (workspace, agents, kind)) in items.iter().enumerate().skip(*state.workspace_scroll) {
+        let height = heights[index];
+        if y.saturating_add(height) > body.bottom() {
             break;
         }
-        render_project_rows(buffer, Rect::new(x0, y, inner, heights[index]), workspace, agents, *open, &t, hits);
-        y += heights[index];
+        match kind {
+            Card::Folded => {
+                // the edge row above: the previous folded card's bottom and
+                // this one's top share it, a hair apart
+                let first = index == *state.workspace_scroll || !folded(index.wrapping_sub(1));
+                let edge = if first { "▁" } else { "\u{1FB80}" };
+                put_text(
+                    buffer,
+                    x,
+                    y,
+                    card_width,
+                    &edge.repeat(usize::from(card_width)),
+                    Style::default().fg(t.line).bg(t.bg),
+                );
+                render_folded_row(buffer, Rect::new(x, y + 1, card_width, 1), workspace, agents, &t, hits);
+                if height == 3 {
+                    put_text(
+                        buffer,
+                        x,
+                        y + 2,
+                        card_width,
+                        &"▔".repeat(usize::from(card_width)),
+                        Style::default().fg(t.line).bg(t.bg),
+                    );
+                }
+            }
+            _ => render_project_card(buffer, Rect::new(x, y, width, height), workspace, agents, *kind, &t, hits),
+        }
+        y += height;
     }
     if metrics.max_offset_from_bottom > 0 {
-        let track = Rect::new(card.right().saturating_sub(1), body.y, 1, body.height);
+        let track = Rect::new(area.right().saturating_sub(1), body.y, 1, body.height);
         hits.workspace_scrollbar = track;
         super::scroll::render_list_scrollbar(buffer, track, metrics, &config.palette);
     }
-
     if let Some(row) = state
         .workspace_drop_indicator_row
         .filter(|row| *row >= body.y && *row < body.bottom())
@@ -452,74 +476,60 @@ pub(crate) fn render_sidebar_tree(
             row,
             body.width,
             &"━".repeat(usize::from(body.width)),
-            Style::default().fg(t.pink).bg(t.card),
+            Style::default().fg(t.pink).bg(t.bg),
         );
     }
 }
 
-/// One project in the PROJECTS card: its row, then its agents when open.
-/// The selected one is tinted, with a yellow bar down its rows.
-fn render_project_rows(
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Card {
+    Selected,
+    Open,
+    Folded,
+}
+
+/// A selected (raised, yellow edge) or open (dim outline) project card:
+/// its name row, then a row per agent.
+fn render_project_card(
     buffer: &mut Buffer,
     rect: Rect,
     workspace: &ClientShellWorkspace,
     agents: &[&ClientShellAgent],
-    open: bool,
+    kind: Card,
     t: &Brutal,
     hits: &mut ShellHitMap,
 ) {
-    let selected = workspace.focused;
-    let fill = if selected { t.frame } else { t.card };
-    buffer.set_style(rect, Style::default().bg(fill));
+    let selected = kind == Card::Selected;
+    let card = if selected {
+        Rect::new(rect.x, rect.y, rect.width.saturating_sub(1), rect.height.saturating_sub(1))
+    } else {
+        Rect::new(rect.x, rect.y, rect.width.saturating_sub(1), rect.height)
+    };
+    let fill = if selected { t.card } else { t.bg };
+    let line = if selected { t.line } else { t.rail_ahead };
+    brutal::draw_box(buffer, card, Edge::Light, line, fill, t.bg);
     if selected {
-        for y in rect.y..rect.bottom() {
-            put_text(buffer, rect.x, y, 1, "▌", Style::default().fg(t.yellow).bg(fill));
+        brutal::draw_box_shadow(buffer, card, t.shadow, t.bg);
+        for y in card.y + 1..card.bottom().saturating_sub(1) {
+            put_text(buffer, card.x + 1, y, 1, "▌", Style::default().fg(t.yellow).bg(fill));
         }
     }
-    let x = rect.x + 1;
-    let y = rect.y;
-    let right = rect.right().saturating_sub(1);
-    put_text(
-        buffer,
-        x,
-        y,
-        2,
-        if open { "▾ " } else { "▸ " },
-        Style::default().fg(t.ink).bg(fill),
-    );
+    let x = card.x + 2;
+    let right = card.right().saturating_sub(2);
+    let y = card.y + 1;
+    put_text(buffer, x, y, 2, "▾ ", Style::default().fg(t.ink).bg(fill));
     if !selected {
         hits.orcha
             .project_toggles
             .push((Rect::new(x, y, 2, 1), workspace.workspace_id.clone()));
     }
-    // folded: a mark per agent on the right; open: the branch
-    let note: Vec<(String, ratatui::style::Color)> = if open {
-        workspace
-            .branch
-            .as_deref()
-            .map(|branch| {
-                let short = branch.rsplit('/').next().unwrap_or(branch);
-                vec![(format!("⎇ {}", brutal::clip(short, 12)), t.muted)]
-            })
-            .unwrap_or_default()
-    } else if agents.is_empty() {
-        vec![("idle".to_owned(), t.muted)]
-    } else {
-        agents
-            .iter()
-            .take(6)
-            .map(|agent| {
-                let (dot, color) = state_dot(agent.agent_status, t);
-                (dot.to_owned(), color)
-            })
-            .collect()
-    };
-    let note_width: u16 = note
-        .iter()
-        .map(|(text, _)| display_width(text) + 1)
-        .sum::<u16>()
-        .saturating_sub(1);
-    let name_width = right.saturating_sub(x + 2 + note_width + 1);
+    let branch = workspace
+        .branch
+        .as_deref()
+        .map(|branch| format!("⎇ {}", brutal::clip(branch.rsplit('/').next().unwrap_or(branch), 12)))
+        .unwrap_or_default();
+    let branch_width = display_width(&branch);
+    let name_width = right.saturating_sub(x + 2 + branch_width + 1);
     put_text(
         buffer,
         x + 2,
@@ -527,15 +537,18 @@ fn render_project_rows(
         name_width,
         &brutal::clip(&workspace.label.to_uppercase(), usize::from(name_width)),
         Style::default()
-            .fg(t.ink)
+            .fg(if selected { t.ink } else { t.muted })
             .bg(fill)
             .add_modifier(Modifier::BOLD),
     );
-    let mut nx = right.saturating_sub(note_width);
-    for (text, color) in &note {
-        put_text(buffer, nx, y, display_width(text), text, Style::default().fg(*color).bg(fill));
-        nx += display_width(text) + 1;
-    }
+    put_text(
+        buffer,
+        right.saturating_sub(branch_width),
+        y,
+        branch_width,
+        &branch,
+        Style::default().fg(t.muted).bg(fill),
+    );
     hits.workspaces.push(WorkspaceHit {
         rect: Rect::new(x + 2, y, right.saturating_sub(x + 2), 1),
         endpoint_id: ClientEndpointId::Local,
@@ -543,26 +556,26 @@ fn render_project_rows(
         indented: false,
         group_toggle: None,
     });
-    if !open {
-        return;
-    }
     for (index, agent) in agents.iter().enumerate() {
-        let y = rect.y + 1 + index as u16;
-        if y >= rect.bottom() {
+        let y = y + 1 + index as u16;
+        if y + 1 >= card.bottom() {
             break;
         }
-        let row = Rect::new(x + 2, y, right.saturating_sub(x + 2), 1);
+        let row = Rect::new(x + 1, y, right.saturating_sub(x + 1), 1);
+        let row_bg = if agent.focused { t.frame } else { fill };
+        buffer.set_style(row, Style::default().bg(row_bg));
         let (dot, color) = state_dot(agent.agent_status, t);
-        put_text(buffer, x + 2, y, 1, dot, Style::default().fg(color).bg(fill));
+        put_text(buffer, x + 2, y, 1, dot, Style::default().fg(color).bg(row_bg));
         let name = row_name(&brutal::agent_label(agent));
         let name_width = display_width(&name).min(row.width.saturating_sub(3));
-        let mut name_style = Style::default().fg(t.ink).bg(fill);
-        if agent.focused {
-            name_style = name_style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
-        } else {
-            name_style = name_style.add_modifier(Modifier::BOLD);
-        }
-        put_text(buffer, x + 4, y, name_width, &name, name_style);
+        put_text(
+            buffer,
+            x + 4,
+            y,
+            name_width,
+            &name,
+            Style::default().fg(t.ink).bg(row_bg).add_modifier(Modifier::BOLD),
+        );
         let blocked = agent.agent_status == AgentStatus::Blocked;
         let note = if blocked { "needs you" } else { "" };
         let task_x = x + 4 + name_width + 1;
@@ -573,7 +586,7 @@ fn render_project_rows(
             y,
             task_width,
             &brutal::clip(&brutal::agent_task(agent), usize::from(task_width)),
-            Style::default().fg(t.muted).bg(fill),
+            Style::default().fg(t.muted).bg(row_bg),
         );
         if blocked {
             put_right_text(
@@ -581,14 +594,60 @@ fn render_project_rows(
                 Rect::new(row.x, y, right.saturating_sub(row.x), 1),
                 y,
                 note,
-                Style::default()
-                    .fg(t.red)
-                    .bg(fill)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(t.red).bg(row_bg).add_modifier(Modifier::BOLD),
             );
         }
         hits.agents.push((row, agent.pane_id.clone()));
     }
+}
+
+/// A folded project's row: its card's sides, the name and a mark per agent.
+fn render_folded_row(
+    buffer: &mut Buffer,
+    row: Rect,
+    workspace: &ClientShellWorkspace,
+    agents: &[&ClientShellAgent],
+    t: &Brutal,
+    hits: &mut ShellHitMap,
+) {
+    let fill = if brutal::is_light(t.bg) { t.bg } else { t.card };
+    brutal::pill(buffer, row, "", t.ink, fill, true, t);
+    let (x, y) = (row.x + 2, row.y);
+    put_text(buffer, x, y, 2, "▸ ", Style::default().fg(t.ink).bg(fill));
+    hits.orcha
+        .project_toggles
+        .push((Rect::new(x, y, 2, 1), workspace.workspace_id.clone()));
+    let marks_width = if agents.is_empty() {
+        4
+    } else {
+        (agents.len().min(6) * 2 - 1) as u16
+    };
+    let right = row.right().saturating_sub(2);
+    let name_width = right.saturating_sub(x + 3 + marks_width + 1);
+    put_text(
+        buffer,
+        x + 2,
+        y,
+        name_width,
+        &brutal::clip(&workspace.label.to_uppercase(), usize::from(name_width)),
+        Style::default().fg(t.ink).bg(fill).add_modifier(Modifier::BOLD),
+    );
+    let mut mx = right.saturating_sub(marks_width);
+    if agents.is_empty() {
+        put_text(buffer, mx, y, 4, "idle", Style::default().fg(t.muted).bg(fill));
+    }
+    for agent in agents.iter().take(6) {
+        let (dot, color) = state_dot(agent.agent_status, t);
+        put_text(buffer, mx, y, 1, dot, Style::default().fg(color).bg(fill));
+        mx += 2;
+    }
+    hits.workspaces.push(WorkspaceHit {
+        rect: Rect::new(x + 2, y, row.width.saturating_sub(5), 1),
+        endpoint_id: ClientEndpointId::Local,
+        workspace_id: workspace.workspace_id.clone(),
+        indented: false,
+        group_toggle: None,
+    });
 }
 
 #[cfg(test)]
