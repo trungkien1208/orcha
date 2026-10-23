@@ -101,6 +101,8 @@ pub(super) enum ClientMobileTarget {
 pub(super) struct OrchaHits {
     /// orcha: back to the terminal (the agents keep running).
     pub(super) quit: Rect,
+    /// orcha: a newer release; a click installs it.
+    pub(super) update: Rect,
     pub(super) settings: Rect,
     pub(super) fuel: Rect,
     pub(super) fuel_hint: Rect,
@@ -129,6 +131,13 @@ pub(crate) struct OrchaUiState {
     /// Projects other tools know about, being looked up off the input path.
     pub(super) import_scan:
         Option<std::sync::mpsc::Receiver<Vec<crate::orcha_import::ImportSource>>>,
+    /// A newer orcha release (being looked up, then its version).
+    pub(super) update_check: Option<std::sync::mpsc::Receiver<Option<String>>>,
+    pub(super) update_available: Option<String>,
+    /// `orcha update` running behind the UI; true when it worked.
+    pub(super) update_run: Option<std::sync::mpsc::Receiver<bool>>,
+    /// The header's update button text, while there is one.
+    pub(super) update_note: Option<String>,
     /// What the import popup offers.
     pub(super) import_sources: Vec<crate::orcha_import::ImportSource>,
     /// Projects expanded in the sidebar besides the selected one.

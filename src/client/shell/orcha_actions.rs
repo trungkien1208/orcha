@@ -92,6 +92,11 @@ impl ClientShellState {
             return true;
         }
         let hits = &self.hits.orcha;
+        if super::contains(hits.update, point) {
+            self.start_update();
+            outcome.repaint = true;
+            return true;
+        }
         if super::contains(hits.quit, point) {
             self.record_binding(
                 crate::input::KeybindMatch::Action(crate::input::KeybindAction::Detach),
@@ -857,6 +862,60 @@ impl ClientShellState {
         // the first time: offer the projects other tools know about
         if !crate::orcha_import::asked() {
             self.start_import_scan();
+        }
+        self.start_update_check();
+    }
+
+    /// Asks (at most daily, off the input path) whether a newer orcha is out.
+    fn start_update_check(&mut self) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        if crate::thread_spawn::spawn_named("orcha-update-check", move || {
+            let _ = tx.send(crate::orcha_app::newer_release());
+        })
+        .is_ok()
+        {
+            self.orcha_ui.update_check = Some(rx);
+        }
+    }
+
+    /// The header's update button: shows a newer release, then the update
+    /// running, then what to do next. Returns true when it changed.
+    pub(super) fn poll_update(&mut self) -> bool {
+        let ui = &mut self.orcha_ui;
+        if let Some(Ok(newer)) = ui.update_check.as_ref().map(|rx| rx.try_recv()) {
+            ui.update_check = None;
+            if let Some(version) = newer {
+                ui.update_note = Some(format!("⬆ update to {version}"));
+                ui.update_available = Some(version);
+                return true;
+            }
+        }
+        if let Some(Ok(ok)) = ui.update_run.as_ref().map(|rx| rx.try_recv()) {
+            ui.update_run = None;
+            ui.update_note = Some(if ok {
+                "✓ updated: quit and reopen".to_owned()
+            } else {
+                "update failed: run orcha update".to_owned()
+            });
+            return true;
+        }
+        false
+    }
+
+    /// Click on the update button: installs the newer release behind the UI.
+    fn start_update(&mut self) {
+        if self.orcha_ui.update_run.is_some() || self.orcha_ui.update_available.is_none() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        if crate::thread_spawn::spawn_named("orcha-update", move || {
+            let _ = tx.send(crate::orcha_app::run_installer(true));
+        })
+        .is_ok()
+        {
+            self.orcha_ui.update_available = None;
+            self.orcha_ui.update_run = Some(rx);
+            self.orcha_ui.update_note = Some("⬆ updating…".to_owned());
         }
     }
 }

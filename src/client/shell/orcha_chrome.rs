@@ -62,12 +62,33 @@ pub(super) fn render_header(
     hits.orcha.settings = button;
     brutal::pill(buffer, quit, quit_text, t.ink, t.card, true, &t);
     hits.orcha.quit = quit;
+    // a newer orcha: a green button left of settings, a click installs it
+    let mut left_of = button.x;
+    if let Some(note) = &ui.update_note {
+        let text = format!(" {note} ");
+        let room = button.x.saturating_sub(x + display_width(&counts) + 4);
+        let width = display_width(&text).min(room);
+        let ux = button.x.saturating_sub(width + 2);
+        put_text(
+            buffer,
+            ux,
+            area.y,
+            width,
+            &text,
+            Style::default()
+                .fg(t.chip_text)
+                .bg(t.green)
+                .add_modifier(Modifier::BOLD),
+        );
+        hits.orcha.update = Rect::new(ux, area.y, width, 1);
+        left_of = ux;
+    }
     // low fuel: a red offer left of settings, a click opens the accounts
     if let Some(hint) = &ui.low_fuel_hint {
         let hint = format!(" ⚠ {hint} ");
-        let room = button.x.saturating_sub(x + display_width(&counts) + 4);
+        let room = left_of.saturating_sub(x + display_width(&counts) + 4);
         let width = display_width(&hint).min(room);
-        let hx = button.x.saturating_sub(width + 2);
+        let hx = left_of.saturating_sub(width + 2);
         put_text(
             buffer,
             hx,
