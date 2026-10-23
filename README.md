@@ -30,7 +30,7 @@
 curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.sh | sh
 ```
 
-**Windows** (x64, PowerShell)
+**Windows** (x64, PowerShell). Use [WezTerm](https://wezfurlong.org/wezterm/).
 
 ```powershell
 irm https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.ps1 | iex
@@ -81,7 +81,7 @@ orcha update      # latest version; a green button also tells you when one is ou
 orcha uninstall   # remove orcha and what it added; asks before touching your settings
 ```
 
-Best in [Ghostty](https://ghostty.org) on macOS and [Windows Terminal](https://aka.ms/terminal) on Windows. Using herdr already? Your config and workspaces come along, and herdr stays untouched.
+Best in [Ghostty](https://ghostty.org) on macOS and [WezTerm](https://wezfurlong.org/wezterm/) on Windows. The agent icon font, and font, size, and ligature settings, still apply in Ghostty only. On WezTerm the logos stay plain symbols, and the font is whatever WezTerm is set to. Using herdr already? Your config and workspaces come along, and herdr stays untouched.
 
 This is an early build. If something breaks, [open an issue](https://github.com/trungkien1208/orcha/issues) with a screenshot.
 
