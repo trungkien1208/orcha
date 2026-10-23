@@ -117,6 +117,19 @@ impl AccountsPoller {
         self.next_refresh = None;
     }
 
+    /// A switch shows at once: `id` is the current account now, the real
+    /// data follows once the switch had time to land.
+    pub(super) fn mark_current(&mut self, id: &str, now: Instant) {
+        if let Some(data) = self.data.as_mut() {
+            for account in data.iter_mut() {
+                account.current = account.id == id;
+            }
+        }
+        // a refresh already under way would bring the old state back
+        self.pending = None;
+        self.next_refresh = Some(now + Duration::from_millis(1500));
+    }
+
     /// Collects a finished refresh and starts the next one when due. Returns
     /// true when the data changed and needs a repaint.
     pub(super) fn tick(&mut self, command: &str, pane: Option<&str>, now: Instant) -> bool {

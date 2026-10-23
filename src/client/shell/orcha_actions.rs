@@ -392,7 +392,13 @@ impl ClientShellState {
                     )
                 };
                 run_detached(command, &env);
-                self.accounts.refresh_soon();
+                if signed_out || alternate || pane.is_none() {
+                    self.accounts.refresh_soon();
+                } else {
+                    // the switch shows at once; the data catches up
+                    self.accounts.mark_current(&account.id, std::time::Instant::now());
+                    self.update_low_fuel_hint();
+                }
             }
             super::orcha_popup::OrchaPopup::NewAgent { workspace, cwd, .. } => {
                 let account = self.accounts.data().and_then(|data| data.get(index)).cloned();
