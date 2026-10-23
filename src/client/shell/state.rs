@@ -107,6 +107,10 @@ pub(super) struct OrchaHits {
     pub(super) process: Rect,
     pub(super) process_toggle: Rect,
     pub(super) settings: Rect,
+    /// orcha: the header's COMMANDS button.
+    pub(super) commands: Rect,
+    /// orcha: the header's "N need you" chip; a click goes to the first.
+    pub(super) needs_you: Rect,
     pub(super) fuel: Rect,
     pub(super) fuel_hint: Rect,
     /// FUEL's ✕ (move it to the status bar) and the status bar's ▴ FUEL (back).
@@ -152,6 +156,10 @@ pub(crate) struct OrchaUiState {
     pub(super) update_run: Option<std::sync::mpsc::Receiver<bool>>,
     /// The header's update button text, while there is one.
     pub(super) update_note: Option<String>,
+    /// Project icons by folder (`orcha_icons::key`).
+    pub(super) project_icons: std::collections::HashMap<String, String>,
+    /// Folders (`orcha_import::folder_key`) already sent to be imported.
+    pub(super) imported_folders: HashSet<String>,
     /// What the import popup offers.
     pub(super) import_sources: Vec<crate::orcha_import::ImportSource>,
     /// Projects expanded in the sidebar besides the selected one.
@@ -167,6 +175,10 @@ pub(crate) struct OrchaUiState {
     pub(super) next_process_tick: Option<std::time::Instant>,
     /// The open orcha popup (accounts, hand off).
     pub(super) popup: Option<super::orcha_popup::OrchaPopup>,
+    /// An account action (switch, sign in, open, add, new agent) under way.
+    pub(super) account_run: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
+    /// A hand-off building its notes and opening the new agent.
+    pub(super) handoff_run: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
     /// The header's low-fuel offer, when the current account runs low.
     pub(super) low_fuel_hint: Option<String>,
     /// Accounts the CONTINUE ON popup was already offered for (once each).
@@ -484,6 +496,7 @@ pub(super) struct ClientGlobalMenuOverlay {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ClientSettingsSection {
     Theme,
+    Look,
     Font,
     FontSize,
     Ligatures,
@@ -498,6 +511,7 @@ pub(super) enum ClientSettingsSection {
 impl ClientSettingsSection {
     pub(super) const ALL: &[Self] = &[
         Self::Theme,
+        Self::Look,
         Self::Font,
         Self::FontSize,
         Self::Ligatures,
@@ -512,12 +526,13 @@ impl ClientSettingsSection {
     pub(super) fn label(self) -> &'static str {
         match self {
             Self::Theme => "theme",
+            Self::Look => "look",
             Self::Font => "font",
             Self::FontSize => "size",
             Self::Ligatures => "ligatures",
             Self::Ide => "ide",
             Self::GitUi => "git",
-            Self::Indicators => "indicators",
+            Self::Indicators => "status",
             Self::Sound => "sound",
             Self::Toast => "toasts",
             Self::Integrations => "integrations",
@@ -537,6 +552,10 @@ pub(super) struct ClientSettingsOverlay {
     pub(super) installing_integrations: bool,
     /// orcha: the terminal's font and ligatures (kept by orcha-config).
     pub(super) appearance: OrchaAppearance,
+    /// orcha: the LOOK rows' current values, in `LookRow::ALL` order.
+    pub(super) look: Vec<String>,
+    /// orcha: the layout those values make, sketched beside them.
+    pub(super) look_map: super::settings::LookMap,
 }
 
 /// orcha: font choices for the terminal, and what is set now.
@@ -642,6 +661,8 @@ pub(super) struct ClientWorktreeRemoveOverlay {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ClientContextMenuAction {
     Rename,
+    /// orcha: pick the project's icon.
+    SetIcon,
     Close,
     NewWorktree,
     OpenWorktree,

@@ -9,6 +9,101 @@ pub(super) fn normalized_theme_name(name: &str) -> String {
         .unwrap_or(normalized)
 }
 
+/// LOOK: accent colors offered for the brand (`[theme.custom] mauve`).
+/// The first keeps the theme's own.
+pub(super) const ACCENTS: [(&str, Option<&str>); 8] = [
+    ("theme", None),
+    ("pink", Some("#ff7ab6")),
+    ("coral", Some("#ff8a65")),
+    ("orange", Some("#ffa94d")),
+    ("yellow", Some("#ffd23f")),
+    ("green", Some("#7be0ad")),
+    ("blue", Some("#6c8cff")),
+    ("purple", Some("#b18cff")),
+];
+
+/// LOOK: sidebar widths, in columns.
+pub(super) const SIDEBAR_WIDTHS: [(&str, u16); 3] = [("narrow", 24), ("normal", 28), ("wide", 36)];
+
+/// Where the LOOK sketch draws PROCESS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum MapProcess {
+    #[default]
+    Sidebar,
+    Panel,
+    Off,
+}
+
+/// What the LOOK sketch shows: the layout the current values make.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) struct LookMap {
+    pub(super) sidebar_right: bool,
+    /// Index into `SIDEBAR_WIDTHS`.
+    pub(super) sidebar: usize,
+    pub(super) panel: bool,
+    pub(super) process: MapProcess,
+    pub(super) fuel_in_status: bool,
+}
+
+/// The LOOK rows, in order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LookRow {
+    Accent,
+    Sidebar,
+    RightPanel,
+    Fuel,
+    Panes,
+    Logos,
+    Process,
+    Side,
+}
+
+impl LookRow {
+    pub(super) const ALL: [Self; 8] = [
+        Self::Accent,
+        Self::Side,
+        Self::Sidebar,
+        Self::RightPanel,
+        Self::Fuel,
+        Self::Process,
+        Self::Panes,
+        Self::Logos,
+    ];
+
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::Accent => "accent",
+            Self::Sidebar => "sidebar",
+            Self::RightPanel => "right panel",
+            Self::Fuel => "fuel gauges",
+            Self::Panes => "panes",
+            Self::Logos => "agent logos",
+            Self::Process => "process",
+            Self::Side => "sidebar side",
+        }
+    }
+}
+
+/// The accent in use: the offered color the palette's brand matches, else
+/// the theme's own.
+pub(super) fn accent_index(palette: &Palette) -> usize {
+    ACCENTS
+        .iter()
+        .position(|(_, hex)| {
+            hex.is_some_and(|hex| crate::config::parse_color(hex) == palette.mauve)
+        })
+        .unwrap_or(0)
+}
+
+/// The sidebar width offered closest to `width`.
+pub(super) fn sidebar_width_index(width: u16) -> usize {
+    SIDEBAR_WIDTHS
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, (_, columns))| columns.abs_diff(width))
+        .map_or(1, |(index, _)| index)
+}
+
 fn theme_index(name: &str) -> usize {
     let normalized = normalized_theme_name(name);
     crate::config::THEME_NAMES
@@ -170,12 +265,46 @@ impl ClientShellState {
             loading_integrations: false,
             installing_integrations: false,
             appearance: load_appearance(),
+            look: Vec::new(),
+            look_map: LookMap::default(),
         }));
+        self.refresh_look();
+    }
+
+    /// Recomputes the LOOK rows shown in the open settings.
+    fn refresh_look(&mut self) {
+        let look: Vec<String> = LookRow::ALL
+            .iter()
+            .map(|row| self.look_value(*row))
+            .collect();
+        let map = self.look_map();
+        if let Some(ClientShellOverlay::Settings(settings)) = self.overlay.as_mut() {
+            settings.look = look;
+            settings.look_map = map;
+        }
+    }
+
+    /// The layout the LOOK values make, for the sketch beside them.
+    fn look_map(&self) -> LookMap {
+        use crate::config::{FuelPlacement, ProcessPlacement, SidebarSide};
+        let panel = self.config.right_panel;
+        LookMap {
+            sidebar_right: self.config.orcha.sidebar_side == SidebarSide::Right,
+            sidebar: sidebar_width_index(self.config.sidebar_width),
+            panel,
+            process: match self.config.orcha.process {
+                ProcessPlacement::Off => MapProcess::Off,
+                ProcessPlacement::Panel if panel => MapProcess::Panel,
+                _ => MapProcess::Sidebar,
+            },
+            fuel_in_status: self.config.orcha.fuel == FuelPlacement::StatusBar || !panel,
+        }
     }
 
     fn selected_index_for_settings_section(&self, section: ClientSettingsSection) -> usize {
         match section {
             ClientSettingsSection::Theme => theme_index(&self.config.theme_name),
+            ClientSettingsSection::Look => 0,
             ClientSettingsSection::Font => match self.overlay.as_ref() {
                 Some(ClientShellOverlay::Settings(settings)) => settings
                     .appearance
@@ -261,6 +390,7 @@ impl ClientShellState {
         match self.overlay.as_ref() {
             Some(ClientShellOverlay::Settings(settings)) => match settings.section {
                 ClientSettingsSection::Theme => crate::config::THEME_NAMES.len(),
+                ClientSettingsSection::Look => LookRow::ALL.len(),
                 // orcha sets the font in Ghostty only
                 ClientSettingsSection::Font
                 | ClientSettingsSection::FontSize
@@ -460,6 +590,136 @@ impl ClientShellState {
                 );
             }
             ClientSettingsSection::Integrations => self.install_recommended_integrations(outcome),
+            ClientSettingsSection::Look => {
+                if let Some(row) = LookRow::ALL.get(selected) {
+                    self.cycle_look(*row, outcome);
+                    self.refresh_look();
+                }
+            }
+        }
+    }
+
+    /// The value a LOOK row shows.
+    pub(super) fn look_value(&self, row: LookRow) -> String {
+        match row {
+            LookRow::Accent => ACCENTS[accent_index(&self.config.palette)].0.to_owned(),
+            LookRow::Sidebar => {
+                let (name, columns) =
+                    SIDEBAR_WIDTHS[sidebar_width_index(self.config.sidebar_width)];
+                format!("{name} · {columns} columns")
+            }
+            LookRow::RightPanel => if self.config.right_panel {
+                "shown"
+            } else {
+                "hidden · the panes take its room"
+            }
+            .to_owned(),
+            LookRow::Fuel => match self.config.orcha.fuel {
+                crate::config::FuelPlacement::Panel => "right panel",
+                crate::config::FuelPlacement::StatusBar => "status bar",
+            }
+            .to_owned(),
+            LookRow::Panes => if self.config.orcha.pane_paper {
+                "paper (the style's colors)"
+            } else {
+                "the terminal's colors"
+            }
+            .to_owned(),
+            LookRow::Side => match self.config.orcha.sidebar_side {
+                crate::config::SidebarSide::Left => "left · panel on the right",
+                crate::config::SidebarSide::Right => "right · panel on the left",
+            }
+            .to_owned(),
+            LookRow::Process => {
+                let (sidebar, panel) = match self.config.orcha.sidebar_side {
+                    crate::config::SidebarSide::Left => ("left", "right"),
+                    crate::config::SidebarSide::Right => ("right", "left"),
+                };
+                match self.config.orcha.process {
+                    crate::config::ProcessPlacement::Sidebar => {
+                        format!("{sidebar} · under the projects")
+                    }
+                    crate::config::ProcessPlacement::Panel if !self.config.right_panel => {
+                        format!("{panel} panel (hidden, so under the projects)")
+                    }
+                    crate::config::ProcessPlacement::Panel => format!("{panel} · in the panel"),
+                    crate::config::ProcessPlacement::Off => "hidden".to_owned(),
+                }
+            }
+            LookRow::Logos => {
+                let mode = match self.config.orcha.icons {
+                    crate::config::IconMode::Auto => "auto",
+                    crate::config::IconMode::Font => "icon font",
+                    crate::config::IconMode::Symbols => "plain symbols",
+                };
+                let shown = if self.config.icon_font {
+                    "logos shown"
+                } else {
+                    "symbols shown"
+                };
+                format!("{mode} · {shown}")
+            }
+        }
+    }
+
+    /// Moves a LOOK row to its next value and saves it.
+    fn cycle_look(&mut self, row: LookRow, outcome: &mut ClientShellInput) {
+        use crate::config::ConfigEdit;
+        match row {
+            LookRow::Accent => {
+                let next = (accent_index(&self.config.palette) + 1) % ACCENTS.len();
+                self.save_settings_edit(ConfigEdit::Accent(ACCENTS[next].1), outcome);
+            }
+            LookRow::Sidebar => {
+                let next =
+                    (sidebar_width_index(self.config.sidebar_width) + 1) % SIDEBAR_WIDTHS.len();
+                self.save_settings_edit(ConfigEdit::SidebarWidth(SIDEBAR_WIDTHS[next].1), outcome);
+            }
+            LookRow::RightPanel => {
+                self.save_settings_edit(ConfigEdit::RightPanel(!self.config.right_panel), outcome);
+            }
+            LookRow::Fuel => {
+                let next = match self.config.orcha.fuel {
+                    crate::config::FuelPlacement::Panel => crate::config::FuelPlacement::StatusBar,
+                    crate::config::FuelPlacement::StatusBar => crate::config::FuelPlacement::Panel,
+                };
+                self.save_settings_edit(ConfigEdit::Fuel(next), outcome);
+            }
+            LookRow::Panes => {
+                self.save_settings_edit(
+                    ConfigEdit::PanePaper(!self.config.orcha.pane_paper),
+                    outcome,
+                );
+            }
+            LookRow::Side => {
+                let next = match self.config.orcha.sidebar_side {
+                    crate::config::SidebarSide::Left => crate::config::SidebarSide::Right,
+                    crate::config::SidebarSide::Right => crate::config::SidebarSide::Left,
+                };
+                self.save_settings_edit(ConfigEdit::SidebarSide(next), outcome);
+                self.invalidate_pane_surface();
+                outcome.resize = true;
+            }
+            LookRow::Process => {
+                let next = match self.config.orcha.process {
+                    crate::config::ProcessPlacement::Sidebar => {
+                        crate::config::ProcessPlacement::Panel
+                    }
+                    crate::config::ProcessPlacement::Panel => crate::config::ProcessPlacement::Off,
+                    crate::config::ProcessPlacement::Off => {
+                        crate::config::ProcessPlacement::Sidebar
+                    }
+                };
+                self.save_settings_edit(ConfigEdit::Process(next), outcome);
+            }
+            LookRow::Logos => {
+                let next = match self.config.orcha.icons {
+                    crate::config::IconMode::Auto => crate::config::IconMode::Font,
+                    crate::config::IconMode::Font => crate::config::IconMode::Symbols,
+                    crate::config::IconMode::Symbols => crate::config::IconMode::Auto,
+                };
+                self.save_settings_edit(ConfigEdit::Icons(next), outcome);
+            }
         }
     }
 

@@ -1,0 +1,185 @@
+name: orcha release
+
+# Push a tag orcha-X.Y.Z (matching ORCHA_VERSION in src/orcha_app.rs) to
+# build every orcha package and publish them together. The release stays a
+# draft until all packages are attached, so "latest" never points at a
+# release without the Windows zip or a Mac build.
+
+on:
+  push:
+    tags:
+      - "orcha-*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: existing tag to (re)build, e.g. orcha-1.0.0
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  RUST_TOOLCHAIN_VERSION: 1.96.1
+  LIBGHOSTTY_VT_OPTIMIZE: ReleaseSafe
+  LIBGHOSTTY_VT_SIMD: "false"
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+
+      - name: Tag matches ORCHA_VERSION and has release notes
+        id: version
+        run: |
+          version="$(sed -n 's/^.*const ORCHA_VERSION: &str = "\([0-9][0-9.]*\)";.*$/\1/p' src/orcha_app.rs)"
+          if [ "orcha-$version" != "$TAG" ]; then
+            echo "error: tag $TAG does not match ORCHA_VERSION $version" >&2
+            exit 1
+          fi
+          if [ ! -s "docs/orcha/releases/$version.md" ]; then
+            echo "error: docs/orcha/releases/$version.md is missing" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build-macos:
+    needs: check-version
+    runs-on: macos-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            name: orcha-macos-arm64
+          - target: x86_64-apple-darwin
+            name: orcha-macos-x86_64
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+          targets: ${{ matrix.target }}
+
+      - name: Install Zig
+        uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
+        with:
+          version: 0.16.0
+
+      - name: Install macOS build tools
+        run: brew install cmake ninja
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package
+        run: |
+          cp target/${{ matrix.target }}/release/herdr ${{ matrix.name }}
+          # ad-hoc signature: Apple Silicon refuses unsigned binaries
+          codesign --force --sign - ${{ matrix.name }}
+          file ${{ matrix.name }}
+
+      - name: Upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+          retention-days: 7
+
+  build-windows:
+    needs: check-version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install Zig
+        uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
+        with:
+          version: 0.16.0
+
+      - name: Build
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $package = Join-Path $env:RUNNER_TEMP "Microsoft.Windows.Console.ConPTY.nupkg"
+          $stage = Join-Path $env:RUNNER_TEMP "orcha-windows-x86_64"
+          .\scripts\package_windows_conpty.ps1 `
+            -HerdrExe target\x86_64-pc-windows-msvc\release\herdr.exe `
+            -PackagePath $package `
+            -StageDir $stage `
+            -OutputPath orcha-windows-x86_64.zip
+
+      - name: Upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: orcha-windows-x86_64.zip
+          path: orcha-windows-x86_64.zip
+          retention-days: 7
+
+  publish:
+    needs: [check-version, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+
+      - name: Download packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: packages
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: packages
+        run: |
+          ls -la
+          for asset in orcha-macos-arm64 orcha-macos-x86_64 orcha-windows-x86_64.zip; do
+            test -s "$asset" || { echo "error: $asset is missing" >&2; exit 1; }
+          done
+          sha256sum orcha-macos-arm64 orcha-macos-x86_64 orcha-windows-x86_64.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Draft, attach everything, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check-version.outputs.version }}
+        run: |
+          notes="docs/orcha/releases/$VERSION.md"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=true --notes-file "$notes"
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft \
+              --title "orcha $VERSION$(grep -q "beta" "$notes" && echo " (beta)")" --notes-file "$notes" --verify-tag
+          fi
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            packages/orcha-macos-arm64 packages/orcha-macos-x86_64 \
+            packages/orcha-windows-x86_64.zip packages/SHA256SUMS.txt
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

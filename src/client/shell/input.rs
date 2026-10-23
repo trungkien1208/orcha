@@ -723,6 +723,7 @@ impl ClientShellState {
                         KeyCode::Char('u') => self.open_accounts_overlay(),
                         KeyCode::Char('o') => self.open_handoff_popup(),
                         KeyCode::Char('!') => self.jump_to_needs_you(outcome),
+                        KeyCode::Char(':') => self.open_palette(),
                         _ => {}
                     }
                 }

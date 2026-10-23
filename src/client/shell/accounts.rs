@@ -1,49 +1,21 @@
 //! orcha: agent accounts and their fuel (plan limits), for the FUEL gauges
 //! and the accounts popup (docs/orcha/SPEC.md §3.2).
 //!
-//! The data comes from `[orcha] accounts_command`, which prints JSON. It runs
-//! on a background thread at most once a minute (or when the focused pane
-//! changes, since "current" is that pane's account); rendering only reads the
-//! last result.
+//! The data comes from orcha itself (`crate::orcha_accounts`), or from
+//! `[orcha] accounts_command` when one is set (it prints the same JSON). It
+//! runs on a background thread at most once a minute (or when the focused
+//! pane changes, since "current" is that pane's account); rendering only
+//! reads the last result.
 
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
-use serde::Deserialize;
-
 const REFRESH: Duration = Duration::from_secs(60);
 /// Clicking through panes refreshes once they settle, not on every click.
 const SETTLE: Duration = Duration::from_millis(800);
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub(super) struct FuelWindow {
-    pub key: String,
-    /// "5H", "WEEK", "MONTH".
-    pub label: String,
-    /// Percent left.
-    pub left: u8,
-    pub reset: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub(super) struct Account {
-    pub id: String,
-    /// "claude", "codex", "cursor".
-    pub kind: String,
-    pub label: String,
-    pub email: Option<String>,
-    /// The account the focused agent runs on.
-    #[serde(default)]
-    pub current: bool,
-    pub error: Option<String>,
-    #[serde(default)]
-    pub windows: Vec<FuelWindow>,
-    /// There is a sign-in (its access token may have expired: the agent
-    /// refreshes it). Missing from older commands.
-    #[serde(default)]
-    pub signed_in: Option<bool>,
-}
+pub(super) use crate::orcha_accounts::{Account, FuelWindow};
 
 impl Account {
     /// Percent left of the window that runs out first.
@@ -89,6 +61,8 @@ pub(super) struct AccountsPoller {
     data: Option<Vec<Account>>,
     pending: Option<Receiver<Option<Vec<Account>>>>,
     next_refresh: Option<Instant>,
+    /// The next read asks every account again, past the cache.
+    fresh: bool,
 }
 
 /// A shell running an orcha command against this session's API socket.
@@ -110,7 +84,10 @@ pub(super) fn expand_home(command: &str) -> String {
     crate::platform::expand_orcha_home_command(command)
 }
 
-fn read_accounts(command: &str, pane: Option<&str>) -> Option<Vec<Account>> {
+fn read_accounts(command: &str, pane: Option<&str>, fresh: bool) -> Option<Vec<Account>> {
+    if command.trim().is_empty() {
+        return Some(crate::orcha_accounts::accounts_with_fuel(pane, fresh));
+    }
     let mut cmd = orcha_command(command);
     if let Some(pane) = pane {
         cmd.env("HERDR_ACTIVE_PANE_ID", pane);
@@ -149,6 +126,14 @@ impl AccountsPoller {
         self.next_refresh = None;
     }
 
+    /// REFRESH: ask every account now, past the cache.
+    pub(super) fn refresh_now(&mut self) {
+        self.fresh = true;
+        // a read under way may hold older numbers
+        self.pending = None;
+        self.next_refresh = None;
+    }
+
     /// A switch shows at once: `id` is the current account now, the real
     /// data follows once the switch had time to land.
     pub(super) fn mark_current(&mut self, id: &str, now: Instant) {
@@ -180,9 +165,6 @@ impl AccountsPoller {
                 Err(TryRecvError::Empty) => {}
             }
         }
-        if command.trim().is_empty() {
-            return changed;
-        }
         let same = |(c, p): &(String, Option<String>)| c == command && p.as_deref() == pane;
         let key = || (command.to_owned(), pane.map(str::to_owned));
         if self.key.as_ref().is_some_and(|known| !same(known)) {
@@ -195,9 +177,10 @@ impl AccountsPoller {
         if due && self.pending.is_none() {
             self.key = Some(key());
             let (command, pane) = (command.to_owned(), pane.map(str::to_owned));
+            let fresh = std::mem::take(&mut self.fresh);
             let (tx, rx) = mpsc::channel();
             let spawned = crate::thread_spawn::spawn_named("orcha-accounts", move || {
-                let _ = tx.send(read_accounts(&command, pane.as_deref()));
+                let _ = tx.send(read_accounts(&command, pane.as_deref(), fresh));
             });
             if spawned.is_ok() {
                 self.pending = Some(rx);

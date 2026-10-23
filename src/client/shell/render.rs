@@ -297,7 +297,7 @@ pub(super) fn render_shell(
                     &mut hits,
                 );
             }
-        } else if state.sidebar_collapsed {
+        } else if state.sidebar_collapsed && !config.sidebar_tree {
             render_collapsed_sidebar(
                 buffer,
                 layout.sidebar,
@@ -309,12 +309,18 @@ pub(super) fn render_shell(
                 &mut hits,
             );
         } else if config.sidebar_tree {
+            let process_here = match config.orcha.process {
+                crate::config::ProcessPlacement::Sidebar => true,
+                crate::config::ProcessPlacement::Panel => layout.right_panel.width == 0,
+                crate::config::ProcessPlacement::Off => false,
+            };
             super::sidebar_tree::render_sidebar_tree(
                 buffer,
                 layout.sidebar,
                 snapshot,
                 config,
                 &mut state,
+                process_here,
                 &mut hits,
             );
         } else {
@@ -363,9 +369,35 @@ pub(super) fn render_shell(
         );
     }
     if layout.right_panel.width > 0 {
+        // PROCESS at the panel's foot when it lives there
+        let mut panel = layout.right_panel;
+        if config.sidebar_tree && config.orcha.process == crate::config::ProcessPlacement::Panel {
+            let t = super::brutal::Brutal::new(&config.palette);
+            let folded = state.orcha_ui.process_folded;
+            let view = super::sidebar_tree::process_view(snapshot, folded);
+            let height =
+                super::sidebar_tree::process_height(&view, folded, panel.height.saturating_sub(12));
+            let rect = Rect::new(
+                panel.x,
+                panel.bottom().saturating_sub(height),
+                panel.width,
+                height,
+            );
+            buffer.set_style(rect, Style::default().bg(t.bg));
+            super::sidebar_tree::draw_process_area(
+                buffer,
+                rect,
+                &view,
+                state.orcha_ui.process_frame,
+                config,
+                &t,
+                &mut hits,
+            );
+            panel.height = panel.height.saturating_sub(height + 1);
+        }
         super::git_panel::render_git_panel(
             buffer,
-            layout.right_panel,
+            panel,
             state.git_panel,
             state.fuel,
             config,

@@ -2,6 +2,23 @@ use super::*;
 
 impl ClientContextMenuOverlay {
     pub(super) fn items(&self) -> Vec<ClientContextMenuItem> {
+        let mut items = self.base_items();
+        // orcha: projects take an icon, right after Rename
+        if crate::orcha_app::is_orcha()
+            && matches!(self.target, ClientContextMenuTarget::Workspace { .. })
+        {
+            items.insert(
+                1.min(items.len()),
+                ClientContextMenuItem {
+                    label: "Set icon…",
+                    action: ClientContextMenuAction::SetIcon,
+                },
+            );
+        }
+        items
+    }
+
+    fn base_items(&self) -> Vec<ClientContextMenuItem> {
         use ClientContextMenuAction as Action;
 
         let item = |label, action| ClientContextMenuItem { label, action };
@@ -229,6 +246,9 @@ impl ClientShellState {
         use crate::input::KeybindAction;
 
         match action {
+            ClientContextMenuAction::SetIcon => {
+                self.open_project_icon_picker(Some(workspace_id));
+            }
             ClientContextMenuAction::Rename => {
                 let label = self
                     .snapshot

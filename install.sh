@@ -1,16 +1,21 @@
 #!/bin/sh
-# orcha in one line (macOS, Apple Silicon):
+# orcha in one line (macOS, Apple Silicon or Intel):
 #   curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.sh | sh
 # Installs the orcha app to ~/.local/bin/orcha and its extras (fuel and
 # account scripts, hand-off, theme, logo font) to ~/.orcha. No questions.
 # Run it again to update.
 set -e
 
-if [ "$(uname)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then
-  echo "orcha's ready-made build needs a Mac with Apple Silicon."
+if [ "$(uname)" != Darwin ]; then
+  echo "orcha's ready-made build is for macOS (and Windows: see install.ps1)."
   echo "Other machines: build it from source, see https://github.com/trungkien1208/orcha#build-from-source"
   exit 1
 fi
+case "$(uname -m)" in
+  arm64) ASSET=orcha-macos-arm64 ;;
+  x86_64) ASSET=orcha-macos-x86_64 ;;
+  *) echo "orcha has no ready-made build for $(uname -m) yet."; exit 1 ;;
+esac
 command -v git >/dev/null 2>&1 || { echo "orcha needs git first: xcode-select --install"; exit 1; }
 
 BIN="$HOME/.local/bin"
@@ -21,9 +26,9 @@ TAG=$(curl -fsSL --connect-timeout 5 --max-time 15 \
   https://api.github.com/repos/trungkien1208/orcha/releases/latest 2>/dev/null \
   | sed -n 's/.*"tag_name": *"\(orcha-[A-Za-z0-9._-]*\)".*/\1/p' | head -n 1)
 if [ -n "$TAG" ]; then
-  URL="https://github.com/trungkien1208/orcha/releases/download/$TAG/orcha-macos-arm64"
+  URL="https://github.com/trungkien1208/orcha/releases/download/$TAG/$ASSET"
 else
-  URL="https://github.com/trungkien1208/orcha/releases/latest/download/orcha-macos-arm64"
+  URL="https://github.com/trungkien1208/orcha/releases/latest/download/$ASSET"
 fi
 
 echo "🐋🍵 orcha"

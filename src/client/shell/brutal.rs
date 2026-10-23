@@ -73,6 +73,46 @@ fn rgb(color: Color) -> Option<(u8, u8, u8)> {
     }
 }
 
+/// WCAG relative luminance of an sRGB color.
+fn luminance((r, g, b): (u8, u8, u8)) -> f64 {
+    let channel = |value: u8| {
+        let c = f64::from(value) / 255.0;
+        if c <= 0.039_28 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+}
+
+fn contrast(a: (u8, u8, u8), b: (u8, u8, u8)) -> f64 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// `fg` darkened (on a light `bg`) until it reaches `ratio`; unchanged on
+/// a dark page or when it reads already.
+fn readable(fg: Color, bg: Color, ratio: f64) -> Color {
+    let (Some(fg_rgb), Some(bg_rgb)) = (rgb(fg), rgb(bg)) else {
+        return fg;
+    };
+    if !is_light(bg) || contrast(fg_rgb, bg_rgb) >= ratio {
+        return fg;
+    }
+    let (r, g, b) = fg_rgb;
+    // keep the hue: scale toward black in small steps
+    for step in 1..=20u16 {
+        let keep = 100 - step * 5;
+        let scale = |value: u8| (u16::from(value) * keep / 100) as u8;
+        let darker = (scale(r), scale(g), scale(b));
+        if contrast(darker, bg_rgb) >= ratio {
+            return Color::Rgb(darker.0, darker.1, darker.2);
+        }
+    }
+    Color::Rgb(17, 17, 17)
+}
+
 pub(super) fn is_light(color: Color) -> bool {
     rgb(color).is_some_and(|(r, g, b)| {
         u32::from(r) * 299 + u32::from(g) * 587 + u32::from(b) * 114 > 128_000
@@ -138,6 +178,18 @@ impl Brutal {
         } else {
             self.card
         }
+    }
+
+    /// `color` as text on `on`: on a light fill the bright state and
+    /// agent colors darken until they read (WCAG 4.5:1). Chips keep the
+    /// bright fill; only letters on paper change.
+    pub(super) fn text(&self, color: Color, on: Color) -> Color {
+        readable(color, on, 4.5)
+    }
+
+    /// `color` for thin marks on `on` (gauge segments, rails, bars): 3:1.
+    pub(super) fn mark(&self, color: Color, on: Color) -> Color {
+        readable(color, on, 3.0)
     }
 
     /// A state's color: yellow working, green done, red needs you.
@@ -434,17 +486,37 @@ pub(crate) fn host_is_ghostty() -> bool {
     })
 }
 
-pub(super) fn icon_font_installed() -> bool {
-    if cfg!(test) || !host_is_ghostty() {
+/// Terminals that find a glyph in any installed font: Ghostty maps the
+/// codepoints itself, WezTerm and iTerm2 fall back to system fonts.
+fn host_draws_icon_font() -> bool {
+    host_is_ghostty()
+        || std::env::var("TERM_PROGRAM").is_ok_and(|value| {
+            value.eq_ignore_ascii_case("wezterm") || value.eq_ignore_ascii_case("iTerm.app")
+        })
+}
+
+/// The agent logos come from the Agent Icons font (`[orcha] icons`).
+pub(super) fn icon_font_installed(mode: crate::config::IconMode) -> bool {
+    use crate::config::IconMode;
+    if cfg!(test) {
         return false;
     }
-    let Some(home) = std::env::var_os("HOME") else {
+    match mode {
+        IconMode::Symbols => false,
+        IconMode::Font => true,
+        IconMode::Auto => host_draws_icon_font() && icon_font_file(),
+    }
+}
+
+/// The font is in a per-user fonts folder (macOS, Linux, Windows).
+fn icon_font_file() -> bool {
+    let Some(home) = crate::platform::user_home_dir() else {
         return false;
     };
-    let home = std::path::Path::new(&home);
     [
         "Library/Fonts/AgentIcons.ttf",
         ".local/share/fonts/AgentIcons.ttf",
+        "AppData/Local/Microsoft/Windows/Fonts/AgentIcons.ttf",
     ]
     .iter()
     .any(|path| home.join(path).exists())
@@ -505,6 +577,22 @@ mod tests {
         assert_eq!(model_label("claude-haiku-4-5-20251001"), "HAIKU 4.5");
         assert_eq!(model_label("gpt-6-luna"), "GPT-6 LUNA");
         assert_eq!(model_label("gpt-5"), "GPT-5");
+    }
+
+    #[test]
+    fn state_colors_read_on_light_paper_and_stay_bright_on_dark() {
+        let light = Brutal::new(&Palette::brutal());
+        for color in [light.yellow, light.green, light.blue, light.red, light.pink] {
+            let text = light.text(color, light.bg);
+            let (Some(fg), Some(bg)) = (rgb(text), rgb(light.bg)) else {
+                panic!("rgb colors expected");
+            };
+            assert!(contrast(fg, bg) >= 4.5, "{color:?} became {text:?}");
+        }
+        let dark = Brutal::new(&Palette::brutal_dark());
+        assert_eq!(dark.text(dark.yellow, dark.bg), dark.yellow);
+        // the status bar is dark in both looks: its colors stay as they are
+        assert_eq!(light.text(light.green, light.status_bg), light.green);
     }
 
     #[test]

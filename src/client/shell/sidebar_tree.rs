@@ -441,18 +441,126 @@ fn project_rows_by_workspace<'a>(
     rows_by_workspace
 }
 
+/// What PROCESS shows: up to `MAX_TRAINS` running agents with their
+/// projects, and how many run and wait in all.
+pub(super) struct ProcessView<'a> {
+    trains: [Option<(&'a ClientShellAgent, &'a str)>; MAX_TRAINS],
+    visible: usize,
+    total: usize,
+    blocked: usize,
+}
+
+pub(super) fn process_view(snapshot: &ClientShellSnapshot, folded: bool) -> ProcessView<'_> {
+    let mut view = ProcessView {
+        trains: [None; MAX_TRAINS],
+        visible: 0,
+        total: 0,
+        blocked: 0,
+    };
+    for agent in snapshot.agents.iter().filter(|agent| running(agent)) {
+        view.blocked += usize::from(agent.agent_status == AgentStatus::Blocked);
+        if !folded && view.total < MAX_TRAINS {
+            let project = snapshot
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.workspace_id == agent.workspace_id)
+                .map(|workspace| workspace.label.as_str())
+                .unwrap_or("");
+            view.trains[view.total] = Some((agent, project));
+        }
+        view.total += 1;
+    }
+    view.visible = view.total.min(MAX_TRAINS);
+    view
+}
+
+/// Rows PROCESS takes: one quiet row when idle or folded, else the card.
+pub(super) fn process_height(view: &ProcessView<'_>, folded: bool, max: u16) -> u16 {
+    if view.visible == 0 || folded {
+        1
+    } else {
+        (4 + view.visible as u16 * TRAIN_ROWS).min(max).max(1)
+    }
+}
+
+/// Draws PROCESS into `rect`: the card when it fits, else a one-row
+/// summary that opens it.
+pub(super) fn draw_process_area(
+    buffer: &mut Buffer,
+    rect: Rect,
+    view: &ProcessView<'_>,
+    frame: u64,
+    config: &ClientShellConfig,
+    t: &Brutal,
+    hits: &mut ShellHitMap,
+) {
+    if rect.height >= 5 {
+        hits.orcha.process = rect;
+        hits.orcha.process_toggle =
+            Rect::new(rect.x + 1, rect.y + 1, rect.width.saturating_sub(2), 1);
+        render_process(
+            buffer,
+            rect,
+            &view.trains[..view.visible],
+            view.total,
+            frame,
+            config,
+            t,
+            hits,
+        );
+        return;
+    }
+    if rect.height == 0 {
+        return;
+    }
+    let (total, blocked) = (view.total, view.blocked);
+    let note = if total == 0 {
+        "No agents running".to_owned()
+    } else if blocked == 0 {
+        format!("▸ {total} running")
+    } else if blocked == total {
+        format!("▸ {blocked} need you")
+    } else {
+        format!("▸ {} running · {blocked} needs you", total - blocked)
+    };
+    if total > 0 {
+        hits.orcha.process_toggle = rect;
+    }
+    put_text(
+        buffer,
+        rect.x + 2,
+        rect.y,
+        rect.width.saturating_sub(3),
+        &note,
+        Style::default()
+            .fg(if blocked > 0 {
+                t.text(t.red, t.bg)
+            } else {
+                t.muted
+            })
+            .bg(t.bg),
+    );
+}
+
+/// `process_here`: PROCESS sits at the sidebar's foot (not in the right
+/// panel, not turned off).
 pub(crate) fn render_sidebar_tree(
     buffer: &mut Buffer,
     area: Rect,
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     state: &mut ShellRenderState<'_>,
+    process_here: bool,
     hits: &mut ShellHitMap,
 ) {
     let t = Brutal::new(&config.palette);
     buffer.set_style(area, Style::default().bg(t.bg).fg(t.ink));
+    // the divider faces the panes
+    let right_side = config.orcha.sidebar_side == crate::config::SidebarSide::Right;
     hits.sidebar_divider = if area.is_empty() {
         Rect::default()
+    } else if right_side {
+        Rect::new(area.x, area.y, 1, area.height)
     } else {
         Rect::new(area.right().saturating_sub(1), area.y, 1, area.height)
     };
@@ -468,78 +576,28 @@ pub(crate) fn render_sidebar_tree(
 
     render_buttons(buffer, x, area.y, width, snapshot, config, &t, hits);
 
-    // PROCESS at the foot: running agents only
-    let mut trains = [None; MAX_TRAINS];
-    let mut total_running = 0;
-    let mut blocked = 0;
-    for agent in snapshot.agents.iter().filter(|agent| running(agent)) {
-        blocked += usize::from(agent.agent_status == AgentStatus::Blocked);
-        if !state.orcha_ui.process_folded && total_running < MAX_TRAINS {
-            let project = snapshot
-                .workspaces
-                .iter()
-                .find(|workspace| workspace.workspace_id == agent.workspace_id)
-                .map(|workspace| workspace.label.as_str())
-                .unwrap_or("");
-            trains[total_running] = Some((agent, project));
-        }
-        total_running += 1;
-    }
-    let visible_trains = total_running.min(MAX_TRAINS);
-    // An idle sidebar needs only one quiet footer row.
-    let process_height = if visible_trains == 0 || state.orcha_ui.process_folded {
-        1
-    } else {
-        (4 + visible_trains as u16 * TRAIN_ROWS).min(area.height.saturating_sub(10))
-    };
-    let process = Rect::new(
-        x,
-        area.bottom().saturating_sub(process_height),
-        width,
-        process_height,
-    );
-    if process_height >= 5 {
-        hits.orcha.process = process;
-        hits.orcha.process_toggle = Rect::new(x + 1, process.y + 1, width.saturating_sub(2), 1);
-        render_process(
+    // PROCESS at the foot (unless it lives in the right panel or is off)
+    let process = if process_here {
+        let view = process_view(snapshot, state.orcha_ui.process_folded);
+        let height = process_height(
+            &view,
+            state.orcha_ui.process_folded,
+            area.height.saturating_sub(10),
+        );
+        let rect = Rect::new(x, area.bottom().saturating_sub(height), width, height);
+        draw_process_area(
             buffer,
-            process,
-            &trains[..visible_trains],
-            total_running,
+            rect,
+            &view,
             state.orcha_ui.process_frame,
             config,
             &t,
             hits,
         );
-    }
-
-    if process_height < 5 {
-        let note = if total_running == 0 {
-            "No agents running".to_owned()
-        } else if blocked == 0 {
-            format!("▸ {total_running} running")
-        } else if blocked == total_running {
-            format!("▸ {blocked} need you")
-        } else {
-            format!(
-                "▸ {} running · {blocked} needs you",
-                total_running - blocked
-            )
-        };
-        if total_running > 0 {
-            hits.orcha.process_toggle = process;
-        }
-        put_text(
-            buffer,
-            x + 2,
-            process.y,
-            width.saturating_sub(3),
-            &note,
-            Style::default()
-                .fg(if blocked > 0 { t.red } else { t.muted })
-                .bg(t.bg),
-        );
-    }
+        rect
+    } else {
+        Rect::new(x, area.bottom(), width, 0)
+    };
 
     // One continuous project list. Details belong below the selected name.
     let label_y = area.y + 2;
@@ -554,15 +612,7 @@ pub(crate) fn render_sidebar_tree(
             .bg(t.bg)
             .add_modifier(Modifier::BOLD),
     );
-    hits.sidebar_toggle = Rect::new(x + width.saturating_sub(2), label_y, 1, 1);
-    put_text(
-        buffer,
-        hits.sidebar_toggle.x,
-        label_y,
-        1,
-        "«",
-        Style::default().fg(t.muted).bg(t.bg),
-    );
+    // orcha keeps its sidebar open: no fold button
 
     let entries = super::sidebar::workspace_entries(snapshot, state.collapsed_groups);
     let rows_by_workspace = project_rows_by_workspace(snapshot);
@@ -643,10 +693,16 @@ pub(crate) fn render_sidebar_tree(
         } else {
             height
         };
+        let icon = state
+            .orcha_ui
+            .project_icons
+            .get(super::orcha_icons::key(workspace))
+            .map(String::as_str);
         render_project(
             buffer,
             Rect::new(x, y, row_width, content),
             workspace,
+            icon,
             project,
             *expanded,
             config.icon_font,
@@ -689,6 +745,7 @@ fn render_project(
     buffer: &mut Buffer,
     rect: Rect,
     workspace: &ClientShellWorkspace,
+    icon: Option<&str>,
     project: &ProjectRows<'_>,
     expanded: bool,
     icon_font: bool,
@@ -705,7 +762,7 @@ fn render_project(
                 y,
                 1,
                 "▌",
-                Style::default().fg(t.yellow).bg(fill),
+                Style::default().fg(t.mark(t.yellow, fill)).bg(fill),
             );
         }
     }
@@ -758,7 +815,13 @@ fn render_project(
         name_x,
         rect.y,
         name_width,
-        &brutal::clip(&workspace.label, usize::from(name_width)),
+        &brutal::clip(
+            &match icon {
+                Some(icon) => Cow::Owned(format!("{icon} {}", workspace.label)),
+                None => Cow::Borrowed(workspace.label.as_str()),
+            },
+            usize::from(name_width),
+        ),
         if workspace.focused {
             Style::default()
                 .fg(t.ink)
@@ -774,7 +837,9 @@ fn render_project(
         rect.y,
         status_width,
         label,
-        Style::default().fg(project.activity.color(t)).bg(fill),
+        Style::default()
+            .fg(t.text(project.activity.color(t), fill))
+            .bg(fill),
     );
     let mut logo_x = summary_x + status_width + 1;
     for agent in project.logos.iter().flatten().take(logo_count) {
@@ -786,7 +851,9 @@ fn render_project(
             rect.y,
             width,
             logo,
-            Style::default().fg(agent_color(agent, t)).bg(fill),
+            Style::default()
+                .fg(t.mark(agent_color(agent, t), fill))
+                .bg(fill),
         );
         logo_x += width;
     }
@@ -890,7 +957,7 @@ fn render_project(
         buffer.set_style(row, Style::default().bg(row_bg));
         let logo_width = display_width(logo);
         let active = matches!(status, AgentStatus::Working | AgentStatus::Blocked);
-        let icon_style = Style::default().fg(color).bg(row_bg);
+        let icon_style = Style::default().fg(t.mark(color, row_bg)).bg(row_bg);
         put_text(
             buffer,
             row.x,
@@ -937,7 +1004,13 @@ fn render_project(
             Style::default().fg(t.muted).bg(row_bg),
         );
         if !note.is_empty() {
-            put_right_text(buffer, row, y, note, Style::default().fg(t.red).bg(row_bg));
+            put_right_text(
+                buffer,
+                row,
+                y,
+                note,
+                Style::default().fg(t.text(t.red, row_bg)).bg(row_bg),
+            );
         }
         hits.agents.push((row, pane_id.to_owned()));
         y += 1;

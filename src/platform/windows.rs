@@ -1317,12 +1317,37 @@ pub(crate) fn orcha_application_support_dir_platform(_home: &std::path::Path) ->
         .unwrap_or_else(std::env::temp_dir)
 }
 
-pub(crate) fn orcha_default_commands_platform() -> (&'static str, &'static str, &'static str) {
-    (
-        "python ",
-        r#""$env:APPDATA\orcha\scripts\limits.py""#,
-        r#""$env:APPDATA\orcha\scripts\handoff.py""#,
-    )
+pub(crate) fn orcha_secret_read(slot: &super::OrchaSecretSlot) -> Option<String> {
+    super::orcha_secret_file_read(slot)
+}
+
+/// Claude reads `.credentials.json` in its config folder on this host;
+/// there is no account attribute to carry over.
+pub(crate) fn orcha_secret_write(
+    slot: &super::OrchaSecretSlot,
+    secret: &str,
+    _account_from: &super::OrchaSecretSlot,
+) -> std::io::Result<()> {
+    super::orcha_secret_file_write(slot, secret)
+}
+
+pub(crate) fn orcha_cursor_token() -> Option<String> {
+    super::orcha_cursor_token_file()
+}
+
+/// Windows does not let one process read another's environment cheaply;
+/// callers fall back to the default sign-in.
+pub(crate) fn orcha_process_env_var(_pid: u32, _name: &str) -> Option<String> {
+    None
+}
+
+/// Symbolic links need extra rights on Windows; an extra account keeps its
+/// own history there instead of sharing `~/.claude`'s.
+pub(crate) fn orcha_link_path(
+    _source: &std::path::Path,
+    _target: &std::path::Path,
+) -> std::io::Result<()> {
+    Ok(())
 }
 
 pub(crate) fn orcha_installed_apps_platform(names: &[&str]) -> Option<Vec<(String, String)>> {

@@ -312,11 +312,6 @@ pub(crate) fn orcha_application_support_dir(home: &std::path::Path) -> std::path
     orcha_application_support_dir_platform(home)
 }
 
-/// Default ORCHA command strings for the host shell and script layout.
-pub(crate) fn orcha_default_commands() -> (&'static str, &'static str, &'static str) {
-    orcha_default_commands_platform()
-}
-
 /// Windows can list installed commands for ORCHA's IDE and Git GUI settings.
 /// Other hosts keep their existing app discovery.
 pub(crate) fn orcha_installed_apps(names: &[&str]) -> Option<Vec<(String, String)>> {
@@ -336,6 +331,108 @@ pub(crate) fn remove_orcha_installation() -> std::io::Result<OrchaUninstallResul
 
 pub(crate) fn orcha_uninstall_intro() -> &'static str {
     orcha_uninstall_intro_platform()
+}
+
+/// Where one Claude sign-in is kept. Claude reads `Folder` (its config
+/// folder; `None` is the default `~/.claude`); orcha keeps a sign-in it
+/// swapped out under `Kept` so that account still works when it returns.
+/// `Service` is a Keychain item named directly (older orcha slot records).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum OrchaSecretSlot {
+    /// `CLAUDE_CONFIG_DIR` exactly as Claude sees it.
+    Folder(Option<String>),
+    /// An orcha account id.
+    Kept(String),
+    /// A Keychain service name (macOS only).
+    Service(String),
+}
+
+const CLAUDE_CREDENTIALS_SERVICE: &str = "Claude Code-credentials";
+
+/// The name Claude gives a config folder's sign-in (its Keychain service on
+/// macOS): the default name, plus the first 8 hex digits of the folder's
+/// SHA-256 for a `CLAUDE_CONFIG_DIR` folder. orcha keys its slot records by
+/// it on every host.
+pub(crate) fn orcha_claude_service(slot: &OrchaSecretSlot) -> String {
+    use sha2::Digest;
+    match slot {
+        OrchaSecretSlot::Folder(None) => CLAUDE_CREDENTIALS_SERVICE.to_owned(),
+        OrchaSecretSlot::Folder(Some(dir)) => {
+            let digest = sha2::Sha256::digest(dir.as_bytes());
+            let hex: String = digest.iter().take(4).map(|b| format!("{b:02x}")).collect();
+            format!("{CLAUDE_CREDENTIALS_SERVICE}-{hex}")
+        }
+        OrchaSecretSlot::Kept(id) => format!("orcha-claude-{id}"),
+        OrchaSecretSlot::Service(name) => name.clone(),
+    }
+}
+
+/// Hosts without a keychain: Claude keeps `.credentials.json` in its config
+/// folder, and orcha keeps its copies in its own config folder.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn orcha_secret_file(slot: &OrchaSecretSlot) -> Option<std::path::PathBuf> {
+    match slot {
+        OrchaSecretSlot::Folder(None) => {
+            Some(user_home_dir()?.join(".claude").join(".credentials.json"))
+        }
+        OrchaSecretSlot::Folder(Some(dir)) => {
+            Some(std::path::Path::new(dir).join(".credentials.json"))
+        }
+        OrchaSecretSlot::Kept(id) => Some(
+            orcha_config_base_dir()?
+                .join("orcha")
+                .join("claude-kept")
+                .join(format!("{id}.json")),
+        ),
+        OrchaSecretSlot::Service(_) => None,
+    }
+}
+
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn orcha_secret_file_read(slot: &OrchaSecretSlot) -> Option<String> {
+    let text = std::fs::read_to_string(orcha_secret_file(slot)?).ok()?;
+    let text = text.trim_end().to_owned();
+    (!text.is_empty()).then_some(text)
+}
+
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn orcha_secret_file_write(slot: &OrchaSecretSlot, secret: &str) -> std::io::Result<()> {
+    let path = orcha_secret_file(slot).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "no file for this sign-in")
+    })?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension("orcha-tmp");
+    std::fs::write(&tmp, secret)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+    }
+    std::fs::rename(tmp, path)
+}
+
+/// The Cursor CLI's access token on hosts that keep it in a file.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn orcha_cursor_token_file() -> Option<String> {
+    let home = user_home_dir()?;
+    let mut candidates = vec![
+        home.join(".config").join("cursor").join("auth.json"),
+        home.join(".cursor").join("auth.json"),
+    ];
+    if let Some(base) = orcha_config_base_dir() {
+        candidates.push(base.join("Cursor").join("auth.json"));
+        candidates.push(base.join("cursor").join("auth.json"));
+    }
+    candidates.iter().find_map(|path| {
+        let text = std::fs::read_to_string(path).ok()?;
+        let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+        value
+            .get("accessToken")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    })
 }
 
 #[derive(Debug)]
@@ -599,10 +696,9 @@ pub use linux::*;
 use linux::{
     expand_orcha_home_command_platform, local_file_uri_path_platform, open_orcha_target_platform,
     orcha_application_support_dir_platform, orcha_config_base_dir_platform,
-    orcha_config_tool_candidates_platform, orcha_default_commands_platform,
-    orcha_installed_apps_platform, orcha_installer_command_platform,
-    orcha_installer_instruction_platform, orcha_shell_command_platform,
-    orcha_tool_command_platform, orcha_uninstall_intro_platform,
+    orcha_config_tool_candidates_platform, orcha_installed_apps_platform,
+    orcha_installer_command_platform, orcha_installer_instruction_platform,
+    orcha_shell_command_platform, orcha_tool_command_platform, orcha_uninstall_intro_platform,
     remove_orcha_installation_platform, user_home_dir_platform,
 };
 
@@ -614,10 +710,9 @@ pub use macos::*;
 use macos::{
     expand_orcha_home_command_platform, local_file_uri_path_platform, open_orcha_target_platform,
     orcha_application_support_dir_platform, orcha_config_base_dir_platform,
-    orcha_config_tool_candidates_platform, orcha_default_commands_platform,
-    orcha_installed_apps_platform, orcha_installer_command_platform,
-    orcha_installer_instruction_platform, orcha_shell_command_platform,
-    orcha_tool_command_platform, orcha_uninstall_intro_platform,
+    orcha_config_tool_candidates_platform, orcha_installed_apps_platform,
+    orcha_installer_command_platform, orcha_installer_instruction_platform,
+    orcha_shell_command_platform, orcha_tool_command_platform, orcha_uninstall_intro_platform,
     remove_orcha_installation_platform, user_home_dir_platform,
 };
 
@@ -629,10 +724,9 @@ pub use windows::*;
 use windows::{
     expand_orcha_home_command_platform, local_file_uri_path_platform, open_orcha_target_platform,
     orcha_application_support_dir_platform, orcha_config_base_dir_platform,
-    orcha_config_tool_candidates_platform, orcha_default_commands_platform,
-    orcha_installed_apps_platform, orcha_installer_command_platform,
-    orcha_installer_instruction_platform, orcha_shell_command_platform,
-    orcha_tool_command_platform, orcha_uninstall_intro_platform,
+    orcha_config_tool_candidates_platform, orcha_installed_apps_platform,
+    orcha_installer_command_platform, orcha_installer_instruction_platform,
+    orcha_shell_command_platform, orcha_tool_command_platform, orcha_uninstall_intro_platform,
     remove_orcha_installation_platform, user_home_dir_platform,
 };
 
@@ -647,10 +741,9 @@ pub use fallback::*;
 use fallback::{
     expand_orcha_home_command_platform, local_file_uri_path_platform, open_orcha_target_platform,
     orcha_application_support_dir_platform, orcha_config_base_dir_platform,
-    orcha_config_tool_candidates_platform, orcha_default_commands_platform,
-    orcha_installed_apps_platform, orcha_installer_command_platform,
-    orcha_installer_instruction_platform, orcha_shell_command_platform,
-    orcha_tool_command_platform, orcha_uninstall_intro_platform,
+    orcha_config_tool_candidates_platform, orcha_installed_apps_platform,
+    orcha_installer_command_platform, orcha_installer_instruction_platform,
+    orcha_shell_command_platform, orcha_tool_command_platform, orcha_uninstall_intro_platform,
     remove_orcha_installation_platform, user_home_dir_platform,
 };
 

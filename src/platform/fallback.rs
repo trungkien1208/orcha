@@ -237,12 +237,41 @@ pub(crate) fn orcha_application_support_dir_platform(_home: &std::path::Path) ->
     orcha_config_base_dir_platform().unwrap_or_else(std::env::temp_dir)
 }
 
-pub(crate) fn orcha_default_commands_platform() -> (&'static str, &'static str, &'static str) {
-    (
-        "",
-        "~/.config/orcha/scripts/limits.py",
-        "~/.config/orcha/scripts/handoff.py",
-    )
+pub(crate) fn orcha_secret_read(slot: &super::OrchaSecretSlot) -> Option<String> {
+    super::orcha_secret_file_read(slot)
+}
+
+/// Claude reads `.credentials.json` in its config folder on this host;
+/// there is no account attribute to carry over.
+pub(crate) fn orcha_secret_write(
+    slot: &super::OrchaSecretSlot,
+    secret: &str,
+    _account_from: &super::OrchaSecretSlot,
+) -> std::io::Result<()> {
+    super::orcha_secret_file_write(slot, secret)
+}
+
+pub(crate) fn orcha_cursor_token() -> Option<String> {
+    super::orcha_cursor_token_file()
+}
+
+pub(crate) fn orcha_process_env_var(_pid: u32, _name: &str) -> Option<String> {
+    None
+}
+
+pub(crate) fn orcha_link_path(
+    source: &std::path::Path,
+    target: &std::path::Path,
+) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(source, target)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (source, target);
+        Ok(())
+    }
 }
 
 pub(crate) fn pick_project_folder() -> std::io::Result<Option<std::path::PathBuf>> {

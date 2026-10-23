@@ -1196,8 +1196,8 @@ fn client_settings_preview_restore_and_endpoint_integrations_are_owned_by_overla
 
     state.open_settings_overlay();
     state.compose(106, 30).expect("settings overlay");
-    // theme, font, size, ligatures, ide, git, indicators, sound, toasts, then integrations
-    for _ in 0..8 {
+    // theme, look, font, size, ligatures, ide, git, status, sound, toasts, then integrations
+    for _ in 0..9 {
         let next = state.handle_input_bytes(b"\t");
         assert!(next.actions.is_empty());
     }
@@ -1322,6 +1322,7 @@ fn settings_font_size_lists_point_sizes() {
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     state.open_settings_overlay();
+    state.handle_input_bytes(b"\t");
     state.handle_input_bytes(b"\t");
     state.handle_input_bytes(b"\t");
     assert!(matches!(

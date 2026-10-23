@@ -522,6 +522,11 @@ fn unknown_config_key_diagnostics(
             }
             path
         })
+        // [orcha] is the orcha client's own table: a newer client adds keys
+        // an older running server does not know yet, which is not an error
+        .filter(
+            |path| !matches!(path.first(), Some(ConfigKeyPathSegment::Key(key)) if key == "orcha"),
+        )
         .collect();
     paths.sort();
     paths.dedup();
@@ -975,6 +980,9 @@ mouse_capture = false
 mouse_captur = true
 "foo.bar" = true
 "foo.?.bar" = false
+
+[orcha]
+a_key_from_a_newer_orcha = true
 
 [ui.toast]
 enabled = true

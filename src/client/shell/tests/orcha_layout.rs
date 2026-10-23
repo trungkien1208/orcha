@@ -163,7 +163,7 @@ fn new_button_offers_current_project_or_another_folder() {
         }) if project == "client-shell"
     ));
     current.compose(140, 40).expect("new workspace choices");
-    assert_eq!(current.hits.orcha.popup.actions.len(), 3);
+    assert_eq!(current.hits.orcha.popup.actions.len(), 4);
     let create = current.hits.orcha.popup.actions[0].0;
     current.handle_orcha_popup_mouse(
         MouseEvent {
@@ -707,7 +707,14 @@ fn orcha_preview() {
     config.right_panel = true;
     config.sidebar_tree = true;
     let mut state = ClientShellState::new(config);
-    state.sidebar_width = 40;
+    state.sidebar_width = std::env::var("ORCHA_PREVIEW_SIDEBAR")
+        .ok()
+        .and_then(|width| width.parse().ok())
+        .unwrap_or(40);
+    state.sidebar_collapsed = std::env::var("ORCHA_PREVIEW_COLLAPSED").is_ok();
+    if std::env::var("ORCHA_PREVIEW_RIGHT").is_ok() {
+        state.config.orcha.sidebar_side = crate::config::SidebarSide::Right;
+    }
     state.set_snapshot(Box::new(projected));
     let size = state.layout(cols, rows).pane_surface;
     state.set_pane_surface(preview_surface(size));
@@ -781,6 +788,46 @@ fn orcha_preview() {
             selected: 0,
             release: demo_release(),
         });
+    }
+    if std::env::var("ORCHA_PREVIEW_ICONS").is_ok() {
+        let keys: Vec<String> = state
+            .snapshot
+            .as_deref()
+            .map(|snapshot| {
+                snapshot
+                    .workspaces
+                    .iter()
+                    .map(|workspace| crate::client::shell::orcha_icons::key(workspace).to_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (key, icon) in keys.into_iter().zip(["🍵", "💳", "🌊", "📝", "🍱", "🏮"]) {
+            state.orcha_ui.project_icons.insert(key, icon.to_owned());
+        }
+        state.open_project_icon_picker(None);
+    }
+    if let Ok(section) = std::env::var("ORCHA_PREVIEW_SETTINGS") {
+        use crate::client::shell::ClientSettingsSection;
+        state.open_settings_overlay();
+        let section = ClientSettingsSection::ALL
+            .iter()
+            .copied()
+            .find(|known| known.label() == section)
+            .unwrap_or(ClientSettingsSection::Look);
+        let mut outcome = ClientShellInput::default();
+        state.select_settings_section(section, &mut outcome);
+    }
+    if std::env::var("ORCHA_PREVIEW_LOOK").is_ok() {
+        state.open_settings_overlay();
+        let mut outcome = ClientShellInput::default();
+        state.select_settings_section(
+            crate::client::shell::ClientSettingsSection::Look,
+            &mut outcome,
+        );
+    }
+    if let Ok(query) = std::env::var("ORCHA_PREVIEW_PALETTE") {
+        state.orcha_ui.popup =
+            Some(crate::client::shell::orcha_popup::OrchaPopup::Palette { selected: 0, query });
     }
     if std::env::var("ORCHA_PREVIEW_WHATS_NEW").is_ok() {
         state.orcha_ui.popup = Some(crate::client::shell::orcha_popup::OrchaPopup::WhatsNew {

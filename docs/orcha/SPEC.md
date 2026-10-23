@@ -227,7 +227,7 @@ FUEL placement option: right panel (default) or status bar, never both.
 - **Low fuel**: under 10% orcha shows a toast "switch to personal (70% left)?";
   one click switches. When no account has fuel, it offers a hand-off (§3.4).
 
-### 3.4 Hand off a conversation to another agent — ⬜
+### 3.4 Hand off a conversation to another agent — ✅ (native, `src/orcha_handoff.rs`)
 
 For when every account of one agent is out of fuel (Claude → Codex …).
 
@@ -238,7 +238,7 @@ For when every account of one agent is out of fuel (Claude → Codex …).
 - Two modes: **full** (the whole history) and **summary** (the new agent
   summarizes first, then continues).
 
-### 3.5 Open things — ⬜
+### 3.5 Open things — ✅
 
 - Cmd+click a path in a pane: file → editor (with `:line` when present),
   folder → Finder.
@@ -246,34 +246,34 @@ For when every account of one agent is out of fuel (Claude → Codex …).
 - Which IDE and Git GUI: detected on first use (VS Code, Cursor, Zed, JetBrains;
   Sourcetree, Fork, GitHub Desktop, lazygit), the user picks once.
 
-### 3.6 Resume everything — ⬜
+### 3.6 Resume everything — 🟡 (agents outlive the window; reboot resume through herdr's agent_resume)
 
 Quit or reboot, run `orcha`: every project, tab and pane comes back and each
 agent continues its own conversation (`--resume` with the stored session id
 and account).
 
-### 3.7 Needs-you jump — ⬜
+### 3.7 Needs-you jump — ✅ (prefix `!`, header chip, COMMANDS)
 
 One key jumps to the next agent that needs you, across all projects, in
 order of waiting time.
 
-### 3.8 Train arrives at DONE — ⬜
+### 3.8 Train arrives at DONE — 🟡 (CHANGES has diff, commit and PR buttons)
 
 When an agent finishes, its row shows the change summary (files, +/−) and
 three actions: view diff, commit, open PR.
 
-### 3.9 Smart NEW — ⬜
+### 3.9 Smart NEW — 🟡 (NEW offers a new worktree; agent picker with fuel)
 
 NEW opens a picker: project, agent, model, account (with fuel). Optional:
 create a worktree and branch from a task id (`#42` → `feature/42-<slug>`).
 
-### 3.10 Custom — ⬜
+### 3.10 Custom — 🟡 (style files, settings → look, COMMANDS palette)
 
 - Style files (§1).
 - Keybindings.
 - User commands in MENU ("run tests", "deploy staging"), global or per project.
 
-### 3.11 Standalone app — ⬜
+### 3.11 Standalone app — ✅
 
 - Binary and command `orcha`; config in `~/.config/orcha/`, sessions in
   `~/.config/orcha/sessions/`.

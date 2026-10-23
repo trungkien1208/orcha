@@ -22,6 +22,19 @@ pub(crate) enum OrchaPopup {
         selected: usize,
         pane: Option<String>,
     },
+    /// Pick a project's icon (`key`: its folder).
+    ProjectIcon {
+        selected: usize,
+        key: String,
+        label: String,
+    },
+    /// Confirm taking an account off orcha's list (`selected` 0 removes).
+    RemoveAccount {
+        selected: usize,
+        id: String,
+        label: String,
+        pane: Option<String>,
+    },
     /// Pick a name for a new Claude account, then sign it in.
     AddAccount {
         selected: usize,
@@ -30,7 +43,17 @@ pub(crate) enum OrchaPopup {
         pane: Option<String>,
     },
     /// Continue `pane`'s conversation with another agent.
-    Handoff { selected: usize, pane: String },
+    /// `targets` index `HANDOFF_TARGETS`: the other agents installed.
+    Handoff {
+        selected: usize,
+        pane: String,
+        targets: Vec<usize>,
+    },
+    /// COMMANDS: every action, filtered by `query`; `selected` indexes the
+    /// matches.
+    Palette { selected: usize, query: String },
+    /// ASK EVERY AGENT: one prompt for the agents in `panes`.
+    Broadcast { typed: String, panes: Vec<String> },
     /// Bring in projects from other tools; `chosen` per source.
     Import { selected: usize, chosen: Vec<bool> },
     /// Start an agent on an account in a new tab of `workspace`.
@@ -139,7 +162,12 @@ pub(super) struct PopupHits {
     pub rows: Vec<(Rect, usize)>,
     /// (button, index)
     pub actions: Vec<(Rect, usize)>,
+    /// The footer's extra action on the right (accounts: refresh).
+    pub extra: Rect,
 }
+
+/// NEW WORKSPACE: current project, browse, enter a path, new worktree.
+pub(super) const NEW_WORKSPACE_ROWS: usize = 4;
 
 /// (agent kind, mode, label)
 pub(super) const HANDOFF_TARGETS: [(&str, &str, &str); 6] = [
@@ -286,6 +314,13 @@ pub(super) fn popup_frame(
             extra,
             Style::default().fg(t.muted).bg(t.card),
         );
+        let width = display_width(extra);
+        hits.extra = Rect::new(
+            (inner_x + inner_w.saturating_sub(1)).saturating_sub(width),
+            footer_y,
+            width,
+            1,
+        );
     }
     Some(Frame {
         body: Rect::new(
@@ -328,7 +363,7 @@ pub(super) fn row_box(
                 y,
                 1,
                 "▌",
-                Style::default().fg(t.yellow).bg(fill),
+                Style::default().fg(t.mark(t.yellow, fill)).bg(fill),
             );
         }
     }
@@ -473,9 +508,10 @@ fn render_accounts(
         &[
             ("↵", "continue"),
             ("alt ↵", "summary first"),
+            ("d", "remove"),
             ("esc", "not now"),
         ],
-        "",
+        "↻ refresh (r)",
         t,
         hits,
     )?;
@@ -580,6 +616,79 @@ fn render_accounts(
 }
 
 /// ADD ACCOUNT: a suggested name, or whatever was typed.
+fn render_remove_account(
+    buffer: &mut Buffer,
+    selected: usize,
+    label: &str,
+    t: &Brutal,
+    hits: &mut PopupHits,
+) -> Option<()> {
+    let frame = popup_frame(
+        buffer,
+        64,
+        rows_height(2),
+        "REMOVE ACCOUNT",
+        label,
+        &[("↵", "choose"), ("esc", "back")],
+        "",
+        t,
+        hits,
+    )?;
+    let options = [
+        (
+            "Remove from orcha",
+            "its sign-in and chats stay; add it again any time",
+            "REMOVE",
+        ),
+        ("Keep it", "back to the accounts", "KEEP"),
+    ];
+    let mut y = frame.body.y;
+    for (index, (title, detail, action)) in options.iter().enumerate() {
+        let rect = Rect::new(frame.body.x, y, frame.body.width, ROW);
+        let fill = row_box(buffer, rect, index == 0, index == selected, t);
+        put_text(
+            buffer,
+            rect.x + 2,
+            y,
+            rect.width.saturating_sub(16),
+            title,
+            Style::default()
+                .fg(if index == 0 {
+                    t.text(t.red, fill)
+                } else {
+                    t.ink
+                })
+                .bg(fill)
+                .add_modifier(Modifier::BOLD),
+        );
+        put_text(
+            buffer,
+            rect.x + 2,
+            y + 1,
+            rect.width.saturating_sub(16),
+            detail,
+            Style::default().fg(t.muted).bg(fill),
+        );
+        let button_rect = button(
+            buffer,
+            rect.right() - 1,
+            y,
+            action,
+            if index == selected {
+                ButtonKind::Primary
+            } else {
+                ButtonKind::Plain
+            },
+            fill,
+            t,
+        );
+        hits.actions.push((button_rect, index));
+        hits.rows.push((rect, index));
+        y += ROW + 1;
+    }
+    Some(())
+}
+
 fn render_add_account(
     buffer: &mut Buffer,
     selected: usize,
@@ -935,7 +1044,7 @@ fn render_new_workspace(
     let frame = popup_frame(
         buffer,
         72,
-        rows_height(3),
+        rows_height(NEW_WORKSPACE_ROWS),
         "NEW WORKSPACE",
         "choose where the project starts",
         &[("↵", "choose"), ("↑↓", "move")],
@@ -964,6 +1073,15 @@ fn render_new_workspace(
             "Enter folder path",
             "paste an absolute project folder path".to_owned(),
             "CHOOSE",
+        ),
+        (
+            "New worktree",
+            project
+                .map(|project| {
+                    format!("a branch of {project} in its own folder, for an agent beside it")
+                })
+                .unwrap_or_else(|| "select a git project first".to_owned()),
+            "BRANCH",
         ),
     ];
     let mut y = frame.body.y;
@@ -1012,10 +1130,12 @@ fn render_new_workspace(
     Some(())
 }
 
+#[allow(clippy::too_many_arguments)] // one popup's inputs, like render_open_with
 fn render_handoff(
     buffer: &mut Buffer,
     selected: usize,
     pane: &str,
+    targets: &[usize],
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     t: &Brutal,
@@ -1038,7 +1158,7 @@ fn render_handoff(
     let frame = popup_frame(
         buffer,
         72,
-        rows_height(HANDOFF_TARGETS.len()),
+        rows_height(targets.len()),
         "HAND OFF",
         &context,
         &[("↵", "continue there"), ("↑↓", "choose")],
@@ -1047,7 +1167,10 @@ fn render_handoff(
         hits,
     )?;
     let mut y = frame.body.y;
-    for (index, (kind, mode, label)) in HANDOFF_TARGETS.iter().enumerate() {
+    let rows = targets
+        .iter()
+        .filter_map(|target| HANDOFF_TARGETS.get(*target));
+    for (index, (kind, mode, label)) in rows.enumerate() {
         if y + ROW > frame.body.bottom() {
             break;
         }
@@ -1133,7 +1256,7 @@ fn render_import(
         76,
         rows_height(sources.len()) + 2,
         "IMPORT PROJECTS",
-        "found on this Mac · each becomes a project in the sidebar",
+        "not open yet · each becomes a project in the sidebar",
         &[("↵", "import"), ("space", "check"), ("esc", "not now")],
         "",
         t,
@@ -1145,7 +1268,7 @@ fn render_import(
             frame.body.x + 2,
             frame.body.y,
             frame.body.width.saturating_sub(4),
-            "nothing to import: no Orca, VS Code, Cursor or JetBrains projects found",
+            "nothing new to import: every Orca, VS Code, Cursor and JetBrains project is open",
             Style::default().fg(t.muted).bg(t.bg),
         );
         return Some(());
@@ -1237,7 +1360,7 @@ fn render_notes(buffer: &mut Buffer, body: Rect, y: u16, notes: &[String], t: &B
             y,
             2,
             "•",
-            Style::default().fg(t.green).bg(t.bg),
+            Style::default().fg(t.text(t.green, t.bg)).bg(t.bg),
         );
         put_text(
             buffer,
@@ -1504,8 +1627,32 @@ pub(super) fn render_popup(
         } => {
             let _ = render_add_account(buffer, *selected, names, typed, &t, &mut hits);
         }
-        OrchaPopup::Handoff { selected, pane } => {
-            let _ = render_handoff(buffer, *selected, pane, snapshot, config, &t, &mut hits);
+        OrchaPopup::Handoff {
+            selected,
+            pane,
+            targets,
+        } => {
+            let _ = render_handoff(
+                buffer, *selected, pane, targets, snapshot, config, &t, &mut hits,
+            );
+        }
+        OrchaPopup::ProjectIcon {
+            selected, label, ..
+        } => {
+            let _ = super::orcha_icons::render(buffer, *selected, label, &t, &mut hits);
+        }
+        OrchaPopup::RemoveAccount {
+            selected, label, ..
+        } => {
+            let _ = render_remove_account(buffer, *selected, label, &t, &mut hits);
+        }
+        OrchaPopup::Palette { selected, query } => {
+            let _ = super::orcha_palette::render(buffer, *selected, query, &t, &mut hits);
+        }
+        OrchaPopup::Broadcast { typed, panes } => {
+            let _ = super::orcha_palette::render_broadcast(
+                buffer, typed, panes, snapshot, config, &t, &mut hits,
+            );
         }
         OrchaPopup::Import { selected, chosen } => {
             let _ = render_import(buffer, *selected, chosen, &ui.import_sources, &t, &mut hits);

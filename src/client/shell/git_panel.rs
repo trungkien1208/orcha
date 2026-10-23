@@ -1,10 +1,12 @@
 //! orcha: the right panel. Git facts about the focused pane's folder: branch,
 //! ahead/behind, changed files and worktrees.
 //!
-//! Git runs on a background thread at most every few seconds (or when the
-//! focused folder changes); rendering only reads the last result, so nothing
-//! here touches the filesystem from view computation. The panel reads the
-//! local filesystem, so it is only fed for the Local endpoint.
+//! Git runs on a background thread every few seconds (or when the focused
+//! folder changes), backing off while nothing changes; rendering only reads
+//! the last result, so nothing here touches the filesystem from view
+//! computation. History and worktrees are read again only when the
+//! repository's refs moved. The panel reads the local filesystem, so it is
+//! only fed for the Local endpoint.
 
 use std::path::Path;
 use std::process::Command;
@@ -16,6 +18,8 @@ use super::render::{display_width, put_right_text, put_text};
 use super::*;
 
 const REFRESH: Duration = Duration::from_secs(3);
+/// Unchanged reads stretch the interval up to this.
+const REFRESH_IDLE: Duration = Duration::from_secs(12);
 const MAX_FILES: usize = 200;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -47,12 +51,19 @@ pub(super) struct HistoryLine {
     pub subject: String,
 }
 
+/// A read's result: the data and the refs fingerprint it was read at.
+type GitRead = Option<(GitPanelData, String)>;
+
 #[derive(Default)]
 pub(super) struct GitPanelPoller {
     cwd: Option<String>,
     data: Option<GitPanelData>,
-    pending: Option<Receiver<Option<GitPanelData>>>,
+    /// The refs fingerprint `data`'s history and worktrees belong to.
+    refs_key: Option<String>,
+    pending: Option<Receiver<GitRead>>,
     next_refresh: Option<Instant>,
+    /// Time to the next read; doubles while reads find nothing new.
+    interval: Duration,
 }
 
 impl GitPanelPoller {
@@ -71,12 +82,19 @@ impl GitPanelPoller {
         let mut changed = false;
         if let Some(rx) = &self.pending {
             match rx.try_recv() {
-                Ok(data) => {
+                Ok(read) => {
                     self.pending = None;
+                    let (data, key) = match read {
+                        Some((data, key)) => (Some(data), Some(key)),
+                        None => (None, None),
+                    };
+                    self.refs_key = key;
                     if data != self.data {
                         self.data = data;
                         changed = true;
                     }
+                    self.interval = next_interval(self.interval, changed);
+                    self.next_refresh = Some(now + self.interval);
                 }
                 Err(TryRecvError::Disconnected) => self.pending = None,
                 Err(TryRecvError::Empty) => {}
@@ -85,6 +103,8 @@ impl GitPanelPoller {
         let moved = cwd != self.cwd.as_deref();
         if moved {
             self.cwd = cwd.map(str::to_owned);
+            self.interval = REFRESH;
+            self.refs_key = None;
             if self.cwd.is_none() && self.data.take().is_some() {
                 changed = true;
             }
@@ -92,15 +112,16 @@ impl GitPanelPoller {
         let due = moved || self.next_refresh.is_none_or(|at| now >= at);
         if due && self.pending.is_none() {
             if let Some(cwd) = self.cwd.clone() {
+                let previous = self.data.clone().zip(self.refs_key.clone());
                 let (tx, rx) = mpsc::channel();
                 let spawned = crate::thread_spawn::spawn_named("orcha-git-panel", move || {
-                    let _ = tx.send(read_git(Path::new(&cwd)));
+                    let _ = tx.send(read_git(Path::new(&cwd), previous));
                 });
                 if spawned.is_ok() {
                     self.pending = Some(rx);
                 }
             }
-            self.next_refresh = Some(now + REFRESH);
+            self.next_refresh = Some(now + self.interval.max(REFRESH));
         }
         changed
     }
@@ -141,6 +162,8 @@ impl ClientShellState {
             self.update_low_fuel_hint();
         }
         repaint |= self.poll_import_scan();
+        repaint |= self.poll_handoff();
+        repaint |= self.poll_account_action();
         repaint |= self.poll_update();
         repaint |= self.offer_continue_on_low_fuel();
         let running = self.snapshot.as_deref().is_some_and(|snapshot| {
@@ -161,27 +184,86 @@ impl ClientShellState {
     }
 }
 
+/// A change brings the interval back to `REFRESH`; an unchanged read
+/// doubles it, up to `REFRESH_IDLE`.
+fn next_interval(interval: Duration, changed: bool) -> Duration {
+    if changed {
+        REFRESH
+    } else {
+        (interval.max(REFRESH) * 2).min(REFRESH_IDLE)
+    }
+}
+
 /// How often the PROCESS trains move a cell.
 const PROCESS_FRAME: Duration = Duration::from_millis(220);
 
 fn git(dir: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .arg("-C")
         .arg(dir)
         .args(args)
         .env("GIT_OPTIONAL_LOCKS", "0")
-        .output()
-        .ok()?;
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    crate::platform::configure_background_command(&mut command);
+    let output = command.output().ok()?;
     output
         .status
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-fn read_git(cwd: &Path) -> Option<GitPanelData> {
-    let root = git(cwd, &["rev-parse", "--show-toplevel"])?
-        .trim()
-        .to_owned();
+/// Sizes and modified times of the files a commit, checkout, branch or
+/// worktree change rewrites. Equal keys: history and worktrees still hold.
+fn refs_key(git_dir: &Path, common_dir: &Path) -> String {
+    let stamp = |path: &Path| {
+        std::fs::metadata(path)
+            .ok()
+            .map(|meta| {
+                let modified = meta
+                    .modified()
+                    .ok()
+                    .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map_or(0, |since| since.as_nanos());
+                format!("{}:{modified}", meta.len())
+            })
+            .unwrap_or_default()
+    };
+    [
+        git_dir.join("HEAD"),
+        git_dir.join("logs").join("HEAD"),
+        common_dir.join("packed-refs"),
+        common_dir.join("refs").join("heads"),
+        common_dir.join("worktrees"),
+    ]
+    .iter()
+    .map(|path| stamp(path))
+    .collect::<Vec<_>>()
+    .join("|")
+}
+
+/// Reads the folder's git facts. `previous` (data and its refs key) lends
+/// its history and worktrees when the refs did not move.
+fn read_git(cwd: &Path, previous: Option<(GitPanelData, String)>) -> GitRead {
+    let dirs = git(
+        cwd,
+        &[
+            "rev-parse",
+            "--show-toplevel",
+            "--git-dir",
+            "--git-common-dir",
+        ],
+    )?;
+    let mut dirs = dirs.lines().map(str::trim);
+    let root = dirs.next()?.to_owned();
+    // older gits print the git folders relative to `cwd`
+    let git_dir = cwd.join(dirs.next()?);
+    let common_dir = dirs
+        .next()
+        .map(|dir| cwd.join(dir))
+        .unwrap_or_else(|| git_dir.clone());
+    let key = refs_key(&git_dir, &common_dir);
     let root_path = Path::new(&root);
     let status = git(
         root_path,
@@ -196,6 +278,7 @@ fn read_git(cwd: &Path) -> Option<GitPanelData> {
         root: root.clone(),
         ..GitPanelData::default()
     };
+    let reuse = previous.filter(|(old, old_key)| *old_key == key && old.root == root);
     for line in status.lines() {
         if let Some(head) = line.strip_prefix("## ") {
             parse_branch_line(head, &mut data);
@@ -204,6 +287,21 @@ fn read_git(cwd: &Path) -> Option<GitPanelData> {
             let path = line[3..].rsplit(" -> ").next().unwrap_or(&line[3..]);
             data.files.push((code, path.trim_matches('"').to_owned()));
         }
+    }
+    if let Some(stat) = git(root_path, &["diff", "HEAD", "--shortstat"]) {
+        let (insertions, deletions) = parse_shortstat(&stat);
+        data.insertions = insertions;
+        data.deletions = deletions;
+    }
+    // the age ("5 minutes ago") moves on even when the refs do not
+    data.last_commit = git(root_path, &["log", "-1", "--format=%s%x09%cr"]).and_then(|line| {
+        let (subject, age) = line.trim().split_once('\t')?;
+        Some((subject.to_owned(), age.to_owned()))
+    });
+    if let Some((old, _)) = reuse {
+        data.worktrees = old.worktrees;
+        data.history = old.history;
+        return Some((data, key));
     }
     if let Some(list) = git(root_path, &["worktree", "list", "--porcelain"]) {
         let mut path = String::new();
@@ -222,15 +320,6 @@ fn read_git(cwd: &Path) -> Option<GitPanelData> {
             }
         }
     }
-    if let Some(stat) = git(root_path, &["diff", "HEAD", "--shortstat"]) {
-        let (insertions, deletions) = parse_shortstat(&stat);
-        data.insertions = insertions;
-        data.deletions = deletions;
-    }
-    data.last_commit = git(root_path, &["log", "-1", "--format=%s%x09%cr"]).and_then(|line| {
-        let (subject, age) = line.trim().split_once('\t')?;
-        Some((subject.to_owned(), age.to_owned()))
-    });
     if let Some(log) = git(
         root_path,
         &[
@@ -244,7 +333,7 @@ fn read_git(cwd: &Path) -> Option<GitPanelData> {
     ) {
         data.history = log.lines().take(24).map(parse_history_line).collect();
     }
-    Some(data)
+    Some((data, key))
 }
 
 /// " 3 files changed, 26 insertions(+), 4 deletions(-)"
@@ -371,7 +460,11 @@ pub(super) fn draw_gauge_wide(
     // ten marks, always a cell apart; wider marks when there is room
     let solid = ((width + 1) / 10).saturating_sub(1).max(1);
     for index in 0..10u16 {
-        let fg = if index < filled { color } else { t.empty };
+        let fg = if index < filled {
+            t.mark(color, bg)
+        } else {
+            t.empty
+        };
         put_text(
             buffer,
             x + index * (solid + 1),
@@ -774,7 +867,7 @@ fn draw_rows(
                     1,
                     mark,
                     Style::default()
-                        .fg(color)
+                        .fg(t.text(color, t.card))
                         .bg(t.card)
                         .add_modifier(Modifier::BOLD),
                 );
@@ -800,7 +893,7 @@ fn draw_rows(
                         1,
                         history_glyph(ch),
                         Style::default()
-                            .fg(lane_color(column / 2, t))
+                            .fg(t.mark(lane_color(column / 2, t), t.card))
                             .bg(t.card)
                             .add_modifier(Modifier::BOLD),
                     );
@@ -864,6 +957,31 @@ fn draw_rows(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unchanged_reads_back_off_and_a_change_resets() {
+        let mut interval = super::REFRESH;
+        interval = super::next_interval(interval, false);
+        assert_eq!(interval, super::REFRESH * 2);
+        for _ in 0..5 {
+            interval = super::next_interval(interval, false);
+        }
+        assert_eq!(interval, super::REFRESH_IDLE);
+        assert_eq!(super::next_interval(interval, true), super::REFRESH);
+    }
+
+    #[test]
+    fn refs_key_moves_with_a_commit() {
+        let dir = std::env::temp_dir().join(format!("orcha-refs-key-{}", std::process::id()));
+        let logs = dir.join("logs");
+        std::fs::create_dir_all(&logs).expect("temp git folder");
+        std::fs::write(dir.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
+        let before = super::refs_key(&dir, &dir);
+        assert_eq!(before, super::refs_key(&dir, &dir));
+        std::fs::write(logs.join("HEAD"), "a commit\n").expect("reflog");
+        assert_ne!(before, super::refs_key(&dir, &dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     #[test]

@@ -319,6 +319,8 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
             loading_integrations: false,
             installing_integrations: false,
             appearance: Default::default(),
+            look: Vec::new(),
+            look_map: Default::default(),
         }),
     ];
     for overlay in overlays {

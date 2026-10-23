@@ -24,7 +24,7 @@
 
 ## Install
 
-**macOS** (Apple Silicon)
+**macOS** (Apple Silicon or Intel)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.sh | sh
@@ -61,6 +61,8 @@ Then run `orcha` inside a project. Your agent sign-ins are picked up automatical
 - **Paths you can click.** Ctrl+click anything an agent prints: folders open in Finder/Explorer, files in the app you pick once per type, at the right line.
 - **Git beside the work.** Branch, changes and history in the side panel, one click to your IDE or Git app.
 - **Agents outlive the window.** Quit orcha and they keep running; `orcha` brings you straight back.
+- **One search for everything.** `⌕ commands` in the header (or the prefix key, then `:`) finds any action: new agent, worktree, hand off, ask every agent, open in IDE.
+- **Yours to tune.** Settings → `look`: accent color, sidebar width, right panel, where FUEL sits, pane colors, agent logos. Own colors go in `~/.config/orcha/styles/<name>.toml`.
 
 <table>
   <tr>
@@ -81,9 +83,9 @@ orcha update      # latest version; a green button also tells you when one is ou
 orcha uninstall   # remove orcha and what it added; asks before touching your settings
 ```
 
-Best in [Ghostty](https://ghostty.org) on macOS and [WezTerm](https://wezfurlong.org/wezterm/) on Windows. The agent icon font, and font, size, and ligature settings, still apply in Ghostty only. On WezTerm the logos stay plain symbols, and the font is whatever WezTerm is set to. Using herdr already? Your config and workspaces come along, and herdr stays untouched.
+Best in [Ghostty](https://ghostty.org) on macOS and [WezTerm](https://wezfurlong.org/wezterm/) on Windows; any terminal works. Agent logos come from the icon font in Ghostty, WezTerm and iTerm2 when it is installed, plain symbols elsewhere (Settings → `look` → agent logos changes that). Font, size and ligature settings apply in Ghostty only; elsewhere the font is whatever your terminal uses. Using herdr already? Your config and workspaces come along, and herdr stays untouched.
 
-This is an early build. If something breaks, [open an issue](https://github.com/trungkien1208/orcha/issues) with a screenshot.
+If something breaks, [open an issue](https://github.com/trungkien1208/orcha/issues) with a screenshot.
 
 <details>
 <summary><b>Build from source</b></summary>

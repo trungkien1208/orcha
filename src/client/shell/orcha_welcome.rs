@@ -606,7 +606,7 @@ fn draw_item(
             y,
             1,
             "✓",
-            Style::default().fg(t.green).bg(fill),
+            Style::default().fg(t.text(t.green, fill)).bg(fill),
         ),
         Mark::Off => put_text(
             buffer,

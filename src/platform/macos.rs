@@ -298,12 +298,97 @@ pub(crate) fn orcha_application_support_dir_platform(home: &std::path::Path) -> 
     home.join("Library").join("Application Support")
 }
 
-pub(crate) fn orcha_default_commands_platform() -> (&'static str, &'static str, &'static str) {
-    (
-        "",
-        "~/.config/orcha/scripts/limits.py",
-        "~/.config/orcha/scripts/handoff.py",
-    )
+/// A generic password from the login Keychain (Claude's sign-in JSON).
+fn keychain_read(service: &str) -> Option<String> {
+    let output = Command::new("security")
+        .args(["find-generic-password", "-s", service, "-w"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    let text = String::from_utf8(output.stdout).ok()?;
+    let text = text.trim_end_matches('\n').to_owned();
+    (output.status.success() && !text.trim().is_empty()).then_some(text)
+}
+
+/// The item's account attribute (Claude writes the user name there).
+fn keychain_account(service: &str) -> String {
+    let fallback = || std::env::var("USER").unwrap_or_default();
+    let Ok(output) = Command::new("security")
+        .args(["find-generic-password", "-s", service])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return fallback();
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| {
+            let rest = line.trim().strip_prefix("\"acct\"<blob>=\"")?;
+            Some(rest.strip_suffix('"').unwrap_or(rest).to_owned())
+        })
+        .unwrap_or_else(fallback)
+}
+
+pub(crate) fn orcha_secret_read(slot: &super::OrchaSecretSlot) -> Option<String> {
+    keychain_read(&super::orcha_claude_service(slot))
+}
+
+/// Writes through `security -i`, so the secret (hex encoded) travels on
+/// stdin and never shows in `ps`. The item keeps its account attribute;
+/// a new one gets the default item's.
+pub(crate) fn orcha_secret_write(
+    slot: &super::OrchaSecretSlot,
+    secret: &str,
+    account_from: &super::OrchaSecretSlot,
+) -> std::io::Result<()> {
+    let service = super::orcha_claude_service(slot);
+    let account = keychain_account(&super::orcha_claude_service(account_from));
+    let hex: String = secret.bytes().map(|b| format!("{b:02x}")).collect();
+    let script = format!(
+        "add-generic-password -U -s \"{}\" -a \"{}\" -X {hex}\n",
+        service.replace('"', ""),
+        account.replace('"', "")
+    );
+    let mut child = Command::new("security")
+        .arg("-i")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(script.as_bytes())?;
+    }
+    if child.wait()?.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other("keychain write failed"))
+    }
+}
+
+/// The Cursor CLI's access token (a JWT) from the Keychain.
+pub(crate) fn orcha_cursor_token() -> Option<String> {
+    keychain_read("cursor-access-token").map(|token| token.trim().to_owned())
+}
+
+/// One variable of another process's environment, as that process sees it.
+pub(crate) fn orcha_process_env_var(pid: u32, name: &str) -> Option<String> {
+    if pid == 0 {
+        return None;
+    }
+    let buf = kern_procargs2(pid)?;
+    let prefix = format!("{name}=");
+    procargs2_env(&buf)?
+        .split(|&byte| byte == 0)
+        .find_map(|record| record.strip_prefix(prefix.as_bytes()))
+        .and_then(|value| String::from_utf8(value.to_vec()).ok())
+}
+
+/// Links `source` at `target` (an extra Claude account's folder shares
+/// `~/.claude`'s history and settings this way).
+pub(crate) fn orcha_link_path(source: &Path, target: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(source, target)
 }
 
 pub(crate) fn orcha_installed_apps_platform(_names: &[&str]) -> Option<Vec<(String, String)>> {

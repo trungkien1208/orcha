@@ -10,6 +10,9 @@ impl ClientShellState {
             crate::input::KeybindMatch::Action(crate::input::KeybindAction::Detach) => {
                 outcome.detach = true;
             }
+            // orcha keeps its sidebar open
+            crate::input::KeybindMatch::Action(crate::input::KeybindAction::ToggleSidebar)
+                if self.config.sidebar_tree => {}
             crate::input::KeybindMatch::Action(crate::input::KeybindAction::ToggleSidebar) => {
                 self.sidebar_collapsed = !self.sidebar_collapsed;
                 self.sidebar_collapsed_manual = true;

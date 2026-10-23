@@ -188,7 +188,7 @@ fn collapsed_project_shows_active_agent_logos_and_selected_project_can_fold() {
             .find(|cell| cell.symbol == "◎")
             .expect("Codex")
             .fg,
-        crate::protocol::color_to_u32(palette.green)
+        crate::protocol::color_to_u32(palette.mark(palette.green, palette.card))
     );
     assert_eq!(
         cells
@@ -196,7 +196,7 @@ fn collapsed_project_shows_active_agent_logos_and_selected_project_can_fold() {
             .find(|cell| cell.symbol == "✳")
             .expect("Claude")
             .fg,
-        crate::protocol::color_to_u32(palette.red)
+        crate::protocol::color_to_u32(palette.mark(palette.red, palette.card))
     );
     assert!(state.snapshot.as_ref().expect("snapshot").workspaces[0].focused);
     state.snapshot.as_mut().expect("snapshot").agents[2].agent_status = AgentStatus::Idle;

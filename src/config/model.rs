@@ -336,14 +336,60 @@ pub enum FuelPlacement {
     StatusBar,
 }
 
+/// Which side the project sidebar takes (`[orcha] sidebar_side`); the
+/// right panel takes the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SidebarSide {
+    #[default]
+    Left,
+    Right,
+}
+
+/// Where PROCESS (the running agents as trains) sits (`[orcha] process`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessPlacement {
+    /// At the foot of the right panel; in the sidebar while the panel is
+    /// hidden.
+    Panel,
+    /// At the foot of the sidebar.
+    #[default]
+    Sidebar,
+    /// Not shown.
+    Off,
+}
+
+/// Agent logos: the Agent Icons font, or plain symbols (`[orcha] icons`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IconMode {
+    /// The font where the terminal is known to draw it (Ghostty, WezTerm,
+    /// iTerm2) and the font is installed.
+    #[default]
+    Auto,
+    /// Always the font (the terminal falls back to it).
+    Font,
+    /// Always plain symbols.
+    Symbols,
+}
+
 /// orcha's own settings (`[orcha]`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct OrchaConfig {
     /// FUEL gauges in the right panel ("panel") or the status bar ("status_bar").
     pub fuel: FuelPlacement,
+    /// Agent logos: "auto", "font" or "symbols".
+    pub icons: IconMode,
+    /// PROCESS: "sidebar" (default), "panel" (the right panel) or "off".
+    pub process: ProcessPlacement,
+    /// The project sidebar on the "left" (default) or the "right".
+    pub sidebar_side: SidebarSide,
     /// Command printing the accounts and their plan limits as JSON
     /// (`[{id, agent, name, email, current, windows: [{key, left, reset}]}]`).
+    /// This and the other account commands are empty by default: orcha does
+    /// it natively. Set one to replace that action with your own script.
     pub accounts_command: String,
     /// Continue a pane's chat on another account: `{id}` account, `{pane}` pane.
     pub switch_command: String,
@@ -356,7 +402,7 @@ pub struct OrchaConfig {
     /// Start an account's agent in a new tab: `{id}`, `{workspace}`, `{cwd}`.
     pub new_agent_command: String,
     /// Continue `{pane}`'s chat with another agent: `{agent}` and `{mode}`
-    /// ("full" or "summary").
+    /// ("full" or "summary"). Empty (the default): orcha's own hand-off.
     pub handoff_command: String,
     /// Command opening a folder in the IDE; `{path}` is replaced. Empty: detect.
     pub ide: String,
@@ -374,19 +420,19 @@ pub struct OrchaConfig {
 
 impl Default for OrchaConfig {
     fn default() -> Self {
-        let (script_prefix, limits_script, handoff_script) =
-            crate::platform::orcha_default_commands();
         Self {
             fuel: FuelPlacement::Panel,
-            accounts_command: format!("{script_prefix}{limits_script} json"),
-            switch_command: format!("{script_prefix}{limits_script} switch {{id}} {{pane}}"),
-            open_command: format!("{script_prefix}{limits_script} open {{id}}"),
-            login_command: format!("{script_prefix}{limits_script} login-pane {{id}}"),
-            add_command: format!("{script_prefix}{limits_script} add {{name}}"),
-            new_agent_command: format!(
-                "{script_prefix}{limits_script} new {{id}} {{workspace}} {{cwd}}"
-            ),
-            handoff_command: format!("{script_prefix}{handoff_script} {{pane}} {{agent}} {{mode}}"),
+            icons: IconMode::Auto,
+            process: ProcessPlacement::Sidebar,
+            sidebar_side: SidebarSide::Left,
+            // empty: orcha's own accounts, fuel and hand-off
+            accounts_command: String::new(),
+            switch_command: String::new(),
+            open_command: String::new(),
+            login_command: String::new(),
+            add_command: String::new(),
+            new_agent_command: String::new(),
+            handoff_command: String::new(),
             ide: String::new(),
             git_gui: String::new(),
             pane_paper: true,
@@ -1284,7 +1330,7 @@ impl Default for UiConfig {
     fn default() -> Self {
         Self {
             // orcha's cards and PROCESS rails need room
-            sidebar_width: if ORCHA_LAYOUT_DEFAULT { 32 } else { 26 },
+            sidebar_width: if ORCHA_LAYOUT_DEFAULT { 28 } else { 26 },
             sidebar_min_width: 18,
             sidebar_max_width: if ORCHA_LAYOUT_DEFAULT { 52 } else { 36 },
             sidebar_start_collapsed: false,
@@ -1346,7 +1392,13 @@ impl UiConfig {
 impl Default for ToastConfig {
     fn default() -> Self {
         Self {
-            delivery: ToastDelivery::Off,
+            // orcha tells you on the desktop when an agent needs you or
+            // finishes in the background; herdr keeps its quiet default
+            delivery: if crate::orcha_app::is_orcha() {
+                ToastDelivery::System
+            } else {
+                ToastDelivery::Off
+            },
             delay_seconds: 1,
             herdr: HerdrToastConfig::default(),
             clipboard: ClipboardToastConfig::default(),
@@ -1387,12 +1439,13 @@ impl<'de> Deserialize<'de> for ToastConfig {
         }
 
         let raw = RawToastConfig::deserialize(deserializer)?;
+        let default = Self::default();
         let legacy_delivery = match raw.enabled {
             Some(true) => ToastDelivery::Herdr,
-            Some(false) | None => ToastDelivery::Off,
+            Some(false) => ToastDelivery::Off,
+            None => default.delivery,
         };
         let delivery = raw.delivery.unwrap_or(legacy_delivery);
-        let default = Self::default();
         let delay_seconds = raw.delay_seconds.unwrap_or(default.delay_seconds);
         if delay_seconds > MAX_TOAST_DELAY_SECONDS {
             return Err(de::Error::custom(format!(

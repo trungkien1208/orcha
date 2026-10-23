@@ -55,13 +55,50 @@ pub(crate) fn find_sources() -> Vec<ImportSource> {
         name: "JetBrains".into(),
         projects: jetbrains_recent(&support.join("JetBrains"), &home),
     });
+    let home_key = folder_key(&home.to_string_lossy());
+    // each folder once, under the first source that has it
+    let mut seen = std::collections::HashSet::new();
     for source in &mut sources {
-        source
-            .projects
-            .retain(|(_, path)| Path::new(path).is_dir() && Path::new(path) != home);
+        source.projects.retain(|(_, path)| {
+            let key = folder_key(path);
+            Path::new(path).is_dir() && key != home_key && seen.insert(key)
+        });
     }
     sources.retain(|source| !source.projects.is_empty());
     sources
+}
+
+/// Folders compare case-insensitively where the usual file systems do.
+const FOLDERS_IGNORE_CASE: bool = cfg!(any(target_os = "macos", windows));
+
+/// One spelling per folder: links resolved, `/` separators, no trailing
+/// separator, and lowercase where folder names ignore case. Two paths of
+/// the same folder (`C:\Code\app`, `c:/code/app/`) get the same key.
+pub(crate) fn folder_key(path: &str) -> String {
+    let resolved = std::fs::canonicalize(path)
+        .map(|resolved| resolved.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.to_owned());
+    normalize_folder(&resolved, FOLDERS_IGNORE_CASE)
+}
+
+fn normalize_folder(path: &str, ignore_case: bool) -> String {
+    let path = path.strip_prefix(r"\\?\").unwrap_or(path);
+    let mut key = path.replace('\\', "/");
+    while key.len() > 1 && key.ends_with('/') {
+        key.pop();
+    }
+    if ignore_case {
+        key = key.to_lowercase();
+    }
+    key
+}
+
+/// `path` is the folder of `folder_key` or inside it (keys from `folder_key`).
+pub(crate) fn key_within(path_key: &str, folder_key: &str) -> bool {
+    path_key == folder_key
+        || path_key
+            .strip_prefix(folder_key)
+            .is_some_and(|rest| rest.starts_with('/') || folder_key.ends_with('/'))
 }
 
 fn folder_name(path: &str) -> String {
@@ -258,6 +295,28 @@ mod tests {
                 ("api".to_owned(), "/Users/me/api".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn one_key_per_folder_whatever_the_spelling() {
+        assert_eq!(
+            normalize_folder(r"\\?\C:\Code\App\", true),
+            normalize_folder("c:/code/app", true)
+        );
+        assert_eq!(normalize_folder("/Users/me/app/", false), "/Users/me/app");
+        assert_ne!(
+            normalize_folder("/p/App", false),
+            normalize_folder("/p/app", false)
+        );
+        assert_eq!(normalize_folder("/", false), "/");
+    }
+
+    #[test]
+    fn within_means_the_folder_or_below_it() {
+        assert!(key_within("/p/app", "/p/app"));
+        assert!(key_within("/p/app/src", "/p/app"));
+        assert!(!key_within("/p/application", "/p/app"));
+        assert!(key_within("/p/app", "/"));
     }
 
     #[test]

@@ -40,6 +40,36 @@ pub(super) fn render_header(
         &counts,
         Style::default().fg(t.muted).bg(t.bg),
     );
+    // agents waiting on you: a red chip, a click goes to the first of them
+    let waiting = snapshot
+        .agents
+        .iter()
+        .filter(|agent| agent.agent_status == crate::api::schema::AgentStatus::Blocked)
+        .count();
+    let mut counts_end = x + display_width(&counts);
+    if waiting > 0 {
+        let text = format!(
+            " ⚠ {waiting} need{} you ",
+            if waiting == 1 { "s" } else { "" }
+        );
+        let width = display_width(&text);
+        let nx = counts_end + 2;
+        if nx + width < area.right() {
+            put_text(
+                buffer,
+                nx,
+                area.y,
+                width,
+                &text,
+                Style::default()
+                    .fg(t.card)
+                    .bg(t.red)
+                    .add_modifier(Modifier::BOLD),
+            );
+            hits.orcha.needs_you = Rect::new(nx, area.y, width, 1);
+            counts_end = nx + width;
+        }
+    }
     // right: settings, then quit (back to the terminal; agents keep running)
     let quit_text = "⏻ quit";
     let quit = Rect::new(
@@ -55,20 +85,33 @@ pub(super) fn render_header(
         display_width(text) + 4,
         1,
     );
-    if button.x <= x + display_width(&counts) + 4 {
+    if button.x <= counts_end + 4 {
         return;
     }
     brutal::pill(buffer, button, text, t.ink, t.card, true, &t);
     hits.orcha.settings = button;
     brutal::pill(buffer, quit, quit_text, t.ink, t.card, true, &t);
     hits.orcha.quit = quit;
-    // a newer orcha: a green button left of settings, a click installs it
+    // COMMANDS: every action in one search, left of settings
     let mut left_of = button.x;
+    let commands_text = "⌕ commands";
+    let commands = Rect::new(
+        button.x.saturating_sub(display_width(commands_text) + 5),
+        area.y,
+        display_width(commands_text) + 4,
+        1,
+    );
+    if commands.x > counts_end + 4 {
+        brutal::pill(buffer, commands, commands_text, t.ink, t.card, true, &t);
+        hits.orcha.commands = commands;
+        left_of = commands.x;
+    }
+    // a newer orcha: a green button left of the buttons, a click installs it
     if let Some(note) = &ui.update_note {
         let text = format!(" {note} ");
-        let room = button.x.saturating_sub(x + display_width(&counts) + 4);
+        let room = left_of.saturating_sub(counts_end + 4);
         let width = display_width(&text).min(room);
-        let ux = button.x.saturating_sub(width + 2);
+        let ux = left_of.saturating_sub(width + 2);
         put_text(
             buffer,
             ux,
@@ -86,7 +129,7 @@ pub(super) fn render_header(
     // low fuel: a red offer left of settings, a click opens the accounts
     if let Some(hint) = &ui.low_fuel_hint {
         let hint = format!(" ⚠ {hint} ");
-        let room = left_of.saturating_sub(x + display_width(&counts) + 4);
+        let room = left_of.saturating_sub(counts_end + 4);
         let width = display_width(&hint).min(room);
         let hx = left_of.saturating_sub(width + 2);
         put_text(
@@ -256,7 +299,7 @@ pub(super) fn render_frame_and_tabs(
                 above,
                 w,
                 &"▂".repeat(usize::from(w)),
-                Style::default().fg(t.yellow).bg(t.bg),
+                Style::default().fg(t.mark(t.yellow, t.bg)).bg(t.bg),
             );
         } else {
             put_text(buffer, x, above, w, &"▁".repeat(usize::from(w)), edge);
@@ -276,7 +319,7 @@ pub(super) fn render_frame_and_tabs(
                 y,
                 1,
                 "■",
-                Style::default().fg(color).bg(fill),
+                Style::default().fg(t.mark(color, fill)).bg(fill),
             );
         }
         hits.tabs.push((rect, tab.tab_id.clone()));

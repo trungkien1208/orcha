@@ -126,7 +126,7 @@ impl ClientShellConfig {
             right_panel_width: config.ui.right_panel_width,
             sidebar_tree: config.ui.sidebar_tree,
             orcha: config.orcha.clone(),
-            icon_font: super::brutal::icon_font_installed(),
+            icon_font: super::brutal::icon_font_installed(config.orcha.icons),
             spaces: config.ui.sidebar.spaces.clone(),
             agents: config.ui.sidebar.agents.clone(),
             agent_panel_sort: config.ui.agent_panel_sort,
@@ -359,6 +359,7 @@ impl ClientShellConfig {
                 self.right_panel_width = ui.right_panel_width;
                 self.sidebar_tree = ui.sidebar_tree;
                 self.orcha = config.orcha.clone();
+                self.icon_font = super::brutal::icon_font_installed(config.orcha.icons);
                 self.spaces = ui.sidebar.spaces.clone();
                 self.agents = ui.sidebar.agents.clone();
                 self.agent_panel_sort = ui.agent_panel_sort;
@@ -415,6 +416,8 @@ impl ClientShellConfig {
             };
         }
 
+        // orcha keeps its sidebar open
+        let sidebar_collapsed = sidebar_collapsed && !self.sidebar_tree;
         let sidebar_width = if sidebar_collapsed {
             match self.sidebar_collapsed_mode {
                 SidebarCollapsedModeConfig::Compact => 4,
@@ -435,6 +438,7 @@ impl ClientShellConfig {
                 rows,
                 sidebar_width,
                 self.right_panel.then_some(self.right_panel_width),
+                self.orcha.sidebar_side == crate::config::SidebarSide::Right,
             ) {
                 return layout;
             }
@@ -519,11 +523,13 @@ impl ClientShellConfig {
 /// orcha's page (docs/orcha/SPEC.md §2), in cells: the header on the top
 /// row, the sidebar, the main frame with the tabs over it and the right
 /// panel side by side a column apart, the status bar on the last row.
+/// `swapped`: the sidebar on the right and the panel on the left.
 fn orcha_layout(
     cols: u16,
     rows: u16,
     sidebar_width: u16,
     panel_width: Option<u16>,
+    swapped: bool,
 ) -> Option<ClientShellLayout> {
     // the terminal's own window padding is the margin
     const MARGIN_X: u16 = 0;
@@ -540,17 +546,41 @@ fn orcha_layout(
     let body_y = header.bottom() + 1;
     // the boxes' shadow rows are half empty: they are the gap to the status bar
     let body_height = status_bar.y.saturating_sub(body_y);
-    let sidebar = Rect::new(MARGIN_X, body_y, sidebar_width.min(width / 3), body_height);
-    let rest = width.saturating_sub(sidebar.width + GAP_X);
+    let sidebar_width = sidebar_width.min(width / 3);
+    let rest = width.saturating_sub(sidebar_width + GAP_X);
     // the panel only when the panes keep room
     let panel = panel_width
         .map(|width| width.clamp(24, 60))
         .filter(|panel| rest >= panel + GAP_X + 60)
         .unwrap_or(0);
-    let right_panel = Rect::new(cols - MARGIN_X - panel, body_y, panel, body_height);
-    let main_x = sidebar.right() + GAP_X;
-    let main_right = if panel > 0 {
-        right_panel.x - GAP_X
+    let (sidebar, right_panel) = if swapped {
+        (
+            Rect::new(
+                cols - MARGIN_X - sidebar_width,
+                body_y,
+                sidebar_width,
+                body_height,
+            ),
+            Rect::new(MARGIN_X, body_y, panel, body_height),
+        )
+    } else {
+        (
+            Rect::new(MARGIN_X, body_y, sidebar_width, body_height),
+            Rect::new(cols - MARGIN_X - panel, body_y, panel, body_height),
+        )
+    };
+    let (left, right) = if swapped {
+        (right_panel, sidebar)
+    } else {
+        (sidebar, right_panel)
+    };
+    let main_x = if left.width > 0 {
+        left.right() + GAP_X
+    } else {
+        MARGIN_X
+    };
+    let main_right = if right.width > 0 {
+        right.x - GAP_X
     } else {
         cols - MARGIN_X
     };

@@ -407,12 +407,46 @@ pub(crate) fn orcha_application_support_dir_platform(
     orcha_config_base_dir_platform().unwrap_or_else(|| std::env::temp_dir())
 }
 
-pub(crate) fn orcha_default_commands_platform() -> (&'static str, &'static str, &'static str) {
-    (
-        "",
-        "~/.config/orcha/scripts/limits.py",
-        "~/.config/orcha/scripts/handoff.py",
-    )
+pub(crate) fn orcha_secret_read(slot: &super::OrchaSecretSlot) -> Option<String> {
+    super::orcha_secret_file_read(slot)
+}
+
+/// Claude reads `.credentials.json` in its config folder on this host;
+/// there is no account attribute to carry over.
+pub(crate) fn orcha_secret_write(
+    slot: &super::OrchaSecretSlot,
+    secret: &str,
+    _account_from: &super::OrchaSecretSlot,
+) -> std::io::Result<()> {
+    super::orcha_secret_file_write(slot, secret)
+}
+
+pub(crate) fn orcha_cursor_token() -> Option<String> {
+    super::orcha_cursor_token_file()
+}
+
+/// One variable of another process's environment, as that process sees it.
+pub(crate) fn orcha_process_env_var(pid: u32, name: &str) -> Option<String> {
+    if pid == 0 {
+        return None;
+    }
+    let (_, comm, state) = process_pgrp_comm_and_state(pid)?;
+    if !process_allows_remote_memory_read(state, &comm, running_inside_wsl()) {
+        return None;
+    }
+    let environ = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
+    let prefix = format!("{name}=");
+    environ
+        .split(|&byte| byte == 0)
+        .find_map(|record| record.strip_prefix(prefix.as_bytes()))
+        .and_then(|value| String::from_utf8(value.to_vec()).ok())
+}
+
+pub(crate) fn orcha_link_path(
+    source: &std::path::Path,
+    target: &std::path::Path,
+) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(source, target)
 }
 
 pub(crate) fn orcha_installed_apps_platform(_names: &[&str]) -> Option<Vec<(String, String)>> {

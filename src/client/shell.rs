@@ -31,6 +31,8 @@ mod notification_policy;
 mod notifications;
 mod orcha_actions;
 mod orcha_chrome;
+mod orcha_icons;
+mod orcha_palette;
 mod orcha_popup;
 mod orcha_projects;
 mod orcha_welcome;

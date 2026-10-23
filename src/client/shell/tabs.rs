@@ -416,7 +416,7 @@ pub(crate) fn render_status_bar(
                 area.right(),
                 &pct,
                 Style::default()
-                    .fg(super::super::git_panel::fuel_color(window.left, &t))
+                    .fg(t.text(super::super::git_panel::fuel_color(window.left, &t), bg))
                     .bg(bg)
                     .add_modifier(Modifier::BOLD),
             );

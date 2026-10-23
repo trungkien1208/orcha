@@ -11,7 +11,16 @@ impl ClientShellState {
             self.config.sidebar_max_width,
         )
         .unwrap_or((18, 36));
-        let width = column.saturating_add(1).clamp(min, max);
+        // a sidebar on the right grows to the left
+        let right_side = self.config.orcha.sidebar_side == crate::config::SidebarSide::Right
+            && self.config.sidebar_tree;
+        let width = if right_side {
+            let cols = self.last_composed_size.map_or(column, |(cols, _)| cols);
+            cols.saturating_sub(column)
+        } else {
+            column.saturating_add(1)
+        }
+        .clamp(min, max);
         if self.sidebar_width != width {
             self.sidebar_width = width;
             self.sidebar_width_manual = true;
