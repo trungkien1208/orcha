@@ -141,7 +141,8 @@ fn render_process(
     t: &Brutal,
     hits: &mut ShellHitMap,
 ) {
-    let card = Rect::new(rect.x, rect.y, rect.width.saturating_sub(1), rect.height.saturating_sub(1));
+    // its bottom row is its line and shadow, right on the bottom
+    let card = Rect::new(rect.x, rect.y, rect.width.saturating_sub(1), rect.height);
     brutal::draw_box(buffer, card, Edge::Heavy, t.line, t.card, t.bg);
     brutal::draw_box_shadow(buffer, card, t.shadow, t.bg);
     let x = rect.x + 2;
@@ -162,7 +163,8 @@ fn render_process(
     let count_width = display_width(&count);
     put_text(
         buffer,
-        (x + width).saturating_sub(count_width),
+        // in the corner, against the right line
+        card.right().saturating_sub(count_width + 1),
         y,
         count_width,
         &count,
@@ -332,7 +334,8 @@ pub(crate) fn render_sidebar_tree(
     } else {
         trains.len() as u16 * TRAIN_ROWS
     };
-    let process_height = (5 + rows_for_trains).min(area.height.saturating_sub(10));
+    // line row, title, stations, the trains, bottom line row
+    let process_height = (4 + rows_for_trains).min(area.height.saturating_sub(10));
     let process = Rect::new(x, area.bottom().saturating_sub(process_height), width, process_height);
     if process_height >= 5 {
         render_process(
