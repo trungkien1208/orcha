@@ -100,6 +100,19 @@ pub(super) fn render_frame_and_tabs(
     buffer.set_style(paper, Style::default().bg(t.bg));
     brutal::draw_box(buffer, frame, Edge::Heavy, t.line, t.frame, t.bg);
     brutal::draw_box_shadow(buffer, frame, t.shadow, t.bg);
+    // the top edge runs along the top of its row, right under the tabs, so
+    // they sit on it; its corners carry the side lines up to it
+    let top_edge = Style::default().fg(t.line).bg(t.frame);
+    put_text(buffer, frame.x, frame.y, 1, "▕", Style::default().fg(t.line).bg(t.bg));
+    put_text(
+        buffer,
+        frame.x + 1,
+        frame.y,
+        frame.width.saturating_sub(2),
+        &"▔".repeat(usize::from(frame.width.saturating_sub(2))),
+        top_edge,
+    );
+    put_text(buffer, frame.right().saturating_sub(1), frame.y, 1, "▏", Style::default().fg(t.line).bg(t.bg));
 
     let tabs: Vec<&ClientShellTab> = snapshot
         .tabs
@@ -180,12 +193,10 @@ pub(super) fn render_frame_and_tabs(
         let above = y.saturating_sub(1);
         if open {
             put_text(buffer, x + 1, above, w - 2, &"▂".repeat(usize::from(w - 2)), Style::default().fg(t.yellow).bg(t.bg));
-            let joint = Style::default().fg(t.line).bg(t.frame);
-            put_text(buffer, x, frame.y, 1, "\u{1FB7F}", edge);
+            // the frame's top edge opens under it
             for cx in x + 1..x + w - 1 {
-                put_text(buffer, cx, frame.y, 1, " ", joint);
+                put_text(buffer, cx, frame.y, 1, " ", top_edge);
             }
-            put_text(buffer, x + w - 1, frame.y, 1, "\u{1FB7C}", edge);
         } else {
             put_text(buffer, x + 1, above, w - 2, &"▁".repeat(usize::from(w - 2)), edge);
         }
