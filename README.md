@@ -8,8 +8,8 @@
 <p align="center">
   <a href="#install"><b>Install</b></a> ·
   <a href="https://trungkien1208.github.io/orcha/">Website</a> ·
-  <a href="#everyday-use">Everyday use</a> ·
-  <a href="#update-and-uninstall">Update &amp; uninstall</a> ·
+  <a href="#why-orcha">Why orcha</a> ·
+  <a href="#commands">Commands</a> ·
   <a href="https://github.com/trungkien1208/orcha/issues">Feedback</a>
 </p>
 
@@ -20,39 +20,34 @@
   </picture>
 </p>
 
+<p align="center"><b>Claude Code, Codex and Cursor across all your projects, in one terminal.</b><br/>See who's working, who's waiting on you, and how much fuel is left, without hunting through tabs.</p>
+
 ## Install
 
-Runs on **macOS** (Apple Silicon) and **Windows** (x64). One line, no questions.
-
-**macOS**, in Terminal:
+**macOS** (Apple Silicon)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.sh | sh
 ```
 
-**Windows**, in PowerShell:
+**Windows** (x64, PowerShell)
 
 ```powershell
 irm https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.ps1 | iex
 ```
 
-or in Command Prompt (cmd):
+<details>
+<summary>From cmd instead</summary>
 
 ```cmd
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.ps1 | iex"
 ```
 
-Then open a new terminal window **inside a project** and run:
+</details>
 
-```sh
-orcha
-```
+Then run `orcha` inside a project. Your agent sign-ins are picked up automatically, and the first run offers to import projects from Orca, VS Code, Cursor and JetBrains.
 
-That project opens by itself. The first time, orcha also offers to bring in the projects it finds from **Orca, VS Code, Cursor and JetBrains**, and it finds your **Claude Code, Codex and Cursor** sign-ins on its own. Nothing to set up.
-
-<sub>On macOS, best in <a href="https://ghostty.org">Ghostty</a> (agent logos, theme, font). On Windows, use <a href="https://aka.ms/terminal">Windows Terminal</a>. Other terminals work too, with plain symbols. Already use herdr? Your herdr config and workspaces come along; herdr itself stays untouched.</sub>
-
-## What you get
+## Why orcha
 
 <p align="center">
   <picture>
@@ -61,34 +56,27 @@ That project opens by itself. The first time, orcha also offers to bring in the 
   </picture>
 </p>
 
-When an account runs low, **CONTINUE ON** picks the best next place for the chat: another account of the same agent, or a hand-off to Codex, Claude or Cursor (the whole conversation or a summary).
+- **Every agent at a glance.** Each project lists its tabs and agents; a folded project still shows `running` or `needs you` with the agents involved.
+- **Never stall on limits.** Fuel gauges per account. When one runs low, **CONTINUE ON** moves the chat to another account or hands it to a different agent, whole or summarized.
+- **Paths you can click.** Ctrl+click anything an agent prints: folders open in Finder/Explorer, files in the app you pick once per type, at the right line.
+- **Git beside the work.** Branch, changes and history in the side panel, one click to your IDE or Git app.
+- **Agents outlive the window.** Quit orcha and they keep running; `orcha` brings you straight back.
 
 <p align="center">
   <img src="docs/orcha/images/continue-on.png" alt="the CONTINUE ON popup: accounts with their fuel, the best one marked" width="80%" />
 </p>
 
-## Everyday use
-
-| | |
-|---|---|
-| **New agent** | `+ NEW`, pick Claude, Codex or Cursor and the account |
-| **Settings** | `⚙ settings` top right: theme, font, IDE, Git app |
-| **Open a file** | Ctrl+click any path an agent prints. Folders open in Finder/Explorer; the first time a file type comes up, pick its app (editor, default app or folder) and orcha remembers it |
-| **IDE / Git app** | the `↗ IDE` / `↗ Git` buttons in the right panel |
-| **Import projects** | `≡ menu` → import projects |
-| **Quit** | `⏻ quit` top right, or `≡ menu` → quit to terminal. Your agents keep running; `orcha` brings you back |
-
-## Update and uninstall
+## Commands
 
 ```sh
-orcha update      # the latest version (orcha also shows a green button when one is out)
-orcha uninstall   # removes orcha and everything it added; asks before deleting your settings
-orcha --version
+orcha             # open (or come back to) your workspace
+orcha update      # latest version; a green button also tells you when one is out
+orcha uninstall   # remove orcha and what it added; asks before touching your settings
 ```
 
-## Feedback
+Best in [Ghostty](https://ghostty.org) on macOS and [Windows Terminal](https://aka.ms/terminal) on Windows. Using herdr already? Your config and workspaces come along, and herdr stays untouched.
 
-This is an early build for friends to try. Something looks off or breaks? [Open an issue](https://github.com/trungkien1208/orcha/issues) with a screenshot. Ideas are welcome too.
+This is an early build. If something breaks, [open an issue](https://github.com/trungkien1208/orcha/issues) with a screenshot.
 
 <details>
 <summary><b>Build from source</b></summary>
