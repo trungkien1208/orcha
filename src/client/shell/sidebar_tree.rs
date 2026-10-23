@@ -144,8 +144,8 @@ fn render_process(
     let card = Rect::new(rect.x, rect.y, rect.width.saturating_sub(1), rect.height.saturating_sub(1));
     brutal::draw_box(buffer, card, Edge::Heavy, t.line, t.card, t.bg);
     brutal::draw_box_shadow(buffer, card, t.shadow, t.bg);
-    let x = rect.x + 3;
-    let width = rect.width.saturating_sub(6);
+    let x = rect.x + 2;
+    let width = rect.width.saturating_sub(5);
     let mut y = rect.y + 1;
     put_text(
         buffer,

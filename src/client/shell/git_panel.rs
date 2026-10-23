@@ -349,15 +349,13 @@ pub(super) fn draw_gauge_wide(
 ) {
     let color = fuel_color(left, t);
     let filled = (u16::from(left) + 5) / 10;
-    let segment = (width / 10).max(1);
+    // ten marks, always a cell apart; wider marks when there is room
+    let solid = ((width + 1) / 10).saturating_sub(1).max(1);
     for index in 0..10u16 {
         let fg = if index < filled { color } else { t.empty };
-        let sx = x + index * segment;
-        // a cell of gap between segments once they are wide enough
-        let solid = if segment >= 2 { segment - 1 } else { 1 };
         put_text(
             buffer,
-            sx,
+            x + index * (solid + 1),
             y,
             solid,
             &"▬".repeat(usize::from(solid)),
@@ -589,8 +587,9 @@ fn draw_rows(
     // cells' colors into its padding
     let rect = Rect::new(area.x, area.y, area.width.saturating_sub(1), height);
     brutal::draw_box(buffer, rect, Edge::Heavy, t.line, t.card, t.bg);
-    let x = rect.x + 3;
-    let inner_width = rect.width.saturating_sub(6);
+    // a column of air inside each side line
+    let x = rect.x + 2;
+    let inner_width = rect.width.saturating_sub(4);
     let w = usize::from(inner_width);
     let bottom = rect.bottom().saturating_sub(1);
     let mut y = rect.y + 1;
@@ -625,9 +624,9 @@ fn draw_rows(
                 }
             }
             Row::Gauge(window) => {
-                put_text(buffer, x, y, 6, &window.label, Style::default().fg(t.muted).bg(t.card));
-                // the marks run the width of the panel, the % right of them
-                draw_gauge_wide(buffer, x + 6, y, inner_width.saturating_sub(12), window.left, t.card, t);
+                put_text(buffer, x, y, 5, &window.label, Style::default().fg(t.muted).bg(t.card));
+                // ten marks a cell apart across the panel, the % right of them
+                draw_gauge_wide(buffer, x + 5, y, inner_width.saturating_sub(10), window.left, t.card, t);
                 put_right_text(
                     buffer,
                     Rect::new(x, y, inner_width, 1),
