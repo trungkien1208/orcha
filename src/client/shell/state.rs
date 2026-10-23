@@ -122,6 +122,8 @@ pub(super) struct OrchaHits {
 /// orcha: presentation state of the orcha chrome (client only).
 #[derive(Default)]
 pub(crate) struct OrchaUiState {
+    /// The project orcha was started in was opened (or found open) already.
+    pub(super) launch_project_done: bool,
     /// Projects expanded in the sidebar besides the selected one.
     pub(super) open_projects: HashSet<String>,
     pub(super) history_open: bool,

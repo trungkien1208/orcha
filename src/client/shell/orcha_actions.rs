@@ -683,6 +683,73 @@ impl ClientShellState {
         }
         true
     }
+
+    /// orcha started inside a project opens that project: its folder (the
+    /// git root) gets a workspace unless one is already there, then it is
+    /// focused. Once, on the first snapshot.
+    pub(crate) fn open_launch_project(&mut self, outcome: &mut ClientShellInput) {
+        if self.orcha_ui.launch_project_done
+            || !crate::orcha_app::is_orcha()
+            || self.active_endpoint_id != ClientEndpointId::Local
+        {
+            return;
+        }
+        let Some(snapshot) = self.snapshot.as_deref() else {
+            return;
+        };
+        self.orcha_ui.launch_project_done = true;
+        let Some(project) = launch_project() else {
+            return;
+        };
+        let inside = |path: &str| std::path::Path::new(path).starts_with(&project);
+        let open = snapshot.workspaces.iter().find(|workspace| {
+            inside(&workspace.new_workspace_cwd)
+                || snapshot.panes.iter().any(|pane| {
+                    pane.workspace_id == workspace.workspace_id
+                        && pane.cwd.as_deref().is_some_and(inside)
+                })
+        });
+        let method = match open {
+            Some(workspace) if workspace.focused => return,
+            Some(workspace) => {
+                crate::api::schema::Method::WorkspaceFocus(crate::api::schema::WorkspaceTarget {
+                    workspace_id: workspace.workspace_id.clone(),
+                })
+            }
+            None => crate::api::schema::Method::WorkspaceCreate(
+                crate::api::schema::WorkspaceCreateParams {
+                    source_workspace_id: None,
+                    cwd: Some(project.to_string_lossy().into_owned()),
+                    focus: true,
+                    label: None,
+                    env: Default::default(),
+                },
+            ),
+        };
+        self.push_endpoint_method(method, outcome);
+        outcome.repaint = true;
+    }
+}
+
+/// The project the client was started in: the git root of the current
+/// folder, else the folder. Not the home folder or `/`.
+fn launch_project() -> Option<std::path::PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    if cwd.parent().is_none() || home.as_deref() == Some(cwd.as_path()) {
+        return None;
+    }
+    let root = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&cwd)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        .filter(|root| !root.is_empty())
+        .map(std::path::PathBuf::from);
+    Some(root.unwrap_or(cwd))
 }
 
 #[cfg(test)]

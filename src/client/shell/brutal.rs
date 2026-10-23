@@ -158,13 +158,7 @@ pub(super) fn set(buffer: &mut Buffer, x: u16, y: u16, symbol: &str, style: Styl
 /// lines right against the fill (so they read as the gap around the box,
 /// not as padding inside it); the side lines run on the fill's own end
 /// cells. Corners are square.
-pub(super) fn draw_box(
-    buffer: &mut Buffer,
-    rect: Rect,
-    line: Color,
-    fill: Color,
-    page: Color,
-) {
+pub(super) fn draw_box(buffer: &mut Buffer, rect: Rect, line: Color, fill: Color, page: Color) {
     if rect.width < 2 || rect.height < 3 {
         return;
     }
