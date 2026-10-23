@@ -758,21 +758,9 @@ fn draw_rows(
                 put_text(buffer, x, y, inner_width, &clip_right(&format!("{mark} {name}"), w), style);
             }
             Row::NewWorktree => {
-                let label = "+ NEW WORKTREE";
+                // an outlined button on the paper, like the mockup's dashed one
                 let button = Rect::new(x, y, inner_width, 1);
-                buffer.set_style(button, Style::default().bg(t.bg));
-                let pad = inner_width.saturating_sub(display_width(label)) / 2;
-                put_text(
-                    buffer,
-                    x + pad,
-                    y,
-                    display_width(label),
-                    label,
-                    Style::default()
-                        .fg(t.ink)
-                        .bg(t.bg)
-                        .add_modifier(Modifier::BOLD),
-                );
+                brutal::pill(buffer, button, "+ NEW WORKTREE", t.ink, t.bg, true, t);
                 hits.orcha.new_worktree = button;
             }
         }

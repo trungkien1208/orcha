@@ -11,6 +11,35 @@ use ratatui::style::Color;
 use super::render::{display_width, put_text};
 use super::*;
 
+/// The orcha look is on screen (set per frame by the shell render), so
+/// herdr's shared popup frame draws like orcha's popups.
+static ORCHA_LOOK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(super) fn set_orcha_look(on: bool) {
+    ORCHA_LOOK.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub(super) fn orcha_look() -> bool {
+    ORCHA_LOOK.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// herdr's popup frame in the orcha template: the fill, black eighth-block
+/// edges, a hard shadow merged into the right and bottom edges.
+pub(super) fn popup_panel(buffer: &mut Buffer, rect: Rect, fill: Color) {
+    let line = if is_light(fill) {
+        Color::Rgb(17, 17, 17)
+    } else {
+        Color::Rgb(0, 0, 0)
+    };
+    // the shadow sits on whatever (dimmed) page is around the popup
+    let page = buffer
+        .cell((rect.right().saturating_sub(1), rect.bottom().saturating_sub(1)))
+        .and_then(|cell| cell.style().bg)
+        .unwrap_or(Color::Reset);
+    draw_box(buffer, rect, Edge::Heavy, line, fill, page);
+    draw_box_shadow(buffer, rect, line, page);
+}
+
 /// The look's colors, resolved from a palette.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Brutal {

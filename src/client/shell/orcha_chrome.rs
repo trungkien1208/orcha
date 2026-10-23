@@ -169,24 +169,24 @@ pub(super) fn render_frame_and_tabs(
         if x + w > limit {
             break;
         }
-        // the open tab is a raised piece of the frame; the others are cards
+        // a box over the frame: a top edge in the row above, a line down
+        // each side; the open one has a yellow top and opens into the frame
         let open = tab.focused;
         let fill = if open { t.frame } else { t.card };
         let rect = Rect::new(x, y, w, 1);
         brutal::pill(buffer, rect, "", t.ink, fill, true, &t);
+        let edge = Style::default().fg(t.line).bg(t.bg);
+        let above = y.saturating_sub(1);
         if open {
-            // the frame's top edge opens under it
+            put_text(buffer, x + 1, above, w - 2, &"▂".repeat(usize::from(w - 2)), Style::default().fg(t.yellow).bg(t.bg));
             let joint = Style::default().fg(t.line).bg(t.frame);
-            put_text(buffer, x, frame.y, 1, "▁", Style::default().fg(t.line).bg(t.bg));
+            put_text(buffer, x, frame.y, 1, "\u{1FB7F}", edge);
             for cx in x + 1..x + w - 1 {
                 put_text(buffer, cx, frame.y, 1, " ", joint);
             }
-            put_text(buffer, x + w - 1, frame.y, 1, "▁", Style::default().fg(t.line).bg(t.bg));
-            // a lip over the open tab
-            let lip = Style::default().fg(t.line).bg(t.bg);
-            put_text(buffer, x, y.saturating_sub(1), 1, "▁", lip);
-            put_text(buffer, x + 1, y.saturating_sub(1), w - 2, &"▁".repeat(usize::from(w - 2)), lip);
-            put_text(buffer, x + w - 1, y.saturating_sub(1), 1, "▁", lip);
+            put_text(buffer, x + w - 1, frame.y, 1, "\u{1FB7C}", edge);
+        } else {
+            put_text(buffer, x + 1, above, w - 2, &"▁".repeat(usize::from(w - 2)), edge);
         }
         let name = label(tab);
         let mut style = Style::default()
@@ -268,7 +268,6 @@ pub(super) fn dress_panes(
         color_to_u32(t.line),
         color_to_u32(t.frame),
     );
-    let focused_pane = snapshot.focused_pane_id.as_deref();
     let inside = |rect: Rect, x: u16, y: u16| {
         x >= rect.x && x < rect.right() && y >= rect.y && y < rect.bottom()
     };
@@ -309,9 +308,8 @@ pub(super) fn dress_panes(
                     };
                     match glyph {
                         Some(glyph) => {
-                            if focused_pane != Some(pane.pane_id.as_str()) {
-                                cell.fg = line;
-                            }
+                            // black like the mockup; focus shows in the title bar
+                            cell.fg = line;
                             cell.bg = frame_bg;
                             cell.symbol = glyph.to_owned();
                         }

@@ -279,19 +279,32 @@ fn render_project_card(
     }
 }
 
-/// A folded project: one row on a card, a thick line down each side, its
-/// name and a mark per agent.
+/// A folded project: one row of the card that holds the folded projects
+/// (`first` draws its top edge, `last` its bottom edge), its name and a
+/// mark per agent.
+#[allow(clippy::too_many_arguments)] // one row, all inputs are distinct facts
 fn render_folded_project(
     buffer: &mut Buffer,
     rect: Rect,
     workspace: &ClientShellWorkspace,
     agents: &[&ClientShellAgent],
+    (first, last): (bool, bool),
     t: &Brutal,
     hits: &mut ShellHitMap,
 ) {
     let fill = t.card;
-    let row = Rect::new(rect.x, rect.y, rect.width, 1);
+    let edge = Style::default().fg(t.line).bg(t.bg);
+    let inner = rect.width.saturating_sub(2);
+    let mut row_y = rect.y;
+    if first {
+        put_text(buffer, rect.x + 1, row_y, inner, &"▁".repeat(usize::from(inner)), edge);
+        row_y += 1;
+    }
+    let row = Rect::new(rect.x, row_y, rect.width, 1);
     brutal::pill(buffer, row, "", t.ink, fill, true, t);
+    if last {
+        put_text(buffer, rect.x + 1, row_y + 1, inner, &"▔".repeat(usize::from(inner)), edge);
+    }
     let y = row.y;
     let x = rect.x + 2;
     put_text(buffer, x, y, 2, "▸ ", Style::default().fg(t.ink).bg(fill));
@@ -606,10 +619,26 @@ pub(crate) fn render_sidebar_tree(
         };
         items.push((workspace, agents, project_state));
     }
+    // folded projects share one card: the first of a run carries its top
+    // edge, the last its bottom edge
+    let folded_at = |index: usize| {
+        items
+            .get(index)
+            .is_some_and(|(_, _, state)| *state == ProjectState::Folded)
+    };
+    let run: Vec<(bool, bool)> = (0..items.len())
+        .map(|index| {
+            (
+                index == 0 || !folded_at(index - 1),
+                !folded_at(index + 1),
+            )
+        })
+        .collect();
     let heights: Vec<u16> = items
         .iter()
-        .map(|(_, agents, project_state)| match project_state {
-            ProjectState::Folded => 1,
+        .enumerate()
+        .map(|(index, (_, agents, project_state))| match project_state {
+            ProjectState::Folded => 1 + u16::from(run[index].0) + u16::from(run[index].1),
             _ => 3 + agents.len() as u16,
         })
         .collect();
@@ -654,7 +683,7 @@ pub(crate) fn render_sidebar_tree(
         let rect = Rect::new(x, y, width, height);
         match *project_state {
             ProjectState::Folded => {
-                render_folded_project(buffer, rect, workspace, agents, &t, hits)
+                render_folded_project(buffer, rect, workspace, agents, run[index], &t, hits)
             }
             expanded => render_project_card(buffer, rect, workspace, agents, expanded, &t, hits),
         }

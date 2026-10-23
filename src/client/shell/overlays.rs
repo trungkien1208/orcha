@@ -227,6 +227,10 @@ fn panel(
     if a.width < 2 || a.height < 2 {
         return None;
     }
+    if super::super::brutal::orcha_look() {
+        super::super::brutal::popup_panel(b, a, bg);
+        return Some(Rect::new(a.x + 1, a.y + 1, a.width - 2, a.height - 2));
+    }
     let background = Style::default().bg(bg).remove_modifier(Modifier::DIM);
     let border = Style::default().fg(c).bg(bg).remove_modifier(Modifier::DIM);
     for y in a.y..a.bottom() {

@@ -262,6 +262,7 @@ pub(super) fn render_shell(
     mut state: ShellRenderState<'_>,
 ) -> ShellHitMap {
     let mut hits = ShellHitMap::default();
+    super::brutal::set_orcha_look(layout.header.width > 0);
     if layout.header.width > 0 {
         // orcha's page: its margins and gaps are paper
         let bg = super::brutal::Brutal::new(&config.palette).bg;
