@@ -23,6 +23,8 @@ pub(crate) enum OrchaPopup {
     },
     /// Continue `pane`'s conversation with another agent.
     Handoff { selected: usize, pane: String },
+    /// Bring in projects from other tools; `chosen` per source.
+    Import { selected: usize, chosen: Vec<bool> },
     /// Start an agent on an account in a new tab of `workspace`.
     NewAgent {
         selected: usize,
@@ -737,11 +739,123 @@ fn render_handoff(
     Some(())
 }
 
+/// IMPORT: projects from the tools used before, one row per tool, each
+/// with a check; the primary button brings the checked ones in.
+fn render_import(
+    buffer: &mut Buffer,
+    selected: usize,
+    chosen: &[bool],
+    sources: &[crate::orcha_import::ImportSource],
+    t: &Brutal,
+    hits: &mut PopupHits,
+) -> Option<()> {
+    let count: usize = sources
+        .iter()
+        .zip(chosen)
+        .filter(|(_, on)| **on)
+        .map(|(source, _)| source.projects.len())
+        .sum();
+    let frame = popup_frame(
+        buffer,
+        76,
+        rows_height(sources.len()) + 2,
+        "IMPORT PROJECTS",
+        "found on this Mac · each becomes a project in the sidebar",
+        &[("↵", "import"), ("space", "check"), ("esc", "not now")],
+        "",
+        t,
+        hits,
+    )?;
+    if sources.is_empty() {
+        put_text(
+            buffer,
+            frame.body.x + 2,
+            frame.body.y,
+            frame.body.width.saturating_sub(4),
+            "nothing to import: no Orca, VS Code, Cursor or JetBrains projects found",
+            Style::default().fg(t.muted).bg(t.bg),
+        );
+        return Some(());
+    }
+    let mut y = frame.body.y;
+    for (index, source) in sources.iter().enumerate() {
+        if y + ROW > frame.body.bottom() {
+            break;
+        }
+        let rect = Rect::new(frame.body.x, y, frame.body.width, ROW);
+        let fill = row_box(buffer, rect, index == 0, index == selected, t);
+        let on = chosen.get(index).copied().unwrap_or(false);
+        let check = brutal::chip(
+            buffer,
+            rect.x + 2,
+            y,
+            5,
+            if on { "✓" } else { " " },
+            t.chip_text,
+            if on { t.green } else { t.frame },
+        );
+        let x = rect.x + 3 + check;
+        let title = format!("{} · {} projects", source.name, source.projects.len());
+        put_text(
+            buffer,
+            x,
+            y,
+            display_width(&title),
+            &title,
+            Style::default()
+                .fg(t.ink)
+                .bg(fill)
+                .add_modifier(Modifier::BOLD),
+        );
+        let names = source
+            .projects
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let width = rect.right().saturating_sub(x + 2);
+        put_text(
+            buffer,
+            x,
+            y + 1,
+            width,
+            &brutal::clip(&names, usize::from(width)),
+            Style::default().fg(t.muted).bg(fill),
+        );
+        hits.actions
+            .push((Rect::new(rect.x + 2, y, check, 1), index));
+        hits.rows.push((rect, index));
+        y += ROW + 1;
+    }
+    // the primary action, under the list
+    let label = if count == 0 {
+        "IMPORT".to_owned()
+    } else {
+        format!("IMPORT {count} ↵")
+    };
+    let action = button(
+        buffer,
+        frame.body.right() - 1,
+        frame.body.bottom().saturating_sub(1),
+        &label,
+        if count == 0 {
+            ButtonKind::Plain
+        } else {
+            ButtonKind::Primary
+        },
+        t.bg,
+        t,
+    );
+    hits.actions.push((action, sources.len()));
+    Some(())
+}
+
 /// Draws the open popup over the composed frame.
 pub(super) fn render_popup(
     buffer: &mut Buffer,
     popup: &OrchaPopup,
     accounts: Option<&[Account]>,
+    imports: &[crate::orcha_import::ImportSource],
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
 ) -> PopupHits {
@@ -762,6 +876,9 @@ pub(super) fn render_popup(
         }
         OrchaPopup::Handoff { selected, pane } => {
             let _ = render_handoff(buffer, *selected, pane, snapshot, config, &t, &mut hits);
+        }
+        OrchaPopup::Import { selected, chosen } => {
+            let _ = render_import(buffer, *selected, chosen, imports, &t, &mut hits);
         }
         OrchaPopup::NewAgent {
             selected, project, ..

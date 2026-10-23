@@ -34,6 +34,7 @@ mod logging;
 mod metadata_tokens;
 mod noninteractive_process;
 mod orcha_app;
+mod orcha_import;
 mod pane;
 use ghostty_vt::pane_graphics_files;
 mod persist;
@@ -820,6 +821,9 @@ fn main() -> io::Result<()> {
     if let Err(err) = server::autodetect::auto_detect_launch(saved_federation) {
         eprintln!("herdr: {err}");
         std::process::exit(1);
+    }
+    if orcha_app::is_orcha() {
+        eprintln!("orcha: your agents keep running. Run `orcha` to come back.");
     }
     Ok(())
 }

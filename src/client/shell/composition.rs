@@ -723,6 +723,7 @@ impl ClientShellState {
                 &mut composed,
                 popup,
                 self.accounts.data(),
+                &self.orcha_ui.import_sources,
                 snapshot,
                 &self.config,
             );

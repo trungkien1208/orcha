@@ -40,9 +40,17 @@ pub(super) fn render_header(
         &counts,
         Style::default().fg(t.muted).bg(t.bg),
     );
+    // right: settings, then quit (back to the terminal; agents keep running)
+    let quit_text = "⏻ quit";
+    let quit = Rect::new(
+        area.right().saturating_sub(display_width(quit_text) + 5),
+        area.y,
+        display_width(quit_text) + 4,
+        1,
+    );
     let text = "⌘, settings";
     let button = Rect::new(
-        area.right().saturating_sub(display_width(text) + 5),
+        quit.x.saturating_sub(display_width(text) + 5),
         area.y,
         display_width(text) + 4,
         1,
@@ -52,6 +60,8 @@ pub(super) fn render_header(
     }
     brutal::pill(buffer, button, text, t.ink, t.card, true, &t);
     hits.orcha.settings = button;
+    brutal::pill(buffer, quit, quit_text, t.ink, t.card, true, &t);
+    hits.orcha.quit = quit;
     // low fuel: a red offer left of settings, a click opens the accounts
     if let Some(hint) = &ui.low_fuel_hint {
         let hint = format!(" ⚠ {hint} ");

@@ -4,6 +4,8 @@ use super::*;
 pub(super) enum ClientGlobalMenuAction {
     Binding(crate::input::KeybindAction),
     WhatsNew,
+    /// orcha: bring in projects from Orca, VS Code, Cursor, JetBrains.
+    ImportProjects,
 }
 
 pub(super) fn global_menu_attention(snapshot: &ClientShellSnapshot) -> bool {
@@ -46,8 +48,13 @@ pub(super) fn global_menu_items(
             ClientGlobalMenuAction::WhatsNew,
         ));
     }
+    let orcha = crate::orcha_app::is_orcha();
+    if orcha {
+        items.push(("import projects", ClientGlobalMenuAction::ImportProjects));
+    }
     items.push((
-        "detach",
+        // orcha: plain words; the agents keep running either way
+        if orcha { "quit to terminal" } else { "detach" },
         ClientGlobalMenuAction::Binding(crate::input::KeybindAction::Detach),
     ));
     items
@@ -104,6 +111,7 @@ impl ClientShellState {
                 self.record_binding(crate::input::KeybindMatch::Action(binding), outcome)
             }
             ClientGlobalMenuAction::WhatsNew => self.open_release_notes(),
+            ClientGlobalMenuAction::ImportProjects => self.start_import_scan(),
         }
         outcome.repaint = true;
     }

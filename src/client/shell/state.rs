@@ -99,6 +99,8 @@ pub(super) enum ClientMobileTarget {
 /// orcha: click targets of the orcha chrome.
 #[derive(Default)]
 pub(super) struct OrchaHits {
+    /// orcha: back to the terminal (the agents keep running).
+    pub(super) quit: Rect,
     pub(super) settings: Rect,
     pub(super) fuel: Rect,
     pub(super) fuel_hint: Rect,
@@ -124,6 +126,11 @@ pub(super) struct OrchaHits {
 pub(crate) struct OrchaUiState {
     /// The project orcha was started in was opened (or found open) already.
     pub(super) launch_project_done: bool,
+    /// Projects other tools know about, being looked up off the input path.
+    pub(super) import_scan:
+        Option<std::sync::mpsc::Receiver<Vec<crate::orcha_import::ImportSource>>>,
+    /// What the import popup offers.
+    pub(super) import_sources: Vec<crate::orcha_import::ImportSource>,
     /// Projects expanded in the sidebar besides the selected one.
     pub(super) open_projects: HashSet<String>,
     pub(super) history_open: bool,

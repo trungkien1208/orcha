@@ -92,6 +92,13 @@ impl ClientShellState {
             return true;
         }
         let hits = &self.hits.orcha;
+        if super::contains(hits.quit, point) {
+            self.record_binding(
+                crate::input::KeybindMatch::Action(crate::input::KeybindAction::Detach),
+                outcome,
+            );
+            return true;
+        }
         if super::contains(hits.settings, point) {
             self.record_binding(
                 crate::input::KeybindMatch::Action(crate::input::KeybindAction::Settings),
@@ -277,6 +284,9 @@ impl ClientShellState {
             Some(super::orcha_popup::OrchaPopup::NewAgent { .. }) => {
                 self.accounts.data().map_or(0, <[_]>::len) + 1
             }
+            Some(super::orcha_popup::OrchaPopup::Import { .. }) => {
+                self.orcha_ui.import_sources.len()
+            }
             None => 0,
         }
     }
@@ -286,7 +296,8 @@ impl ClientShellState {
             Some(
                 super::orcha_popup::OrchaPopup::Accounts { selected, .. }
                 | super::orcha_popup::OrchaPopup::Handoff { selected, .. }
-                | super::orcha_popup::OrchaPopup::NewAgent { selected, .. },
+                | super::orcha_popup::OrchaPopup::NewAgent { selected, .. }
+                | super::orcha_popup::OrchaPopup::Import { selected, .. },
             ) => *selected = index,
             None => {}
         }
@@ -297,7 +308,8 @@ impl ClientShellState {
             Some(
                 super::orcha_popup::OrchaPopup::Accounts { selected, .. }
                 | super::orcha_popup::OrchaPopup::Handoff { selected, .. }
-                | super::orcha_popup::OrchaPopup::NewAgent { selected, .. },
+                | super::orcha_popup::OrchaPopup::NewAgent { selected, .. }
+                | super::orcha_popup::OrchaPopup::Import { selected, .. },
             ) => *selected,
             None => 0,
         }
@@ -350,6 +362,14 @@ impl ClientShellState {
         };
         let orcha = self.config.orcha.clone();
         match popup {
+            // a check flips; the button past the rows imports
+            super::orcha_popup::OrchaPopup::Import { .. } => {
+                if index >= self.orcha_ui.import_sources.len() {
+                    self.import_chosen(outcome);
+                } else {
+                    self.toggle_import(index);
+                }
+            }
             super::orcha_popup::OrchaPopup::Accounts { pane, .. } => {
                 let Some(account) = self
                     .accounts
@@ -481,6 +501,22 @@ impl ClientShellState {
             }
             KeyCode::Up | KeyCode::Char('k') | KeyCode::BackTab if len > 0 => {
                 self.popup_select((selected + len - 1) % len);
+            }
+            KeyCode::Enter
+                if matches!(
+                    self.orcha_ui.popup,
+                    Some(super::orcha_popup::OrchaPopup::Import { .. })
+                ) =>
+            {
+                self.import_chosen(outcome);
+            }
+            KeyCode::Char(' ')
+                if matches!(
+                    self.orcha_ui.popup,
+                    Some(super::orcha_popup::OrchaPopup::Import { .. })
+                ) =>
+            {
+                self.toggle_import(selected);
             }
             KeyCode::Enter => {
                 let alternate = key.modifiers.contains(KeyModifiers::ALT);
@@ -684,9 +720,107 @@ impl ClientShellState {
         true
     }
 
-    /// orcha started inside a project opens that project: its folder (the
-    /// git root) gets a workspace unless one is already there, then it is
-    /// focused. Once, on the first snapshot.
+    /// Looks for projects to import off the input path; the popup opens
+    /// when the list is in (see `poll_import_scan`).
+    pub(super) fn start_import_scan(&mut self) {
+        if self.orcha_ui.import_scan.is_some() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let spawned = crate::thread_spawn::spawn_named("orcha-import", move || {
+            let _ = tx.send(crate::orcha_import::find_sources());
+        });
+        if spawned.is_ok() {
+            self.orcha_ui.import_scan = Some(rx);
+        }
+    }
+
+    /// The import list came in: offer it (asked once; the menu offers it
+    /// again any time). Returns true when the popup opened.
+    pub(super) fn poll_import_scan(&mut self) -> bool {
+        let Some(rx) = self.orcha_ui.import_scan.as_ref() else {
+            return false;
+        };
+        let Ok(sources) = rx.try_recv() else {
+            if matches!(
+                rx.try_recv(),
+                Err(std::sync::mpsc::TryRecvError::Disconnected)
+            ) {
+                self.orcha_ui.import_scan = None;
+            }
+            return false;
+        };
+        self.orcha_ui.import_scan = None;
+        let first_time = !crate::orcha_import::asked();
+        crate::orcha_import::mark_asked();
+        // nothing found on the first run: say nothing
+        if sources.is_empty() && first_time {
+            return false;
+        }
+        let chosen = vec![true; sources.len()];
+        self.orcha_ui.import_sources = sources;
+        self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::Import {
+            selected: 0,
+            chosen,
+        });
+        true
+    }
+
+    fn toggle_import(&mut self, index: usize) {
+        if let Some(super::orcha_popup::OrchaPopup::Import { chosen, .. }) =
+            self.orcha_ui.popup.as_mut()
+        {
+            if let Some(on) = chosen.get_mut(index) {
+                *on = !*on;
+            }
+        }
+    }
+
+    /// Adds the checked sources' projects as workspaces (each folder once,
+    /// none that is open already), in the background.
+    fn import_chosen(&mut self, outcome: &mut ClientShellInput) {
+        let Some(super::orcha_popup::OrchaPopup::Import { chosen, .. }) =
+            self.orcha_ui.popup.take()
+        else {
+            return;
+        };
+        let Some(snapshot) = self.snapshot.as_deref() else {
+            return;
+        };
+        let mut seen = std::collections::HashSet::new();
+        let mut methods = Vec::new();
+        for (source, _) in self
+            .orcha_ui
+            .import_sources
+            .iter()
+            .zip(&chosen)
+            .filter(|(_, on)| **on)
+        {
+            for (name, path) in &source.projects {
+                let folder = std::path::Path::new(path);
+                if !seen.insert(path.clone()) || workspace_for_folder(snapshot, folder).is_some() {
+                    continue;
+                }
+                methods.push(crate::api::schema::Method::WorkspaceCreate(
+                    crate::api::schema::WorkspaceCreateParams {
+                        source_workspace_id: None,
+                        cwd: Some(path.clone()),
+                        focus: false,
+                        label: Some(name.clone()),
+                        env: Default::default(),
+                    },
+                ));
+            }
+        }
+        for method in methods {
+            self.push_endpoint_method(method, outcome);
+        }
+        outcome.repaint = true;
+    }
+
+    /// On the first snapshot: orcha started inside a project opens that
+    /// project (its git root gets a workspace unless one is already there,
+    /// then it is focused); the first time ever, the import popup is offered.
     pub(crate) fn open_launch_project(&mut self, outcome: &mut ClientShellInput) {
         if self.orcha_ui.launch_project_done
             || !crate::orcha_app::is_orcha()
@@ -698,37 +832,49 @@ impl ClientShellState {
             return;
         };
         self.orcha_ui.launch_project_done = true;
-        let Some(project) = launch_project() else {
-            return;
-        };
-        let inside = |path: &str| std::path::Path::new(path).starts_with(&project);
-        let open = snapshot.workspaces.iter().find(|workspace| {
-            inside(&workspace.new_workspace_cwd)
-                || snapshot.panes.iter().any(|pane| {
-                    pane.workspace_id == workspace.workspace_id
-                        && pane.cwd.as_deref().is_some_and(inside)
-                })
-        });
-        let method = match open {
-            Some(workspace) if workspace.focused => return,
-            Some(workspace) => {
-                crate::api::schema::Method::WorkspaceFocus(crate::api::schema::WorkspaceTarget {
-                    workspace_id: workspace.workspace_id.clone(),
-                })
-            }
-            None => crate::api::schema::Method::WorkspaceCreate(
-                crate::api::schema::WorkspaceCreateParams {
-                    source_workspace_id: None,
-                    cwd: Some(project.to_string_lossy().into_owned()),
-                    focus: true,
-                    label: None,
-                    env: Default::default(),
-                },
-            ),
-        };
-        self.push_endpoint_method(method, outcome);
-        outcome.repaint = true;
+        let method =
+            launch_project().and_then(|project| match workspace_for_folder(snapshot, &project) {
+                Some(workspace) if workspace.focused => None,
+                Some(workspace) => Some(crate::api::schema::Method::WorkspaceFocus(
+                    crate::api::schema::WorkspaceTarget {
+                        workspace_id: workspace.workspace_id.clone(),
+                    },
+                )),
+                None => Some(crate::api::schema::Method::WorkspaceCreate(
+                    crate::api::schema::WorkspaceCreateParams {
+                        source_workspace_id: None,
+                        cwd: Some(project.to_string_lossy().into_owned()),
+                        focus: true,
+                        label: None,
+                        env: Default::default(),
+                    },
+                )),
+            });
+        if let Some(method) = method {
+            self.push_endpoint_method(method, outcome);
+            outcome.repaint = true;
+        }
+        // the first time: offer the projects other tools know about
+        if !crate::orcha_import::asked() {
+            self.start_import_scan();
+        }
     }
+}
+
+/// The workspace already there for a folder: its own folder, or one of
+/// its panes', is inside it.
+fn workspace_for_folder<'a>(
+    snapshot: &'a ClientShellSnapshot,
+    folder: &std::path::Path,
+) -> Option<&'a crate::protocol::ClientShellWorkspace> {
+    let inside = |path: &str| std::path::Path::new(path).starts_with(folder);
+    snapshot.workspaces.iter().find(|workspace| {
+        inside(&workspace.new_workspace_cwd)
+            || snapshot.panes.iter().any(|pane| {
+                pane.workspace_id == workspace.workspace_id
+                    && pane.cwd.as_deref().is_some_and(inside)
+            })
+    })
 }
 
 /// The project the client was started in: the git root of the current
