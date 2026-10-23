@@ -396,7 +396,9 @@ pub(crate) fn render_sidebar_tree(
         .map(|(index, (_, agents, kind))| {
             let last = index + 1 == items.len();
             let under_raised = index > 0 && items[index - 1].2 == Card::Selected;
-            u16::from(!under_raised)
+            // folded cards right under folded cards join them, no line between
+            let joined = *kind == Card::Folded && index > 0 && items[index - 1].2 == Card::Folded;
+            u16::from(!under_raised && !joined)
                 + content(agents, *kind)
                 + u16::from(last || *kind == Card::Selected)
         })
@@ -440,14 +442,15 @@ pub(crate) fn render_sidebar_tree(
         }
         let rows = content(agents, *kind);
         let under_raised = index > 0 && items[index - 1].2 == Card::Selected;
+        let joined = *kind == Card::Folded && index > 0 && items[index - 1].2 == Card::Folded;
         // the line over it: shared with the card above; under the raised
-        // card its shadow row is the gap
-        if !under_raised {
+        // card its shadow row is the gap; folded cards join without one
+        if !under_raised && !joined {
             let top = if previous_raised { "▁" } else { "\u{1FB80}" };
             put_text(buffer, x, y, card_width, &top.repeat(usize::from(card_width)), line);
         }
         // `top` is the row over its body (its own line row, or the shadow row)
-        let top = if under_raised { y.saturating_sub(1) } else { y };
+        let top = if under_raised || joined { y.saturating_sub(1) } else { y };
         let body_rect = Rect::new(x, top + 1, card_width, rows);
         match kind {
             Card::Folded => render_folded_row(buffer, body_rect, workspace, agents, &t, hits),
