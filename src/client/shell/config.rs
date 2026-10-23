@@ -429,6 +429,16 @@ impl ClientShellConfig {
             sidebar_width.clamp(min, max)
         }
         .min(cols.saturating_sub(1));
+        if self.status_bar && self.tab_bar_position == TabBarPositionConfig::Top {
+            if let Some(layout) = orcha_layout(
+                cols,
+                rows,
+                sidebar_width,
+                self.right_panel.then_some(self.right_panel_width),
+            ) {
+                return layout;
+            }
+        }
         // orcha: the status bar takes the last row across the whole width
         let status_height = u16::from(self.status_bar && rows > 3);
         let status_bar = Rect::new(0, rows.saturating_sub(status_height), cols, status_height);
@@ -450,33 +460,6 @@ impl ClientShellConfig {
         );
         let show_tab_bar = rows > 1 && !(self.hide_tab_bar_when_single_tab && tab_count == 1);
         let tab_height = u16::from(show_tab_bar);
-        // orcha: one header row across the whole width; below it the sidebar,
-        // the main frame (tabs in its top edge, a hard shadow right and under
-        // it) and the right panel
-        if self.status_bar && self.tab_bar_position == TabBarPositionConfig::Top && rows > 5 {
-            let body_rows = rows.saturating_sub(1);
-            let frame = Rect::new(
-                main.x.saturating_add(1),
-                1,
-                main.width.saturating_sub(3),
-                body_rows.saturating_sub(1),
-            );
-            return ClientShellLayout {
-                sidebar: Rect::new(0, 1, sidebar_width, body_rows),
-                tab_bar: Rect::new(frame.x.saturating_add(2), frame.y, frame.width.saturating_sub(4), 1),
-                mobile_header: Rect::default(),
-                pane_surface: Rect::new(
-                    frame.x.saturating_add(2),
-                    frame.y.saturating_add(1),
-                    frame.width.saturating_sub(4),
-                    frame.height.saturating_sub(2),
-                ),
-                status_bar,
-                right_panel: Rect::new(right_panel.x, 1, right_panel.width, body_rows),
-                header: Rect::new(0, 0, cols, 1),
-                main_frame: frame,
-            };
-        }
         let (tab_bar, pane_surface) = match self.tab_bar_position {
             TabBarPositionConfig::Top => (
                 Rect::new(main.x, 0, main.width, tab_height),
@@ -627,4 +610,66 @@ mod tests {
             vec![(KeyCode::Char('x'), KeyModifiers::CONTROL)]
         );
     }
+}
+
+/// orcha's page (docs/orcha/SPEC.md §2), in cells: a margin around it, a
+/// header three rows tall, the sidebar, the main frame with the tabs over
+/// it and the right panel side by side with gaps, the status bar at the
+/// foot. One cell is about 8×17 px of the mockup.
+fn orcha_layout(
+    cols: u16,
+    rows: u16,
+    sidebar_width: u16,
+    panel_width: Option<u16>,
+) -> Option<ClientShellLayout> {
+    const MARGIN_X: u16 = 2;
+    const GAP_X: u16 = 2;
+    const HEADER: u16 = 3;
+    const STATUS: u16 = 3;
+    if rows < 24 || cols < 90 {
+        return None;
+    }
+    let width = cols - 2 * MARGIN_X;
+    let header = Rect::new(MARGIN_X, 1, width, HEADER);
+    let status_bar = Rect::new(MARGIN_X, rows - 1 - STATUS, width, STATUS);
+    // box edges leave most of their row empty: that is the gap
+    let body_y = header.bottom();
+    let body_height = status_bar.y.saturating_sub(body_y);
+    let sidebar = Rect::new(MARGIN_X, body_y, sidebar_width.min(width / 3), body_height);
+    let rest = width.saturating_sub(sidebar.width + GAP_X);
+    // the panel only when the panes keep room
+    let panel = panel_width
+        .map(|width| width.clamp(24, 60))
+        .filter(|panel| rest >= panel + GAP_X + 60)
+        .unwrap_or(0);
+    let right_panel = Rect::new(cols - MARGIN_X - panel, body_y, panel, body_height);
+    let main_x = sidebar.right() + GAP_X;
+    let main_right = if panel > 0 {
+        right_panel.x - GAP_X
+    } else {
+        cols - MARGIN_X
+    };
+    // two rows of tabs over the frame: their top edges, then their labels
+    let frame = Rect::new(
+        main_x,
+        body_y + 2,
+        main_right.saturating_sub(main_x),
+        body_height.saturating_sub(2),
+    );
+    Some(ClientShellLayout {
+        sidebar,
+        tab_bar: Rect::new(frame.x + 1, body_y + 1, frame.width.saturating_sub(2), 1),
+        mobile_header: Rect::default(),
+        // the panes sit in the frame with a padding of a row and two columns
+        pane_surface: Rect::new(
+            frame.x + 2,
+            frame.y + 2,
+            frame.width.saturating_sub(4),
+            frame.height.saturating_sub(4),
+        ),
+        status_bar,
+        right_panel,
+        header,
+        main_frame: frame,
+    })
 }

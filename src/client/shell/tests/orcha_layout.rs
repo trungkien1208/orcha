@@ -98,16 +98,17 @@ fn five_regions_compose() {
         eprintln!("|{row}|");
     }
     let layout = state.layout(140, 30);
-    assert_eq!(layout.status_bar, Rect::new(0, 29, 140, 1));
-    assert_eq!(layout.header, Rect::new(0, 0, 140, 1));
-    assert_eq!(layout.sidebar.y, 1);
-    assert_eq!(layout.right_panel.width, 34);
-    assert_eq!(layout.main_frame.y, 1, "the frame starts under the header");
-    assert_eq!(layout.tab_bar.y, layout.main_frame.y, "tabs sit in the frame's top edge");
+    // a margin of two columns and a row around the page
+    assert_eq!(layout.status_bar, Rect::new(2, 26, 136, 3));
+    assert_eq!(layout.header, Rect::new(2, 1, 136, 3));
+    assert_eq!(layout.sidebar.y, 4, "right under the header (box edges are the gap)");
+    assert_eq!(layout.right_panel.width, 38);
+    assert_eq!(layout.main_frame.y, 6, "two rows of tabs over the frame");
+    assert_eq!(layout.tab_bar.y + 1, layout.main_frame.y, "tab labels sit on the frame");
     assert!(layout.pane_surface.x > layout.main_frame.x);
     assert!(layout.main_frame.right() < layout.right_panel.x);
-    assert!(rows[0].contains("ORCHA") && rows[0].contains("settings"));
-    let last = rows.last().expect("status row");
+    assert!(rows[2].contains("ORCHA") && rows[2].contains("settings"));
+    let last = &rows[27];
     assert!(
         last.contains("#42") && last.contains("Dark mode for the menu"),
         "status bar holds the right entries"

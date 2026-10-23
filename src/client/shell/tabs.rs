@@ -243,13 +243,30 @@ pub(crate) fn render_tab_bar(
 /// joins them when it is placed in the status bar.
 pub(crate) fn render_status_bar(
     buffer: &mut Buffer,
-    area: Rect,
+    outer: Rect,
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     fuel: Option<&super::super::accounts::Account>,
 ) {
     let t = super::super::brutal::Brutal::new(&config.palette);
     let bg = t.status_bg;
+    // the margin around it is page; a bar of three rows is one bar of two
+    let page = Rect::new(0, outer.y, buffer.area.width, buffer.area.bottom() - outer.y)
+        .intersection(buffer.area);
+    buffer.set_style(page, Style::default().bg(t.bg));
+    let area = Rect::new(outer.x, outer.y + outer.height / 2, outer.width, 1);
+    if outer.height >= 3 {
+        let edge = Style::default().fg(bg).bg(t.bg);
+        put_text(buffer, outer.x, outer.y, outer.width, &"▄".repeat(usize::from(outer.width)), edge);
+        put_text(
+            buffer,
+            outer.x,
+            outer.bottom() - 1,
+            outer.width,
+            &"▀".repeat(usize::from(outer.width)),
+            edge,
+        );
+    }
     buffer.set_style(area, Style::default().bg(bg).fg(t.status_text));
     let mut parts: Vec<&str> = Vec::new();
     for segment in &snapshot.tab_bar_right {
@@ -277,7 +294,7 @@ pub(crate) fn render_status_bar(
     let text = Style::default().fg(t.status_text).bg(bg);
     let muted = Style::default().fg(t.muted).bg(bg);
 
-    let mut x = area.x.saturating_add(1);
+    let mut x = area.x.saturating_add(2);
     for (index, part) in left.iter().enumerate() {
         if index > 0 {
             x = x.saturating_add(2);
@@ -341,7 +358,7 @@ pub(crate) fn render_status_bar(
     let width = display_width(&joined) + fuel_width;
     let start = area
         .right()
-        .saturating_sub(width.saturating_add(1))
+        .saturating_sub(width.saturating_add(2))
         .max(x.saturating_add(2));
     let mut cx = start;
     if let Some((who, windows)) = fuel_text {

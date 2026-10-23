@@ -87,7 +87,9 @@ fn state_dot(status: AgentStatus, t: &Brutal) -> (&'static str, Color) {
     }
 }
 
-/// The two top buttons: a raised green NEW and an outline menu.
+/// The two top buttons, three rows tall: a raised green NEW and an
+/// outlined menu.
+#[allow(clippy::too_many_arguments)] // one render call, all inputs are distinct facts
 fn render_buttons(
     buffer: &mut Buffer,
     x: u16,
@@ -101,50 +103,24 @@ fn render_buttons(
     if !config.mouse_capture || width < 16 {
         return;
     }
-    let menu_width = 10.min(width / 2);
-    let new_width = width.saturating_sub(menu_width + 2);
-    let new_rect = Rect::new(x, y, new_width, 1);
-    let label = "+ NEW";
-    let pad = new_width.saturating_sub(display_width(label)) / 2;
-    buffer.set_style(new_rect, Style::default().bg(t.green));
-    put_text(
-        buffer,
-        x + pad,
-        y,
-        new_width.saturating_sub(pad),
-        label,
-        Style::default()
-            .fg(t.chip_text)
-            .bg(t.green)
-            .add_modifier(Modifier::BOLD),
-    );
-    brutal::draw_shadow(buffer, new_rect, t.shadow, t.bg);
+    let menu_width = (width * 2 / 5).clamp(10, 16);
+    let new_rect = Rect::new(x, y, width.saturating_sub(menu_width + 2), 3);
+    super::orcha_chrome::boxed_label(buffer, new_rect, "+ NEW", t.chip_text, t.green, true, t);
     hits.new_workspace = new_rect;
-
     let attention = super::global_menu::global_menu_attention(snapshot);
-    let menu_x = new_rect.right() + 2;
-    let menu_rect = Rect::new(menu_x, y, menu_width, 1);
-    let (glyph, color) = if attention { ("●", t.pink) } else { ("≡", t.ink) };
-    buffer.set_style(menu_rect, Style::default().bg(t.card));
-    put_text(
-        buffer,
-        menu_x + 1,
-        y,
-        1,
-        glyph,
-        Style::default().fg(color).bg(t.card),
-    );
-    put_text(
-        buffer,
-        menu_x + 3,
-        y,
-        menu_width.saturating_sub(3),
-        "menu",
-        Style::default()
-            .fg(t.ink)
-            .bg(t.card)
-            .add_modifier(Modifier::BOLD),
-    );
+    let menu_rect = Rect::new(new_rect.right() + 2, y, menu_width, 3);
+    let label = if attention { "● menu" } else { "≡ menu" };
+    super::orcha_chrome::boxed_label(buffer, menu_rect, label, t.ink, t.bg, false, t);
+    if attention {
+        put_text(
+            buffer,
+            menu_rect.x + (menu_rect.width.saturating_sub(6)) / 2,
+            y + 1,
+            1,
+            "●",
+            Style::default().fg(t.pink).bg(t.bg),
+        );
+    }
     hits.global_launcher = menu_rect;
 }
 
@@ -175,11 +151,19 @@ fn render_project_card(
             );
         }
     } else {
-        brutal::draw_box(buffer, rect, Edge::Dashed, t.line, t.bg, t.bg);
+        let fill = if brutal::is_light(t.bg) { t.bg } else { t.frame };
+        brutal::draw_box(buffer, rect, Edge::Dashed, t.line, fill, t.bg);
     }
-    let fill = if selected { t.card } else { t.bg };
-    let x = rect.x + 2;
-    let width = rect.width.saturating_sub(4);
+    let fill = if selected {
+        t.card
+    } else if brutal::is_light(t.bg) {
+        t.bg
+    } else {
+        t.frame
+    };
+    let x = rect.x + 3;
+    // the selected card's right edge carries its shadow
+    let width = rect.width.saturating_sub(5);
     let y = rect.y + 1;
     let branch = workspace
         .branch
@@ -294,7 +278,8 @@ fn render_project_card(
     }
 }
 
-/// A folded project: one row, its name and a dot per agent.
+/// A folded project: a thin box around one row, its name and a mark per
+/// agent.
 fn render_folded_project(
     buffer: &mut Buffer,
     rect: Rect,
@@ -303,46 +288,44 @@ fn render_folded_project(
     t: &Brutal,
     hits: &mut ShellHitMap,
 ) {
-    buffer.set_style(rect, Style::default().bg(t.bg));
-    put_text(
-        buffer,
-        rect.x + 1,
-        rect.y,
-        2,
-        "▸ ",
-        Style::default().fg(t.ink).bg(t.bg),
-    );
+    // light: an outline on the paper; dark: a card, black lines vanish on charcoal
+    let fill = if brutal::is_light(t.bg) { t.bg } else { t.card };
+    brutal::draw_box(buffer, rect, Edge::Light, t.line, fill, t.bg);
+    let y = rect.y + 1;
+    let x = rect.x + 2;
+    put_text(buffer, x, y, 2, "▸ ", Style::default().fg(t.ink).bg(fill));
     hits.orcha
         .project_toggles
-        .push((Rect::new(rect.x + 1, rect.y, 2, 1), workspace.workspace_id.clone()));
-    let dots_width = if agents.is_empty() {
+        .push((Rect::new(x, y, 2, 1), workspace.workspace_id.clone()));
+    let marks_width = if agents.is_empty() {
         4
     } else {
-        (agents.len().min(8) * 2) as u16
+        (agents.len().min(6) * 2 - 1) as u16
     };
-    let name_width = rect.width.saturating_sub(dots_width + 5);
+    let right = rect.right().saturating_sub(2);
+    let name_width = right.saturating_sub(x + 3 + marks_width + 1);
     put_text(
         buffer,
-        rect.x + 3,
-        rect.y,
+        x + 2,
+        y,
         name_width,
         &brutal::clip(&workspace.label.to_uppercase(), usize::from(name_width)),
         Style::default()
             .fg(t.ink)
-            .bg(t.bg)
+            .bg(fill)
             .add_modifier(Modifier::BOLD),
     );
-    let mut x = rect.right().saturating_sub(dots_width + 1);
+    let mut mx = right.saturating_sub(marks_width);
     if agents.is_empty() {
-        put_text(buffer, x, rect.y, 4, "idle", Style::default().fg(t.muted).bg(t.bg));
+        put_text(buffer, mx, y, 4, "idle", Style::default().fg(t.muted).bg(fill));
     }
-    for agent in agents.iter().take(8) {
+    for agent in agents.iter().take(6) {
         let (dot, color) = state_dot(agent.agent_status, t);
-        put_text(buffer, x, rect.y, 1, dot, Style::default().fg(color).bg(t.bg));
-        x += 2;
+        put_text(buffer, mx, y, 1, dot, Style::default().fg(color).bg(fill));
+        mx += 2;
     }
     hits.workspaces.push(WorkspaceHit {
-        rect: Rect::new(rect.x + 3, rect.y, rect.width.saturating_sub(3), 1),
+        rect: Rect::new(x + 2, y, rect.width.saturating_sub(5), 1),
         endpoint_id: ClientEndpointId::Local,
         workspace_id: workspace.workspace_id.clone(),
         indented: false,
@@ -375,8 +358,8 @@ fn render_process(
 ) {
     brutal::draw_box(buffer, rect, Edge::Heavy, t.line, t.card, t.bg);
     brutal::draw_box_shadow(buffer, rect, t.shadow, t.bg);
-    let x = rect.x + 2;
-    let width = rect.width.saturating_sub(4);
+    let x = rect.x + 3;
+    let width = rect.width.saturating_sub(6);
     let mut y = rect.y + 1;
     put_text(
         buffer,
@@ -393,7 +376,7 @@ fn render_process(
     let count_width = display_width(&count);
     put_text(
         buffer,
-        rect.right().saturating_sub(count_width + 2),
+        (x + width).saturating_sub(count_width),
         y,
         count_width,
         &count,
@@ -402,7 +385,7 @@ fn render_process(
             .bg(t.ink)
             .add_modifier(Modifier::BOLD),
     );
-    y += 1;
+    y += 2;
     let leg = (width / 4).max(4);
     // a narrow sidebar gets short station names
     let names: [&str; 4] = if leg >= 6 {
@@ -412,10 +395,7 @@ fn render_process(
     };
     for (index, name) in names.iter().enumerate() {
         let lx = x + leg * index as u16;
-        let style = Style::default()
-            .fg(t.ink)
-            .bg(t.card)
-            .add_modifier(Modifier::BOLD);
+        let style = Style::default().fg(t.muted).bg(t.card).add_modifier(Modifier::BOLD);
         if index == STATIONS.len() - 1 {
             put_right_text(buffer, Rect::new(x, y, width, 1), y, name, style);
         } else {
@@ -434,8 +414,8 @@ fn render_process(
         );
         return;
     }
-    for (agent, project) in trains {
-        if y + TRAIN_ROWS > rect.bottom().saturating_sub(1) + 1 {
+    for (agent, project) in trains.iter() {
+        if y + TRAIN_ROWS > rect.bottom().saturating_sub(1) {
             break;
         }
         let color = t.agent(agent.agent.as_deref());
@@ -538,13 +518,12 @@ pub(crate) fn render_sidebar_tree(
     if area.width < 12 || area.height < 6 {
         return;
     }
-    // cards keep one cell of paper on the left and room for their shadow on the right
-    let x = area.x + 1;
-    let width = area.width.saturating_sub(3);
+    let x = area.x;
+    let width = area.width;
 
     render_buttons(buffer, x, area.y, width, snapshot, config, &t, hits);
 
-    let label_y = area.y + 2;
+    let label_y = area.y + 3;
     put_text(
         buffer,
         x,
@@ -556,7 +535,7 @@ pub(crate) fn render_sidebar_tree(
             .bg(t.bg)
             .add_modifier(Modifier::BOLD),
     );
-    hits.sidebar_toggle = Rect::new(x + width.saturating_sub(1), label_y, 1, 1);
+    hits.sidebar_toggle = Rect::new(x + width.saturating_sub(2), label_y, 1, 1);
     put_text(
         buffer,
         hits.sidebar_toggle.x,
@@ -582,18 +561,14 @@ pub(crate) fn render_sidebar_tree(
         .take(MAX_TRAINS)
         .map(|agent| (*agent, label_of(&agent.workspace_id)))
         .collect();
+    // edges, title, a blank row, stations, then the trains a blank row apart
     let rows_for_trains = if trains.is_empty() {
         1
     } else {
         trains.len() as u16 * TRAIN_ROWS
     };
-    let process_height = (4 + rows_for_trains).min(area.height.saturating_sub(8));
-    let process = Rect::new(
-        x,
-        area.bottom().saturating_sub(process_height + 1),
-        width,
-        process_height,
-    );
+    let process_height = (6 + rows_for_trains).min(area.height.saturating_sub(10));
+    let process = Rect::new(x, area.bottom().saturating_sub(process_height), width, process_height);
     if process_height >= 5 {
         render_process(
             buffer,
@@ -608,12 +583,7 @@ pub(crate) fn render_sidebar_tree(
     }
 
     // projects between the label and PROCESS
-    let body = Rect::new(
-        x,
-        label_y + 1,
-        width + 1,
-        process.y.saturating_sub(label_y + 2),
-    );
+    let body = Rect::new(x, label_y + 1, width, process.y.saturating_sub(label_y + 1));
     hits.workspace_body = body;
     let entries = super::sidebar::workspace_entries(snapshot, state.collapsed_groups);
     let mut items = Vec::new();
@@ -638,25 +608,12 @@ pub(crate) fn render_sidebar_tree(
     let heights: Vec<u16> = items
         .iter()
         .map(|(_, agents, project_state)| match project_state {
-            ProjectState::Folded => 1,
+            ProjectState::Folded => 3,
             _ => 3 + agents.len() as u16,
         })
         .collect();
-    // the selected card's shadow and a blank row around expanded cards
-    let gaps: Vec<u16> = items
-        .iter()
-        .enumerate()
-        .map(|(index, (_, _, project_state))| {
-            let next_expanded = items
-                .get(index + 1)
-                .is_some_and(|(_, _, next)| *next != ProjectState::Folded);
-            match project_state {
-                ProjectState::Selected => 2,
-                ProjectState::Open => 1,
-                ProjectState::Folded => u16::from(next_expanded),
-            }
-        })
-        .collect();
+    // the boxes' own edges leave the gaps between them
+    let gaps = vec![0; items.len()];
     let mut metrics =
         super::scroll::list_scroll_metrics(&heights, &gaps, body.height, *state.workspace_scroll);
     if !body.is_empty() && std::mem::take(state.reveal_focused_workspace) {

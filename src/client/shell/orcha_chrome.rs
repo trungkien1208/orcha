@@ -2,14 +2,41 @@
 //! edge, and the dressing of the panes inside it (paper colors and a title
 //! bar in the agent's color). See docs/orcha/SPEC.md §2.
 
-use crate::api::schema::AgentStatus;
 use crate::protocol::{color_to_u32, modifier_to_u16, FrameData};
 
 use super::brutal::{self, Brutal, Edge};
 use super::render::{display_width, put_text};
 use super::*;
 
-/// Header: the ORCHA chip with the icon, counts, and the settings button.
+/// A boxed label: a heavy-edged block, the text bold in its middle row.
+pub(super) fn boxed_label(
+    buffer: &mut Buffer,
+    rect: Rect,
+    text: &str,
+    fg: ratatui::style::Color,
+    fill: ratatui::style::Color,
+    shadow: bool,
+    t: &Brutal,
+) {
+    brutal::draw_box(buffer, rect, Edge::Heavy, t.line, fill, t.bg);
+    if shadow {
+        brutal::draw_box_shadow(buffer, rect, t.shadow, t.bg);
+    }
+    let inner = rect.width.saturating_sub(if shadow { 3 } else { 2 });
+    let width = display_width(text).min(inner);
+    let x = rect.x + 1 + inner.saturating_sub(width) / 2;
+    put_text(
+        buffer,
+        x,
+        rect.y + rect.height / 2,
+        width,
+        text,
+        Style::default().fg(fg).bg(fill).add_modifier(Modifier::BOLD),
+    );
+}
+
+/// Header, three rows: the boxed ORCHA chip with the icon, the counts, the
+/// low-fuel offer, and the outlined settings button.
 pub(super) fn render_header(
     buffer: &mut Buffer,
     area: Rect,
@@ -19,78 +46,70 @@ pub(super) fn render_header(
     hits: &mut ShellHitMap,
 ) {
     let t = Brutal::new(&config.palette);
-    buffer.set_style(area, Style::default().bg(t.bg).fg(t.ink));
+    // the margin row above belongs to the page too (only the background:
+    // other regions' glyphs keep their colors)
+    let page = Rect::new(0, 0, buffer.area.width, area.bottom()).intersection(buffer.area);
+    buffer.set_style(page, Style::default().bg(t.bg));
+    if area.height < 3 {
+        return;
+    }
     let icon = brutal::orcha_icon(config.icon_font);
-    let mut x = area.x.saturating_add(1);
-    x += brutal::chip(
-        buffer,
-        x,
-        area.y,
-        area.width,
-        &format!("{icon} ORCHA"),
-        t.chip_text,
-        t.pink,
-    );
+    let label = format!("{icon} ORCHA");
+    let chip = Rect::new(area.x, area.y, display_width(&label) + 4, 3);
+    boxed_label(buffer, chip, &label, t.chip_text, t.pink, false, &t);
     let projects = snapshot.workspaces.len();
     let agents = snapshot.agents.len();
     let counts = format!(
-        "  {projects} project{} · {agents} agent{}",
+        "{projects} project{} · {agents} agent{}",
         if projects == 1 { "" } else { "s" },
         if agents == 1 { "" } else { "s" },
     );
-    let room = area.right().saturating_sub(x);
+    let mid = area.y + 1;
+    let x = chip.right() + 2;
     put_text(
         buffer,
         x,
-        area.y,
-        room,
+        mid,
+        area.right().saturating_sub(x),
         &counts,
         Style::default().fg(t.muted).bg(t.bg),
     );
-    let label = " ⌘, settings ";
-    let width = display_width(label);
-    if area.width > width + 30 {
-        let bx = area.right().saturating_sub(width + 1);
-        put_text(
-            buffer,
-            bx,
-            area.y,
-            width,
-            label,
-            Style::default()
-                .fg(t.ink)
-                .bg(t.card)
-                .add_modifier(Modifier::BOLD),
-        );
-        hits.orcha.settings = Rect::new(bx, area.y, width, 1);
+    let text = "⌘, settings";
+    let button = Rect::new(
+        area.right().saturating_sub(display_width(text) + 4),
+        area.y,
+        display_width(text) + 4,
+        3,
+    );
+    if button.x > x + display_width(&counts) + 4 {
+        boxed_label(buffer, button, text, t.ink, t.bg, false, &t);
+        hits.orcha.settings = button;
         // low fuel: a red offer left of settings, a click opens the accounts
         if let Some(hint) = &ui.low_fuel_hint {
-            let text = format!(" ⚠ {hint} ");
-            let hint_width = display_width(&text).min(bx.saturating_sub(x + 4));
-            let hx = bx.saturating_sub(hint_width + 2);
+            let hint = format!(" ⚠ {hint} ");
+            let room = button.x.saturating_sub(x + display_width(&counts) + 4);
+            let width = display_width(&hint).min(room);
+            let hx = button.x.saturating_sub(width + 2);
             put_text(
                 buffer,
                 hx,
-                area.y,
-                hint_width,
-                &text,
+                mid,
+                width,
+                &hint,
                 Style::default()
                     .fg(t.card)
                     .bg(t.red)
                     .add_modifier(Modifier::BOLD),
             );
-            hits.orcha.fuel_hint = Rect::new(hx, area.y, hint_width, 1);
+            hits.orcha.fuel_hint = Rect::new(hx, mid, width, 1);
         }
     }
 }
 
-fn tab_dot(status: AgentStatus, t: &Brutal) -> Option<(&'static str, ratatui::style::Color)> {
-    let color = t.state(status)?;
-    Some(("●", color))
-}
-
 /// The main frame (heavy, frame fill, hard shadow) and the focused
-/// project's tabs drawn into its top edge.
+/// project's tabs over it: each tab a box sitting on the frame's top edge,
+/// the open one heavy and joined to the frame.
+#[allow(clippy::too_many_arguments)] // one render call, all inputs are distinct facts
 pub(super) fn render_frame_and_tabs(
     buffer: &mut Buffer,
     frame: Rect,
@@ -103,12 +122,12 @@ pub(super) fn render_frame_and_tabs(
     hits: &mut ShellHitMap,
 ) {
     let t = Brutal::new(&config.palette);
-    // paper around the frame (the gutter and the shadow's cells)
+    let top = tab_area.y.saturating_sub(1);
     let paper = Rect::new(
-        frame.x.saturating_sub(1),
-        frame.y,
-        frame.width.saturating_add(3),
-        frame.height.saturating_add(1),
+        frame.x.saturating_sub(2),
+        top,
+        frame.width.saturating_add(4),
+        frame.bottom().saturating_sub(top) + 1,
     )
     .intersection(buffer.area);
     buffer.set_style(paper, Style::default().bg(t.bg));
@@ -121,31 +140,28 @@ pub(super) fn render_frame_and_tabs(
         .filter(|tab| Some(tab.workspace_id.as_str()) == snapshot.focused_workspace_id.as_deref())
         .collect();
     let label = |tab: &ClientShellTab| {
-        if tab.label.trim().is_empty() {
+        let name = if tab.label.trim().is_empty() {
             tab.number.to_string()
         } else {
             tab.label.clone()
-        }
+        };
+        brutal::clip(&name, 22)
     };
-    let width_of = |tab: &ClientShellTab| {
-        let name = brutal::clip(&label(tab), 22);
-        display_width(&name) + 2 + if tab_dot(tab.agent_status, &t).is_some() { 2 } else { 0 }
-    };
-    // keep the open tab in view
+    // box width: an edge, " name ", the state mark and a space, an edge
+    let width_of = |tab: &ClientShellTab| display_width(&label(tab)) + 4 + 2;
     if std::mem::take(reveal_focused_tab) {
         if let Some(focused) = tabs.iter().position(|tab| tab.focused) {
             if focused < *tab_scroll {
                 *tab_scroll = focused;
             } else {
-                let budget = tab_area.width.saturating_sub(12);
-                while *tab_scroll < focused {
-                    let used: u16 = tabs[*tab_scroll..=focused]
+                let budget = tab_area.width.saturating_sub(14);
+                while *tab_scroll < focused
+                    && tabs[*tab_scroll..=focused]
                         .iter()
                         .map(|tab| width_of(tab) + 1)
-                        .sum();
-                    if used <= budget {
-                        break;
-                    }
+                        .sum::<u16>()
+                        > budget
+                {
                     *tab_scroll += 1;
                 }
             }
@@ -155,11 +171,10 @@ pub(super) fn render_frame_and_tabs(
 
     let y = tab_area.y;
     let right = tab_area.right();
-    // room kept for "+N ▾" and "+"
-    let reserve = 11;
-    let mut x = tab_area.x;
+    let reserve = 12;
+    let mut x = tab_area.x + 1;
     if *tab_scroll > 0 {
-        let more = format!(" ‹{} ", *tab_scroll);
+        let more = format!("‹{}", *tab_scroll);
         let w = display_width(&more);
         put_text(buffer, x, y, w, &more, Style::default().fg(t.muted).bg(t.bg));
         hits.tab_scroll_left = Rect::new(x, y, w, 1);
@@ -173,22 +188,49 @@ pub(super) fn render_frame_and_tabs(
         if x + w > limit {
             break;
         }
-        let name = brutal::clip(&label(tab), 22);
-        let (fg, bg) = if tab.focused {
-            (t.card, t.ink)
+        let open = tab.focused;
+        let fill = if open { t.frame } else { t.bg };
+        let edge = Style::default().fg(t.line).bg(t.bg);
+        let (right_x, inner) = (x + w - 1, Rect::new(x + 1, y, w - 2, 1));
+        // the top edge, then the sides around the label
+        if open {
+            put_text(buffer, x, top, w, &"▂".repeat(usize::from(w)), edge);
+            put_text(buffer, x, y, 1, "▐", Style::default().fg(t.line).bg(fill));
+            put_text(buffer, right_x, y, 1, "▌", Style::default().fg(t.line).bg(fill));
+            // the open tab and the frame are one shape
+            let joint = Style::default().fg(t.line).bg(t.frame);
+            put_text(buffer, x, frame.y, 1, "▟", edge);
+            for cx in x + 1..right_x {
+                put_text(buffer, cx, frame.y, 1, " ", joint);
+            }
+            put_text(buffer, right_x, frame.y, 1, "▙", edge);
         } else {
-            (t.muted, t.bg)
-        };
-        let mut style = Style::default().fg(fg).bg(bg);
-        if tab.focused {
+            put_text(buffer, x + 1, top, w - 2, &"▁".repeat(usize::from(w - 2)), edge);
+            put_text(buffer, x, y, 1, "▕", edge);
+            put_text(buffer, right_x, y, 1, "▏", edge);
+        }
+        buffer.set_style(inner, Style::default().bg(fill));
+        let name = label(tab);
+        let mut style = Style::default()
+            .fg(if open { t.ink } else { t.muted })
+            .bg(fill);
+        if open {
             style = style.add_modifier(Modifier::BOLD);
         }
-        put_text(buffer, x, y, w, &format!(" {name} "), style);
-        if let Some((dot, color)) = tab_dot(tab.agent_status, &t) {
-            let dx = x + 1 + display_width(&name) + 1;
-            put_text(buffer, dx, y, 2, &format!("{dot} "), Style::default().fg(color).bg(bg));
-        }
-        hits.tabs.push((Rect::new(x, y, w, 1), tab.tab_id.clone()));
+        put_text(buffer, x + 2, y, display_width(&name), &name, style);
+        let (mark, color) = match t.state(tab.agent_status) {
+            Some(color) => ("■", color),
+            None => ("□", t.muted),
+        };
+        put_text(
+            buffer,
+            x + 2 + display_width(&name) + 1,
+            y,
+            1,
+            mark,
+            Style::default().fg(color).bg(fill),
+        );
+        hits.tabs.push((Rect::new(x, top, w, 2), tab.tab_id.clone()));
         x += w + 1;
         shown_until = index + 1;
     }
@@ -196,18 +238,8 @@ pub(super) fn render_frame_and_tabs(
     if hidden > 0 {
         let more = format!(" +{hidden} ▾ ");
         let w = display_width(&more);
-        put_text(
-            buffer,
-            x,
-            y,
-            w,
-            &more,
-            Style::default()
-                .fg(t.ink)
-                .bg(t.bg)
-                .add_modifier(Modifier::BOLD),
-        );
-        hits.tab_scroll_right = Rect::new(x, y, w, 1);
+        put_text(buffer, x, y, w, &more, Style::default().fg(t.muted).bg(t.bg));
+        hits.tab_scroll_right = Rect::new(x, top, w, 2);
         x += w + 1;
     }
     if config.mouse_capture && x + 3 <= right {
@@ -222,14 +254,12 @@ pub(super) fn render_frame_and_tabs(
                 .bg(t.bg)
                 .add_modifier(Modifier::BOLD),
         );
-        hits.new_tab = Rect::new(x, y, 3, 1);
+        hits.new_tab = Rect::new(x, top, 3, 2);
     }
     if let Some(insert) = tab_drag_insert_index {
-        let at = hits
-            .tabs
-            .iter()
-            .position(|(_, id)| tabs.iter().position(|tab| &tab.tab_id == id) == Some(insert))
-            .and_then(|i| hits.tabs.get(i))
+        let at = tabs
+            .get(insert)
+            .and_then(|tab| hits.tabs.iter().find(|(_, id)| id == &tab.tab_id))
             .map(|(rect, _)| rect.x.saturating_sub(1))
             .or_else(|| hits.tabs.last().map(|(rect, _)| rect.right()));
         if let Some(ix) = at {

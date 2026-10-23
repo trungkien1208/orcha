@@ -262,6 +262,11 @@ pub(super) fn render_shell(
     mut state: ShellRenderState<'_>,
 ) -> ShellHitMap {
     let mut hits = ShellHitMap::default();
+    if layout.header.width > 0 {
+        // orcha's page: its margins and gaps are paper
+        let bg = super::brutal::Brutal::new(&config.palette).bg;
+        buffer.set_style(buffer.area, Style::default().bg(bg));
+    }
     if layout.mobile_header.height > 0 {
         super::mobile::render_mobile_header(
             buffer,

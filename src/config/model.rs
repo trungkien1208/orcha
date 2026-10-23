@@ -1274,7 +1274,7 @@ impl Default for UiConfig {
     fn default() -> Self {
         Self {
             // orcha's cards and PROCESS rails need room
-            sidebar_width: if ORCHA_LAYOUT_DEFAULT { 38 } else { 26 },
+            sidebar_width: if ORCHA_LAYOUT_DEFAULT { 36 } else { 26 },
             sidebar_min_width: 18,
             sidebar_max_width: if ORCHA_LAYOUT_DEFAULT { 52 } else { 36 },
             sidebar_start_collapsed: false,
@@ -1306,7 +1306,7 @@ impl Default for UiConfig {
             // herdr's own layout, and orcha's tests turn them on explicitly
             status_bar: ORCHA_LAYOUT_DEFAULT,
             right_panel: ORCHA_LAYOUT_DEFAULT,
-            right_panel_width: 34,
+            right_panel_width: 38,
             sidebar_tree: ORCHA_LAYOUT_DEFAULT,
             tab_bar_right_separator: " ".into(),
             window_title: super::window_title::default_window_title(),

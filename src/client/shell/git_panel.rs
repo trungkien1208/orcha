@@ -342,19 +342,6 @@ pub(super) fn draw_gauge(buffer: &mut Buffer, x: u16, y: u16, left: u8, bg: rata
     }
 }
 
-/// Splits the panel with a light rule that meets its border.
-fn rule(buffer: &mut Buffer, rect: Rect, y: u16, t: &Brutal) {
-    let style = Style::default().fg(t.line).bg(t.card);
-    put_text(
-        buffer,
-        rect.x + 1,
-        y,
-        rect.width.saturating_sub(2),
-        &"━".repeat(usize::from(rect.width.saturating_sub(2))),
-        style,
-    );
-}
-
 fn title(buffer: &mut Buffer, x: u16, y: u16, width: u16, text: &str, note: &str, t: &Brutal) {
     put_text(
         buffer,
@@ -397,6 +384,49 @@ fn history_glyph(ch: char) -> &'static str {
     }
 }
 
+/// One row of the right panel, built first so the box hugs its content.
+enum Row<'a> {
+    Blank,
+    Rule,
+    Title(String, String, Option<Slot>),
+    Gauge(&'a super::accounts::FuelWindow),
+    Note(String, ratatui::style::Color),
+    Strong(String),
+    Buttons(Vec<(&'static str, bool, Slot)>),
+    File(&'a str, &'a str),
+    History(&'a HistoryLine),
+    Worktree(&'a str, bool),
+    NewWorktree,
+}
+
+#[derive(Clone, Copy)]
+enum Slot {
+    Fuel,
+    Ide,
+    GitGui,
+    Diff,
+    Commit,
+    PullRequest,
+    History,
+    Worktrees,
+}
+
+fn hit_slot(hits: &mut ShellHitMap, slot: Slot, rect: Rect) {
+    let target = match slot {
+        Slot::Fuel => &mut hits.orcha.fuel,
+        Slot::Ide => &mut hits.orcha.ide,
+        Slot::GitGui => &mut hits.orcha.git_gui,
+        Slot::Diff => &mut hits.orcha.diff,
+        Slot::Commit => &mut hits.orcha.commit,
+        Slot::PullRequest => &mut hits.orcha.pull_request,
+        Slot::History => &mut hits.orcha.history_toggle,
+        Slot::Worktrees => &mut hits.orcha.worktrees_toggle,
+    };
+    *target = rect;
+}
+
+/// The right panel (docs/orcha/SPEC.md §2 "Right panel"): one heavy box,
+/// sections split by rules with a blank row of padding on each side.
 #[allow(clippy::too_many_arguments)] // one render call, all inputs are distinct facts
 pub(super) fn render_git_panel(
     buffer: &mut Buffer,
@@ -408,111 +438,36 @@ pub(super) fn render_git_panel(
     arrived: bool,
     hits: &mut ShellHitMap,
 ) {
-    if area.width < 12 || area.height < 4 {
+    if area.width < 16 || area.height < 6 {
         return;
     }
     let t = Brutal::new(&config.palette);
     buffer.set_style(area, Style::default().bg(t.bg));
     let fuel = fuel.filter(|_| config.orcha.fuel == crate::config::FuelPlacement::Panel);
-    let inner_width = area.width.saturating_sub(6);
-    let w = usize::from(inner_width);
+    let mut rows: Vec<Row<'_>> = Vec::new();
+    // a rule between sections; its line sits mid-row, half a row of air each side
+    let section = |rows: &mut Vec<Row<'_>>| {
+        rows.push(if rows.is_empty() { Row::Blank } else { Row::Rule });
+    };
 
-    // rows each section needs, so the box hugs its content
-    let fuel_rows = fuel.map_or(0, |account| 2 + account.windows.len().clamp(1, 2) as u16);
-    let branch_rows = if data.is_some() { 4 } else { 3 };
-    let history_rows = 1 + if ui.history_open {
-        data.map_or(0, |d| d.history.len().min(14) as u16)
-    } else {
-        0
-    };
-    let worktree_rows = if ui.worktrees_open {
-        2 + data.map_or(0, |d| d.worktrees.len().min(6) as u16)
-    } else {
-        1
-    };
-    let fixed = 2 + fuel_rows + branch_rows + 2 + history_rows + 1 + worktree_rows;
-    let file_count = data.map_or(0, |d| d.files.len()) as u16;
-    let file_rows = file_count.min(area.height.saturating_sub(1).saturating_sub(fixed));
-    // the train arrived: its changes get DIFF / COMMIT / PR
-    let arrived = arrived && data.is_some_and(|d| !d.files.is_empty());
-    let changes_rows = if data.is_some() {
-        1 + file_rows.max(1) + u16::from(arrived)
-    } else {
-        0
-    };
-    let height = if data.is_some() {
-        fixed + changes_rows
-    } else {
-        // no repository: FUEL and the BRANCH note only
-        2 + fuel_rows + 2
-    }
-    .min(area.height.saturating_sub(1));
-    let rect = Rect::new(area.x + 1, area.y, area.width.saturating_sub(2), height);
-    brutal::draw_box(buffer, rect, Edge::Heavy, t.line, t.card, t.bg);
-    let x = rect.x + 2;
-    let mut y = rect.y + 1;
-    let bottom = rect.bottom().saturating_sub(1);
-
-    // FUEL: whose plan, and how much of it is left
     if let Some(account) = fuel {
-        let top = y;
+        section(&mut rows);
         let who = account.email.clone().unwrap_or_else(|| account.label.clone());
-        title(buffer, x, y, inner_width, "FUEL", &who, &t);
-        y += 1;
+        rows.push(Row::Title("FUEL".into(), who, Some(Slot::Fuel)));
         for window in account.windows.iter().take(2) {
-            if y >= bottom {
-                break;
-            }
-            put_text(
-                buffer,
-                x,
-                y,
-                6,
-                &window.label,
-                Style::default().fg(t.muted).bg(t.card),
-            );
-            draw_gauge(buffer, x + 6, y, window.left, t.card, &t);
-            put_right_text(
-                buffer,
-                Rect::new(x, y, inner_width, 1),
-                y,
-                &format!("{}%", window.left),
-                Style::default()
-                    .fg(if window.left < 20 { t.red } else { t.ink })
-                    .bg(t.card)
-                    .add_modifier(Modifier::BOLD),
-            );
-            y += 1;
+            rows.push(Row::Gauge(window));
         }
-        if account.windows.is_empty() && y < bottom {
-            // signed out or expired: say so, the popup offers SIGN IN
-            let note = account.error.clone().unwrap_or_else(|| "no data".to_owned());
-            put_text(
-                buffer,
-                x,
-                y,
-                inner_width,
-                &clip_right(&note, w),
-                Style::default().fg(t.red).bg(t.card),
-            );
-            y += 1;
+        if account.windows.is_empty() {
+            let note = account.error.clone().unwrap_or_else(|| "no data".into());
+            rows.push(Row::Note(note, t.red));
         }
-        hits.orcha.fuel = Rect::new(rect.x, top, rect.width, y - top);
-        rule(buffer, rect, y, &t);
-        y += 1;
     }
-
-    // BRANCH
+    section(&mut rows);
     let Some(data) = data else {
-        title(buffer, x, y, inner_width, "BRANCH", "", &t);
-        put_text(
-            buffer,
-            x,
-            y + 1,
-            inner_width,
-            "not a git repository",
-            Style::default().fg(t.muted).bg(t.card),
-        );
+        rows.push(Row::Title("BRANCH".into(), String::new(), None));
+        rows.push(Row::Note("not a git repository".into(), t.muted));
+        rows.push(Row::Blank);
+        draw_rows(buffer, area, &rows, config, &t, hits);
         return;
     };
     let sync = match (&data.upstream, data.ahead, data.behind) {
@@ -522,265 +477,282 @@ pub(super) fn render_git_panel(
         (Some(_), 0, b) => format!("↓{b} to pull"),
         (Some(_), a, b) => format!("↑{a} ↓{b}"),
     };
-    title(buffer, x, y, inner_width, "BRANCH", &sync, &t);
-    y += 1;
+    rows.push(Row::Title("BRANCH".into(), sync, None));
     let branch = if data.branch.is_empty() {
         "(no branch)"
     } else {
         &data.branch
     };
-    put_text(
-        buffer,
-        x,
-        y,
-        inner_width,
-        &clip_right(&format!("⎇ {branch}"), w),
-        Style::default()
-            .fg(t.ink)
-            .bg(t.card)
-            .add_modifier(Modifier::BOLD),
-    );
-    y += 1;
-    // open the project elsewhere
-    let mut bx = x;
-    for (label, slot) in [(" ⌘E IDE ", 0), (" ⌘G Git ", 1)] {
-        let width = display_width(label);
-        if bx + width > x + inner_width {
-            break;
-        }
-        put_text(
-            buffer,
-            bx,
-            y,
-            width,
-            label,
-            Style::default()
-                .fg(t.ink)
-                .bg(t.frame)
-                .add_modifier(Modifier::BOLD),
-        );
-        let hit = Rect::new(bx, y, width, 1);
-        if slot == 0 {
-            hits.orcha.ide = hit;
-        } else {
-            hits.orcha.git_gui = hit;
-        }
-        bx += width + 1;
-    }
-    y += 1;
-    rule(buffer, rect, y, &t);
-    y += 1;
+    rows.push(Row::Strong(format!("⎇ {branch}")));
+    rows.push(Row::Buttons(vec![
+        ("⌘E IDE", false, Slot::Ide),
+        ("⌘G Git", false, Slot::GitGui),
+    ]));
 
-    // CHANGES
+    section(&mut rows);
     let stat = if data.files.is_empty() {
         "clean".to_owned()
     } else {
         format!("+{} −{}", data.insertions, data.deletions)
     };
-    title(buffer, x, y, inner_width, "CHANGES", &stat, &t);
-    y += 1;
-    let shown = usize::from(file_rows);
+    rows.push(Row::Title("CHANGES".into(), stat, None));
+    // what is left of the box after the other sections decides how many files show
+    let tail = 5
+        + if ui.history_open { data.history.len().min(14) } else { 0 }
+        + if ui.worktrees_open { data.worktrees.len().min(6) + 1 } else { 0 };
+    let room = usize::from(area.height)
+        .saturating_sub(rows.len() + tail + 2 + usize::from(arrived) * 2);
+    let shown = data.files.len().min(room.max(1));
     for (index, (code, path)) in data.files.iter().enumerate().take(shown) {
-        if y >= bottom {
-            break;
-        }
         if index + 1 == shown && data.files.len() > shown {
-            put_text(
-                buffer,
-                x,
-                y,
-                inner_width,
-                &format!("… {} more", data.files.len() - index),
-                Style::default().fg(t.muted).bg(t.card),
-            );
-            y += 1;
-            break;
+            rows.push(Row::Note(format!("… {} more", data.files.len() - index), t.muted));
+        } else {
+            rows.push(Row::File(code, path));
         }
-        let (mark, color) = match code.chars().next().unwrap_or(' ') {
-            '?' | 'A' => ("A", t.green),
-            'D' => ("D", t.red),
-            'R' => ("R", t.blue),
-            'U' => ("!", t.red),
-            _ => ("M", t.yellow),
-        };
-        put_text(
-            buffer,
-            x,
-            y,
-            1,
-            mark,
-            Style::default()
-                .fg(color)
-                .bg(t.card)
-                .add_modifier(Modifier::BOLD),
-        );
-        put_text(
-            buffer,
-            x + 2,
-            y,
-            inner_width.saturating_sub(2),
-            &clip_left(path, w.saturating_sub(2)),
-            Style::default().fg(t.ink).bg(t.card),
-        );
-        y += 1;
     }
-    if data.files.is_empty() {
-        y += 1;
+    let arrived = arrived && !data.files.is_empty();
+    if arrived {
+        rows.push(Row::Blank);
+        rows.push(Row::Buttons(vec![
+            ("◇ DIFF", false, Slot::Diff),
+            ("✓ COMMIT", true, Slot::Commit),
+            ("↗ PR", false, Slot::PullRequest),
+        ]));
     }
-    if arrived && y < bottom {
-        let mut bx = x;
-        for (index, label) in [" ◇ DIFF ", " ✓ COMMIT ", " ↗ PR "].iter().enumerate() {
-            let width = display_width(label);
-            if bx + width > x + inner_width {
-                break;
-            }
-            let (fg, bg) = if index == 1 {
-                (t.chip_text, t.green)
-            } else {
-                (t.ink, t.frame)
-            };
-            put_text(
-                buffer,
-                bx,
-                y,
-                width,
-                label,
-                Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
-            );
-            let hit = Rect::new(bx, y, width, 1);
-            match index {
-                0 => hits.orcha.diff = hit,
-                1 => hits.orcha.commit = hit,
-                _ => hits.orcha.pull_request = hit,
-            }
-            bx += width + 1;
-        }
-        y += 1;
-    }
-    if y >= bottom {
-        return;
-    }
-    rule(buffer, rect, y, &t);
-    y += 1;
 
-    // HISTORY, folded to its last commit
+    section(&mut rows);
     let arrow = if ui.history_open { "▾" } else { "▸" };
     let last = data
         .last_commit
         .as_ref()
         .map(|(subject, age)| format!("{subject} · {age}"))
         .unwrap_or_default();
-    title(buffer, x, y, inner_width, &format!("{arrow} HISTORY"), &last, &t);
-    hits.orcha.history_toggle = Rect::new(rect.x, y, rect.width, 1);
-    y += 1;
+    rows.push(Row::Title(format!("{arrow} HISTORY"), last, Some(Slot::History)));
     if ui.history_open {
-        for line in data.history.iter().take(14) {
-            if y >= bottom {
-                break;
-            }
-            let mut cx = x;
-            for (column, ch) in line.graph.chars().enumerate() {
-                if cx >= x + inner_width {
-                    break;
-                }
-                let glyph = history_glyph(ch);
-                let style = Style::default()
-                    .fg(lane_color(column / 2, &t))
-                    .bg(t.card)
-                    .add_modifier(Modifier::BOLD);
-                put_text(buffer, cx, y, 1, glyph, style);
-                cx += 1;
-            }
-            cx += 1;
-            for name in line.refs.iter().take(1) {
-                let room = (x + inner_width).saturating_sub(cx);
-                let width = brutal::chip(
-                    buffer,
-                    cx,
-                    y,
-                    room.min(12),
-                    &clip_right(name, 8),
-                    t.chip_text,
-                    if name == &data.branch { t.pink } else { t.green },
-                );
-                cx += width + 1;
-            }
-            let room = (x + inner_width).saturating_sub(cx);
-            put_text(
-                buffer,
-                cx,
-                y,
-                room,
-                &clip_right(&line.subject, usize::from(room)),
-                Style::default().fg(t.ink).bg(t.card),
-            );
-            y += 1;
-        }
+        rows.extend(data.history.iter().take(14).map(Row::History));
     }
-    if y >= bottom {
-        return;
-    }
-    rule(buffer, rect, y, &t);
-    y += 1;
-
-    // WORKTREES, folded to a count
+    section(&mut rows);
     let arrow = if ui.worktrees_open { "▾" } else { "▸" };
-    title(
-        buffer,
-        x,
-        y,
-        inner_width,
-        &format!("{arrow} WORKTREES"),
-        &data.worktrees.len().to_string(),
-        &t,
-    );
-    hits.orcha.worktrees_toggle = Rect::new(rect.x, y, rect.width, 1);
-    y += 1;
+    rows.push(Row::Title(
+        format!("{arrow} WORKTREES"),
+        data.worktrees.len().to_string(),
+        Some(Slot::Worktrees),
+    ));
     if ui.worktrees_open {
-        for (name, current) in data.worktrees.iter().take(6) {
-            if y >= bottom {
-                break;
+        rows.extend(
+            data.worktrees
+                .iter()
+                .take(6)
+                .map(|(name, current)| Row::Worktree(name, *current)),
+        );
+        rows.push(Row::NewWorktree);
+    }
+    rows.push(Row::Blank);
+    draw_rows(buffer, area, &rows, config, &t, hits);
+}
+
+fn draw_rows(
+    buffer: &mut Buffer,
+    area: Rect,
+    rows: &[Row<'_>],
+    _config: &ClientShellConfig,
+    t: &Brutal,
+    hits: &mut ShellHitMap,
+) {
+    let height = (rows.len() as u16 + 2).min(area.height);
+    let rect = Rect::new(area.x, area.y, area.width, height);
+    brutal::draw_box(buffer, rect, Edge::Heavy, t.line, t.card, t.bg);
+    let x = rect.x + 3;
+    let inner_width = rect.width.saturating_sub(6);
+    let w = usize::from(inner_width);
+    let bottom = rect.bottom().saturating_sub(1);
+    let mut y = rect.y + 1;
+    // a title's hit covers its whole section, up to the next rule
+    let mut open_slot: Option<(Slot, u16)> = None;
+    let close = |hits: &mut ShellHitMap, open: &mut Option<(Slot, u16)>, y: u16| {
+        if let Some((slot, top)) = open.take() {
+            hit_slot(hits, slot, Rect::new(rect.x, top, rect.width, y.saturating_sub(top)));
+        }
+    };
+    for row in rows {
+        if y >= bottom {
+            break;
+        }
+        match row {
+            Row::Blank => {}
+            Row::Rule => {
+                close(hits, &mut open_slot, y);
+                put_text(
+                    buffer,
+                    rect.x + 1,
+                    y,
+                    rect.width.saturating_sub(2),
+                    &"━".repeat(usize::from(rect.width.saturating_sub(2))),
+                    Style::default().fg(t.line).bg(t.card),
+                );
             }
-            let (mark, style) = if *current {
-                (
-                    "●",
+            Row::Title(text, note, slot) => {
+                title(buffer, x, y, inner_width, text, note, t);
+                if let Some(slot) = slot {
+                    open_slot = Some((*slot, y.saturating_sub(1)));
+                }
+            }
+            Row::Gauge(window) => {
+                put_text(buffer, x, y, 6, &window.label, Style::default().fg(t.muted).bg(t.card));
+                draw_gauge(buffer, x + 7, y, window.left, t.card, t);
+                put_right_text(
+                    buffer,
+                    Rect::new(x, y, inner_width, 1),
+                    y,
+                    &format!("{}%", window.left),
                     Style::default()
-                        .fg(t.ink)
+                        .fg(if window.left < 20 { t.red } else { t.ink })
                         .bg(t.card)
                         .add_modifier(Modifier::BOLD),
-                )
-            } else {
-                ("○", Style::default().fg(t.ink).bg(t.card))
-            };
-            put_text(
+                );
+            }
+            Row::Note(text, color) => put_text(
                 buffer,
                 x,
                 y,
                 inner_width,
-                &clip_right(&format!("{mark} {name}"), w),
-                style,
-            );
-            y += 1;
-        }
-        if y < bottom {
-            let label = "+ NEW WORKTREE";
-            let pad = inner_width.saturating_sub(display_width(label)) / 2;
-            let button = Rect::new(x, y, inner_width, 1);
-            buffer.set_style(button, Style::default().bg(t.bg));
-            put_text(
+                &clip_right(text, w),
+                Style::default().fg(*color).bg(t.card),
+            ),
+            Row::Strong(text) => put_text(
                 buffer,
-                x + pad,
+                x,
                 y,
-                display_width(label),
-                label,
+                inner_width,
+                &clip_right(text, w),
                 Style::default()
                     .fg(t.ink)
-                    .bg(t.bg)
+                    .bg(t.card)
                     .add_modifier(Modifier::BOLD),
-            );
-            hits.orcha.new_worktree = button;
+            ),
+            Row::Buttons(buttons) => {
+                let mut bx = x;
+                for (label, primary, slot) in buttons {
+                    let text = format!(" {label} ");
+                    let width = display_width(&text);
+                    if bx + width > x + inner_width {
+                        break;
+                    }
+                    let (fg, bg) = if *primary {
+                        (t.chip_text, t.green)
+                    } else {
+                        (t.ink, t.frame)
+                    };
+                    put_text(
+                        buffer,
+                        bx,
+                        y,
+                        width,
+                        &text,
+                        Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
+                    );
+                    hit_slot(hits, *slot, Rect::new(bx, y, width, 1));
+                    bx += width + 1;
+                }
+            }
+            Row::File(code, path) => {
+                let (mark, color) = match code.chars().next().unwrap_or(' ') {
+                    '?' | 'A' => ("A", t.green),
+                    'D' => ("D", t.red),
+                    'R' => ("R", t.blue),
+                    'U' => ("!", t.red),
+                    _ => ("M", t.yellow),
+                };
+                put_text(
+                    buffer,
+                    x,
+                    y,
+                    1,
+                    mark,
+                    Style::default()
+                        .fg(color)
+                        .bg(t.card)
+                        .add_modifier(Modifier::BOLD),
+                );
+                put_text(
+                    buffer,
+                    x + 3,
+                    y,
+                    inner_width.saturating_sub(3),
+                    &clip_left(path, w.saturating_sub(3)),
+                    Style::default().fg(t.ink).bg(t.card),
+                );
+            }
+            Row::History(line) => {
+                let mut cx = x;
+                for (column, ch) in line.graph.chars().enumerate() {
+                    if cx >= x + inner_width {
+                        break;
+                    }
+                    put_text(
+                        buffer,
+                        cx,
+                        y,
+                        1,
+                        history_glyph(ch),
+                        Style::default()
+                            .fg(lane_color(column / 2, t))
+                            .bg(t.card)
+                            .add_modifier(Modifier::BOLD),
+                    );
+                    cx += 1;
+                }
+                cx += 1;
+                if let Some(name) = line.refs.first() {
+                    let room = (x + inner_width).saturating_sub(cx);
+                    cx += brutal::chip(buffer, cx, y, room.min(12), &clip_right(name, 8), t.chip_text, t.green) + 1;
+                }
+                let room = (x + inner_width).saturating_sub(cx);
+                put_text(
+                    buffer,
+                    cx,
+                    y,
+                    room,
+                    &clip_right(&line.subject, usize::from(room)),
+                    Style::default().fg(t.ink).bg(t.card),
+                );
+            }
+            Row::Worktree(name, current) => {
+                let (mark, style) = if *current {
+                    (
+                        "●",
+                        Style::default()
+                            .fg(t.ink)
+                            .bg(t.card)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    ("○", Style::default().fg(t.ink).bg(t.card))
+                };
+                put_text(buffer, x, y, inner_width, &clip_right(&format!("{mark} {name}"), w), style);
+            }
+            Row::NewWorktree => {
+                let label = "+ NEW WORKTREE";
+                let button = Rect::new(x, y, inner_width, 1);
+                buffer.set_style(button, Style::default().bg(t.bg));
+                let pad = inner_width.saturating_sub(display_width(label)) / 2;
+                put_text(
+                    buffer,
+                    x + pad,
+                    y,
+                    display_width(label),
+                    label,
+                    Style::default()
+                        .fg(t.ink)
+                        .bg(t.bg)
+                        .add_modifier(Modifier::BOLD),
+                );
+                hits.orcha.new_worktree = button;
+            }
         }
+        y += 1;
     }
+    close(hits, &mut open_slot, y);
 }
 
 #[cfg(test)]

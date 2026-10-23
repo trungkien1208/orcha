@@ -129,7 +129,9 @@ impl Edge {
     /// outside it.
     fn glyphs(self) -> [&'static str; 8] {
         match self {
-            Edge::Heavy => ["▗", "▄", "▖", "▐", "▌", "▝", "▀", "▘"],
+            // ~3 px like the mockup's thick lines: half a column, a quarter row
+            // corners carry the horizontal line: a quadrant would stick out
+            Edge::Heavy => ["▂", "▂", "▂", "▐", "▌", "▔", "▔", "▔"],
             Edge::Light => [" ", "▁", " ", "▕", "▏", " ", "▔", " "],
             Edge::Dashed => ["┌", "┄", "┐", "┆", "┆", "└", "┄", "┘"],
         }
@@ -180,37 +182,22 @@ pub(super) fn draw_box(
     set(buffer, right, bottom, br, style);
 }
 
-/// The hard shadow of a heavy box: half a cell right and down, merged into
-/// its right and bottom edges.
+/// The hard shadow of a heavy box, merged into its right and bottom
+/// edges: the right edge becomes a full column, the bottom a half row.
 pub(super) fn draw_box_shadow(buffer: &mut Buffer, rect: Rect, shadow: Color, page: Color) {
     if rect.width < 2 || rect.height < 2 {
         return;
     }
     let style = Style::reset().fg(shadow).bg(page);
     let (right, bottom) = (rect.right() - 1, rect.bottom() - 1);
-    set(buffer, right, rect.y, "▄", style);
-    for y in rect.y + 1..=bottom {
+    set(buffer, right, rect.y, "▂", style);
+    for y in rect.y + 1..bottom {
         set(buffer, right, y, "█", style);
     }
-    set(buffer, rect.x, bottom, "▐", style);
-    for x in rect.x + 1..right {
-        set(buffer, x, bottom, "█", style);
+    set(buffer, rect.x, bottom, "▀", style);
+    for x in rect.x + 1..=right {
+        set(buffer, x, bottom, "▀", style);
     }
-}
-
-/// The hard shadow of a filled block (a button): half a cell right and down.
-pub(super) fn draw_shadow(buffer: &mut Buffer, rect: Rect, shadow: Color, page: Color) {
-    let style = Style::reset().fg(shadow).bg(page);
-    let (x, y) = (rect.right(), rect.bottom());
-    set(buffer, x, rect.y, "▖", style);
-    for row in rect.y + 1..y {
-        set(buffer, x, row, "▌", style);
-    }
-    set(buffer, rect.x, y, "▝", style);
-    for col in rect.x + 1..x {
-        set(buffer, col, y, "▀", style);
-    }
-    set(buffer, x, y, "▘", style);
 }
 
 /// A run of colored cells with padded bold text; returns its width.
