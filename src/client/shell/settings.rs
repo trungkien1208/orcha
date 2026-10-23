@@ -17,6 +17,15 @@ fn theme_index(name: &str) -> usize {
         .unwrap_or(0)
 }
 
+/// Font sizes offered for the terminal, in points.
+pub(super) const FONT_SIZES: std::ops::RangeInclusive<u16> = 11..=20;
+/// orcha-config's default font size.
+const DEFAULT_FONT_SIZE: u16 = 15;
+
+fn font_size_index(size: u16) -> usize {
+    usize::from(size.clamp(*FONT_SIZES.start(), *FONT_SIZES.end()) - FONT_SIZES.start())
+}
+
 fn indicator_index(style: crate::config::StatusIndicatorStyle) -> usize {
     usize::from(style == crate::config::StatusIndicatorStyle::Symbols)
 }
@@ -58,9 +67,8 @@ fn load_appearance() -> OrchaAppearance {
         std::fs::read_to_string(crate::config::config_dir().join("config.json"))
             .ok()
             .or_else(|| {
-                std::env::var("HOME").ok().and_then(|home| {
-                    std::fs::read_to_string(format!("{home}/.config/orcha/config.json")).ok()
-                })
+                crate::platform::orcha_config_base_dir()
+                    .and_then(|base| std::fs::read_to_string(base.join("orcha/config.json")).ok())
             })
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default();
@@ -72,13 +80,17 @@ fn load_appearance() -> OrchaAppearance {
             .as_str()
             .unwrap_or_default()
             .to_owned(),
+        font_size: config["font"]["size"]
+            .as_u64()
+            .and_then(|size| u16::try_from(size).ok())
+            .unwrap_or(DEFAULT_FONT_SIZE),
         ligatures: config["font"]["ligatures"].as_bool().unwrap_or(true),
         note: None,
     }
 }
 
-/// IDEs orcha knows how to open a folder in (macOS app names).
-const IDE_APPS: &[&str] = &[
+/// IDEs orcha knows how to open a folder in, with platform-specific commands.
+pub(super) const IDE_APPS: &[&str] = &[
     "Cursor",
     "Visual Studio Code",
     "Zed",
@@ -94,7 +106,7 @@ const IDE_APPS: &[&str] = &[
     "Xcode",
 ];
 /// Git GUIs orcha knows how to open a repository in.
-const GIT_GUI_APPS: &[&str] = &[
+pub(super) const GIT_GUI_APPS: &[&str] = &[
     "Fork",
     "GitHub Desktop",
     "Tower",
@@ -106,9 +118,13 @@ const GIT_GUI_APPS: &[&str] = &[
 
 /// "auto" (the first one found), then each app that is installed, with
 /// the command opening a folder in it.
-fn installed_apps(names: &[&str]) -> Vec<(String, String)> {
+pub(super) fn installed_apps(names: &[&str]) -> Vec<(String, String)> {
     let mut out = vec![("auto: the first one found".to_owned(), String::new())];
     if cfg!(test) {
+        return out;
+    }
+    if let Some(apps) = crate::platform::orcha_installed_apps(names) {
+        out.extend(apps);
         return out;
     }
     let home = std::env::var("HOME").unwrap_or_default();
@@ -133,8 +149,7 @@ fn run_config_tool(args: Vec<String>) -> Option<String> {
         return Some("orcha-config is not installed: nothing changed".to_owned());
     };
     let _ = crate::thread_spawn::spawn_named("orcha-config", move || {
-        let _ = std::process::Command::new(tool)
-            .args(args)
+        let _ = crate::platform::orcha_tool_command(&tool, &args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -168,6 +183,12 @@ impl ClientShellState {
                     .iter()
                     .position(|font| settings.appearance.font.starts_with(font.as_str()))
                     .unwrap_or(0),
+                _ => 0,
+            },
+            ClientSettingsSection::FontSize => match self.overlay.as_ref() {
+                Some(ClientShellOverlay::Settings(settings)) => {
+                    font_size_index(settings.appearance.font_size)
+                }
                 _ => 0,
             },
             ClientSettingsSection::Ligatures => match self.overlay.as_ref() {
@@ -241,12 +262,15 @@ impl ClientShellState {
             Some(ClientShellOverlay::Settings(settings)) => match settings.section {
                 ClientSettingsSection::Theme => crate::config::THEME_NAMES.len(),
                 // orcha sets the font in Ghostty only
-                ClientSettingsSection::Font | ClientSettingsSection::Ligatures
+                ClientSettingsSection::Font
+                | ClientSettingsSection::FontSize
+                | ClientSettingsSection::Ligatures
                     if !super::brutal::host_is_ghostty() =>
                 {
                     0
                 }
                 ClientSettingsSection::Font => settings.appearance.fonts.len(),
+                ClientSettingsSection::FontSize => FONT_SIZES.len(),
                 ClientSettingsSection::Ligatures => 2,
                 ClientSettingsSection::Ide => settings.appearance.ides.len(),
                 ClientSettingsSection::GitUi => settings.appearance.git_guis.len(),
@@ -312,7 +336,7 @@ impl ClientShellState {
         self.config.palette = settings.original_palette;
     }
 
-    fn save_settings_edit(
+    pub(super) fn save_settings_edit(
         &mut self,
         edit: crate::config::ConfigEdit<'_>,
         outcome: &mut ClientShellInput,
@@ -360,6 +384,26 @@ impl ClientShellState {
                 settings.appearance.font = font;
                 outcome.repaint = true;
             }
+            ClientSettingsSection::FontSize => {
+                let Some(ClientShellOverlay::Settings(settings)) = self.overlay.as_mut() else {
+                    return;
+                };
+                let Some(size) = FONT_SIZES.clone().nth(selected) else {
+                    return;
+                };
+                // orcha-config sets the size along with the family
+                if settings.appearance.font.is_empty() {
+                    settings.appearance.note = Some("pick a font first".to_owned());
+                } else {
+                    settings.appearance.note = run_config_tool(vec![
+                        "font".into(),
+                        settings.appearance.font.clone(),
+                        size.to_string(),
+                    ]);
+                    settings.appearance.font_size = size;
+                }
+                outcome.repaint = true;
+            }
             ClientSettingsSection::Ligatures => {
                 let Some(ClientShellOverlay::Settings(settings)) = self.overlay.as_mut() else {
                     return;
@@ -386,22 +430,7 @@ impl ClientShellState {
                     return;
                 };
                 settings.appearance.note = Some(format!("opens with {name}"));
-                let key = if ide { "ide" } else { "git_gui" };
-                if ide {
-                    self.config.orcha.ide = command.clone();
-                } else {
-                    self.config.orcha.git_gui = command.clone();
-                }
-                let path = crate::config::config_path();
-                let value = format!("\"{command}\"");
-                let _ = crate::thread_spawn::spawn_named("orcha-app-pref", move || {
-                    let content = std::fs::read_to_string(&path).unwrap_or_default();
-                    let updated =
-                        crate::config::upsert_section_value(&content, "orcha", key, &value);
-                    if let Err(err) = std::fs::write(&path, updated) {
-                        tracing::warn!(err = %err, "orcha: failed to save the {key} setting");
-                    }
-                });
+                self.save_open_app(ide, command);
                 outcome.repaint = true;
             }
             ClientSettingsSection::Indicators => {
@@ -432,6 +461,26 @@ impl ClientShellState {
             }
             ClientSettingsSection::Integrations => self.install_recommended_integrations(outcome),
         }
+    }
+
+    /// Keeps the IDE (`ide`) or Git GUI command, in memory and in the
+    /// config's `[orcha]` table (written off the input path).
+    pub(super) fn save_open_app(&mut self, ide: bool, command: String) {
+        let key = if ide { "ide" } else { "git_gui" };
+        if ide {
+            self.config.orcha.ide = command.clone();
+        } else {
+            self.config.orcha.git_gui = command.clone();
+        }
+        let path = crate::config::config_path();
+        let value = format!("\"{command}\"");
+        let _ = crate::thread_spawn::spawn_named("orcha-app-pref", move || {
+            let content = std::fs::read_to_string(&path).unwrap_or_default();
+            let updated = crate::config::upsert_section_value(&content, "orcha", key, &value);
+            if let Err(err) = std::fs::write(&path, updated) {
+                tracing::warn!(err = %err, "orcha: failed to save the {key} setting");
+            }
+        });
     }
 
     fn queue_integration_list(&mut self, outcome: &mut ClientShellInput, clear_messages: bool) {
@@ -517,6 +566,12 @@ impl ClientShellState {
                         }
                         Err(_) => {}
                     }
+                } else if let Ok(crate::api::schema::ResponseResult::IntegrationList {
+                    integrations,
+                }) = result
+                {
+                    // orcha: the first-run setup asked
+                    self.welcome_integrations_listed(integrations);
                 }
                 (true, Vec::new())
             }
@@ -538,6 +593,11 @@ impl ClientShellState {
                         Err(error) => settings.integration_messages.push(error.message),
                     }
                     settings.installing_integrations = self.pending_integration_installs > 0;
+                } else if let Err(error) = result {
+                    // orcha: installed from the first-run setup; only a failure says something
+                    if !cancelled {
+                        self.set_endpoint_error(error.message);
+                    }
                 }
                 let actions = if !cancelled
                     && self.pending_integration_installs == 0

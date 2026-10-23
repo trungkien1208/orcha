@@ -356,6 +356,14 @@ impl ClientShellState {
         }));
     }
 
+    pub(super) fn open_new_project_folder_overlay(&mut self) {
+        self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
+            title: "paste project folder path",
+            input: TextEditor::default(),
+            target: ClientRenameTarget::NewProjectFolder,
+        }));
+    }
+
     pub(super) fn open_rename_workspace_overlay(&mut self) {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return;
@@ -950,6 +958,17 @@ impl ClientShellState {
                     env: Default::default(),
                 },
             )),
+            ClientRenameTarget::NewProjectFolder => (!trimmed.is_empty()).then(|| {
+                crate::api::schema::Method::WorkspaceCreate(
+                    crate::api::schema::WorkspaceCreateParams {
+                        source_workspace_id: None,
+                        cwd: Some(trimmed.to_owned()),
+                        focus: true,
+                        label: None,
+                        env: Default::default(),
+                    },
+                )
+            }),
             ClientRenameTarget::Workspace { workspace_id } => (!trimmed.is_empty()).then(|| {
                 crate::api::schema::Method::WorkspaceRename(
                     crate::api::schema::WorkspaceRenameParams {

@@ -125,15 +125,17 @@ impl ClientShellState {
     /// Called from the client timer: refreshes the accounts' fuel and moves
     /// the PROCESS trains while any agent is running.
     pub(crate) fn tick_orcha(&mut self, now: Instant) -> bool {
+        let folder_changed = self.poll_project_folder_picker();
         if !self.config.sidebar_tree || self.active_endpoint_id != ClientEndpointId::Local {
-            return false;
+            return folder_changed;
         }
         let pane = self
             .snapshot
             .as_deref()
             .and_then(|snapshot| snapshot.focused_pane_id.clone());
-        let mut repaint =
-            self.accounts
+        let mut repaint = folder_changed
+            | self
+                .accounts
                 .tick(&self.config.orcha.accounts_command, pane.as_deref(), now);
         if repaint {
             self.update_low_fuel_hint();
@@ -500,6 +502,9 @@ pub(super) fn render_git_panel(
         rows.push(Row::Title("FUEL".into(), who, Some(Slot::Fuel)));
         for window in account.windows.iter().take(2) {
             rows.push(Row::Gauge(window));
+            if let Some(reset) = window.reset.as_deref().filter(|reset| !reset.is_empty()) {
+                rows.push(Row::Note(super::accounts::resets_in(reset), t.muted));
+            }
         }
         if account.windows.is_empty() {
             let note = account.error.clone().unwrap_or_else(|| "no data".into());

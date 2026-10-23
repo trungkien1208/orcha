@@ -66,11 +66,13 @@ impl ApiClient {
         timeout: Duration,
     ) -> Result<serde_json::Value, ApiClientError> {
         let mut stream = self.connect()?;
-        set_timeout_best_effort(&stream, TimeoutKind::Send, timeout)?;
-        set_timeout_best_effort(&stream, TimeoutKind::Recv, timeout)?;
+        set_send_timeout_best_effort(&stream, timeout)?;
         write_request(&mut stream, request)?;
-
-        let mut reader = BufReader::new(stream);
+        crate::ipc::set_local_stream_polling(&mut stream, true)?;
+        let mut reader = BufReader::new(DeadlineReader {
+            stream: &mut stream,
+            deadline: Instant::now() + timeout,
+        });
         read_json_line(&mut reader)
     }
 
@@ -95,14 +97,7 @@ impl ApiClient {
         };
         let response = match timeout {
             Some(timeout) => {
-                let mut stream = self.connect()?;
-                write_request(&mut stream, &request)?;
-                crate::ipc::set_local_stream_polling(&mut stream, true)?;
-                let mut reader = BufReader::new(DeadlineReader {
-                    stream: &mut stream,
-                    deadline: Instant::now() + timeout,
-                });
-                parse_response_value(read_json_line(&mut reader)?)?
+                parse_response_value(self.request_value_with_timeout(&request, timeout)?)?
             }
             None => self.request(request)?,
         };
@@ -125,20 +120,8 @@ impl ApiClient {
     }
 }
 
-enum TimeoutKind {
-    Send,
-    Recv,
-}
-
-fn set_timeout_best_effort(
-    stream: &LocalStream,
-    kind: TimeoutKind,
-    timeout: Duration,
-) -> io::Result<()> {
-    let result = match kind {
-        TimeoutKind::Send => stream.set_send_timeout(Some(timeout)),
-        TimeoutKind::Recv => stream.set_recv_timeout(Some(timeout)),
-    };
+fn set_send_timeout_best_effort(stream: &LocalStream, timeout: Duration) -> io::Result<()> {
+    let result = stream.set_send_timeout(Some(timeout));
     match result {
         Ok(()) => Ok(()),
         #[cfg(windows)]

@@ -172,6 +172,108 @@ pub(crate) fn detached_custom_command_process_platform(command: &str) -> std::pr
     command
 }
 
+pub(crate) fn orcha_shell_command_platform(command: &str) -> std::process::Command {
+    let mut process = Command::new("sh");
+    process.arg("-c").arg(command);
+    process
+}
+
+pub(crate) fn expand_orcha_home_command_platform(command: &str) -> String {
+    let Some(rest) = command.strip_prefix("~/") else {
+        return command.to_owned();
+    };
+    let Some(home) = user_home_dir_platform() else {
+        return command.to_owned();
+    };
+    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    let path = home.join(&rest[..end]);
+    format!("{}{}", shell_quote(&path.to_string_lossy()), &rest[end..])
+}
+
+pub(crate) fn orcha_tool_command_platform(program: &std::path::Path, args: &[String]) -> Command {
+    let mut process = Command::new(program);
+    process.args(args);
+    process
+}
+
+pub(crate) fn orcha_installer_command_platform(
+    unix_command: &str,
+    _windows_command: &str,
+) -> Command {
+    let mut process = Command::new("sh");
+    process.arg("-c").arg(unix_command);
+    process
+}
+
+pub(crate) fn orcha_installer_instruction_platform(
+    unix_command: &'static str,
+    _windows_command: &'static str,
+) -> &'static str {
+    unix_command
+}
+
+pub(crate) fn open_orcha_target_platform(
+    _target: super::OrchaOpenTarget,
+    path: &std::path::Path,
+    _line: u32,
+) -> Command {
+    let mut process = Command::new("xdg-open");
+    process.arg(path);
+    process
+}
+
+pub(crate) fn user_home_dir_platform() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(Into::into)
+}
+
+pub(crate) fn orcha_config_base_dir_platform() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("XDG_CONFIG_HOME") {
+        return Some(dir.into());
+    }
+    user_home_dir_platform().map(|home| home.join(".config"))
+}
+
+pub(crate) fn orcha_application_support_dir_platform(_home: &std::path::Path) -> PathBuf {
+    orcha_config_base_dir_platform().unwrap_or_else(std::env::temp_dir)
+}
+
+pub(crate) fn orcha_default_commands_platform() -> (&'static str, &'static str, &'static str) {
+    (
+        "",
+        "~/.config/orcha/scripts/limits.py",
+        "~/.config/orcha/scripts/handoff.py",
+    )
+}
+
+pub(crate) fn pick_project_folder() -> std::io::Result<Option<std::path::PathBuf>> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "folder dialogs are unavailable on this platform",
+    ))
+}
+
+pub(crate) fn orcha_installed_apps_platform(_names: &[&str]) -> Option<Vec<(String, String)>> {
+    None
+}
+
+pub(crate) fn orcha_config_tool_candidates_platform() -> &'static [&'static str] {
+    &["orcha"]
+}
+
+pub(crate) fn remove_orcha_installation_platform() -> std::io::Result<super::OrchaUninstallResult> {
+    Ok(super::OrchaUninstallResult::Unsupported)
+}
+
+pub(crate) fn orcha_uninstall_intro_platform() -> &'static str {
+    "This removes orcha and its settings."
+}
+
+pub(crate) fn local_file_uri_path_platform(uri: &str) -> Option<String> {
+    uri.strip_prefix("file://")
+        .filter(|path| path.starts_with('/'))
+        .map(str::to_owned)
+}
+
 pub(crate) fn pane_custom_command_pty_builder_platform(
     command: &str,
 ) -> portable_pty::CommandBuilder {

@@ -6,6 +6,10 @@ pub(super) enum ClientGlobalMenuAction {
     WhatsNew,
     /// orcha: bring in projects from Orca, VS Code, Cursor, JetBrains.
     ImportProjects,
+    /// orcha: start an agent in a new tab of the focused project.
+    NewAgent,
+    /// orcha: the first-run setup again.
+    Setup,
 }
 
 pub(super) fn global_menu_attention(snapshot: &ClientShellSnapshot) -> bool {
@@ -50,6 +54,8 @@ pub(super) fn global_menu_items(
     }
     let orcha = crate::orcha_app::is_orcha();
     if orcha {
+        items.push(("new agent", ClientGlobalMenuAction::NewAgent));
+        items.push(("setup", ClientGlobalMenuAction::Setup));
         items.push(("import projects", ClientGlobalMenuAction::ImportProjects));
     }
     items.push((
@@ -112,6 +118,8 @@ impl ClientShellState {
             }
             ClientGlobalMenuAction::WhatsNew => self.open_release_notes(),
             ClientGlobalMenuAction::ImportProjects => self.start_import_scan(),
+            ClientGlobalMenuAction::NewAgent => self.open_new_agent_popup(),
+            ClientGlobalMenuAction::Setup => self.open_welcome(outcome),
         }
         outcome.repaint = true;
     }

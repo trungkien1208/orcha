@@ -367,7 +367,15 @@ pub(crate) fn render_status_bar(
             + 2
             + windows
                 .iter()
-                .map(|w| display_width(&w.label) + 27)
+                .map(|w| {
+                    display_width(&w.label)
+                        + 27
+                        + w.reset
+                            .as_ref()
+                            .filter(|reset| !reset.is_empty())
+                            .map(|reset| 3 + display_width(reset))
+                            .unwrap_or(0)
+                })
                 .sum::<u16>()
     });
     let joined = right.join("  ");
@@ -412,6 +420,17 @@ pub(crate) fn render_status_bar(
                     .bg(bg)
                     .add_modifier(Modifier::BOLD),
             );
+            if let Some(reset) = window.reset.as_deref().filter(|reset| !reset.is_empty()) {
+                cx += 1;
+                cx = put_segment(
+                    buffer,
+                    cx,
+                    area.y,
+                    area.right(),
+                    &format!("· {reset}"),
+                    muted,
+                );
+            }
             cx += 1;
         }
     }

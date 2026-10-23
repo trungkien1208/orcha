@@ -52,12 +52,35 @@ impl Account {
     }
 
     /// Needs a sign-in before it can run anything.
+    ///
+    /// Credentials may still sit in the keychain after the token dies. Fuel
+    /// then has an error and no windows; treat that as signed out so SIGN IN
+    /// stays on the row (a usage-request failure is not a sign-in error).
     pub(super) fn signed_out(&self) -> bool {
-        match self.signed_in {
-            Some(signed_in) => !signed_in,
-            None => self.error.is_some() && self.windows.is_empty(),
+        if matches!(self.signed_in, Some(false)) {
+            return true;
         }
+        self.windows.is_empty() && self.error.as_deref().is_some_and(sign_in_error)
     }
+}
+
+/// "1h 12m" → "resets in 1h 12m". The clock already passed → "resets now".
+pub(super) fn resets_in(reset: &str) -> String {
+    if reset.eq_ignore_ascii_case("now") {
+        "resets now".to_owned()
+    } else {
+        format!("resets in {reset}")
+    }
+}
+
+fn sign_in_error(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    error.contains("sign-in")
+        || error.contains("sign in")
+        || error.contains("signed in")
+        || error.contains("signin")
+        || error.contains("đăng nhập")
+        || error.contains("hết hạn")
 }
 
 #[derive(Default)]
@@ -70,8 +93,8 @@ pub(super) struct AccountsPoller {
 
 /// A shell running an orcha command against this session's API socket.
 pub(super) fn orcha_command(command: &str) -> Command {
-    let mut cmd = Command::new("sh");
-    cmd.arg("-c").arg(expand_home(command)).env(
+    let mut cmd = crate::platform::orcha_shell_command(&expand_home(command));
+    cmd.env(
         crate::api::SOCKET_PATH_ENV_VAR,
         crate::session::active_api_socket_path(),
     );
@@ -82,12 +105,9 @@ pub(super) fn orcha_command(command: &str) -> Command {
     cmd
 }
 
-/// `~/x` → `$HOME/x` for the first word of a command.
+/// Expands a leading home-relative script path for the host shell.
 pub(super) fn expand_home(command: &str) -> String {
-    match (command.strip_prefix("~/"), std::env::var("HOME")) {
-        (Some(rest), Ok(home)) => format!("{home}/{rest}"),
-        _ => command.to_owned(),
-    }
+    crate::platform::expand_orcha_home_command(command)
 }
 
 fn read_accounts(command: &str, pane: Option<&str>) -> Option<Vec<Account>> {
@@ -200,5 +220,49 @@ mod tests {
         let accounts: Vec<Account> = serde_json::from_str(json).expect("json");
         assert_eq!(accounts[0].lowest(), Some(18));
         assert!(accounts[0].current);
+        assert!(!accounts[0].signed_out());
+    }
+
+    fn account(signed_in: Option<bool>, error: Option<&str>, windows: bool) -> Account {
+        Account {
+            id: "work".into(),
+            kind: "claude".into(),
+            label: "Claude · work".into(),
+            email: Some("a@b.c".into()),
+            current: true,
+            error: error.map(str::to_owned),
+            windows: if windows {
+                vec![FuelWindow {
+                    key: "session".into(),
+                    label: "5H".into(),
+                    left: 40,
+                    reset: None,
+                }]
+            } else {
+                Vec::new()
+            },
+            signed_in,
+        }
+    }
+
+    #[test]
+    fn expired_sign_in_still_needs_the_sign_in_button() {
+        assert!(account(
+            Some(true),
+            Some("sign-in expired: open Claude with this account once"),
+            false
+        )
+        .signed_out());
+        assert!(account(Some(false), Some("not signed in: ctrl-l to sign in"), false).signed_out());
+        assert!(account(
+            None,
+            Some("chưa đăng nhập: nhấn ctrl-l để đăng nhập"),
+            false
+        )
+        .signed_out());
+        assert!(
+            !account(Some(true), Some("usage request failed (error: 429)"), false).signed_out()
+        );
+        assert!(!account(Some(true), None, true).signed_out());
     }
 }

@@ -99,7 +99,21 @@ fn is_server_listening_at(socket_path: &Path) -> io::Result<bool> {
 }
 
 fn read_server_status() -> io::Result<Option<crate::api::RuntimeStatus>> {
-    crate::api::read_runtime_status_at(&crate::api::socket_path(), STATUS_REQUEST_TIMEOUT)
+    let path = crate::api::socket_path();
+    read_server_status_with_retry(|| {
+        crate::api::read_runtime_status_at(&path, STATUS_REQUEST_TIMEOUT)
+    })
+}
+
+fn read_server_status_with_retry(
+    mut probe: impl FnMut() -> io::Result<Option<crate::api::RuntimeStatus>>,
+) -> io::Result<Option<crate::api::RuntimeStatus>> {
+    match probe()? {
+        Some(status) => Ok(Some(status)),
+        // The listener may be present before its status handler catches up.
+        // Retry once, preserving compatibility errors and never replacing it.
+        None => probe(),
+    }
 }
 
 #[cfg(windows)]
@@ -283,7 +297,9 @@ pub fn wait_for_server_socket(socket_path: &Path, timeout: Duration) -> io::Resu
             "server did not become ready within {}s (socket: {}). The background server may still be starting; try `herdr` again, or check {}",
             timeout.as_secs(),
             socket_path.display(),
-            crate::session::data_dir().join("herdr-server.log").display()
+            crate::session::data_dir()
+                .join("herdr-server.log")
+                .display()
         ),
     ))
 }
@@ -613,6 +629,66 @@ test "$sid" = "$$"
         assert_eq!(status.version.as_deref(), Some("0.5.5"));
         assert_eq!(status.protocol, Some(2));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn runtime_status_probe_bounds_silent_and_partial_responses() {
+        for partial in [false, true] {
+            let dir = unique_test_dir("status-deadline");
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("api.sock");
+            let listener = UnixListener::bind(&path).unwrap();
+            let (release, released) = std::sync::mpsc::channel();
+            let handle = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = String::new();
+                BufReader::new(stream.try_clone().unwrap())
+                    .read_line(&mut request)
+                    .unwrap();
+                if partial {
+                    let _ = stream.write_all(b"{\"id\":\"status\"");
+                }
+                let _ = released.recv_timeout(Duration::from_secs(2));
+            });
+            let result = crate::api::read_runtime_status_at(&path, Duration::from_millis(30));
+            let _ = release.send(());
+            handle.join().unwrap();
+            assert_eq!(result.unwrap(), None, "partial response: {partial}");
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn startup_status_retry_is_bounded_and_preserves_errors() {
+        let status = crate::api::RuntimeStatus {
+            version: Some("0.9.5".into()),
+            protocol: None,
+            capabilities: None,
+        };
+        let mut calls = 0;
+        let result = read_server_status_with_retry(|| {
+            calls += 1;
+            Ok((calls == 2).then(|| status.clone()))
+        });
+        assert_eq!(result.unwrap(), Some(status));
+        assert_eq!(calls, 2);
+
+        calls = 0;
+        let result = read_server_status_with_retry(|| {
+            calls += 1;
+            Err(io::ErrorKind::PermissionDenied.into())
+        });
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(calls, 1);
+
+        calls = 0;
+        assert!(read_server_status_with_retry(|| {
+            calls += 1;
+            Ok(None)
+        })
+        .unwrap()
+        .is_none());
+        assert_eq!(calls, 2);
     }
 
     #[test]

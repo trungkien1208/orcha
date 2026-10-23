@@ -2,24 +2,20 @@
 
 use super::*;
 
-/// Opens a folder in the IDE: the first editor found on PATH, else the
-/// system's default handler.
-const DETECT_IDE: &str = r#"for c in cursor code zed subl idea; do command -v "$c" >/dev/null 2>&1 && exec "$c" "$P"; done; open "$P" 2>/dev/null || xdg-open "$P""#;
-/// Opens a folder in a Git GUI: the first app found, else the folder.
-const DETECT_GIT_GUI: &str = r#"for a in Fork SourceTree "GitHub Desktop" Tower GitKraken; do [ -d "/Applications/$a.app" ] && exec open -a "$a" "$P"; done; command -v gitk >/dev/null 2>&1 && cd "$P" && exec gitk --all; open "$P" 2>/dev/null || xdg-open "$P""#;
-
-/// Opens a file in the editor at `$L` (line) when it knows how, else with
-/// the system's default handler.
-const OPEN_FILE: &str = r#"for c in cursor code; do command -v "$c" >/dev/null 2>&1 && exec "$c" -g "$P:$L"; done; command -v zed >/dev/null 2>&1 && exec zed "$P:$L"; open "$P" 2>/dev/null || xdg-open "$P""#;
-/// Opens a folder in the file manager (Finder on macOS).
-const OPEN_FOLDER: &str = r#"open "$P" 2>/dev/null || xdg-open "$P""#;
-
 /// "src/a.ts:12:4" → ("src/a.ts", Some(12)).
 fn split_line(text: &str) -> (&str, Option<u32>) {
-    let mut parts = text.splitn(3, ':');
-    let path = parts.next().unwrap_or(text);
-    let line = parts.next().and_then(|line| line.parse().ok());
-    (path, line)
+    let Some((before_last, last)) = text.rsplit_once(':') else {
+        return (text, None);
+    };
+    let Ok(last_number) = last.parse::<u32>() else {
+        return (text, None);
+    };
+    if let Some((path, line)) = before_last.rsplit_once(':') {
+        if let Ok(line) = line.parse::<u32>() {
+            return (path, Some(line));
+        }
+    }
+    (before_last, Some(last_number))
 }
 
 /// Runs `command` with `$P` (and `{path}`) set to `path`, without waiting.
@@ -29,9 +25,7 @@ pub(super) fn spawn_with_path(command: &str, path: &str) {
 
 fn spawn_with_env(command: &str, path: &str, line: u32) {
     let script = command.replace("{path}", "\"$P\"");
-    let child = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(script)
+    let child = crate::platform::orcha_shell_command(&script)
         .env("P", path)
         .env("L", line.to_string())
         .stdin(std::process::Stdio::null())
@@ -41,6 +35,22 @@ fn spawn_with_env(command: &str, path: &str, line: u32) {
     match child {
         Ok(mut child) => {
             // reap it off the input path
+            let _ = crate::thread_spawn::spawn_named("orcha-open", move || {
+                let _ = child.wait();
+            });
+        }
+        Err(err) => tracing::warn!(err = %err, "orcha: failed to open {path}"),
+    }
+}
+
+fn open_orcha_target(target: crate::platform::OrchaOpenTarget, path: &str, line: u32) {
+    let child = crate::platform::open_orcha_target(target, std::path::Path::new(path), line)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    match child {
+        Ok(mut child) => {
             let _ = crate::thread_spawn::spawn_named("orcha-open", move || {
                 let _ = child.wait();
             });
@@ -87,11 +97,16 @@ impl ClientShellState {
         outcome: &mut ClientShellInput,
     ) -> bool {
         if self.config.sidebar_tree && super::contains(self.hits.new_workspace, point) {
-            self.open_new_agent_popup();
+            self.open_new_workspace_popup();
             outcome.repaint = true;
             return true;
         }
         let hits = &self.hits.orcha;
+        if super::contains(hits.process_toggle, point) {
+            self.orcha_ui.process_expanded = !self.orcha_ui.process_expanded;
+            outcome.repaint = true;
+            return true;
+        }
         if super::contains(hits.update, point) {
             self.start_update();
             outcome.repaint = true;
@@ -132,9 +147,20 @@ impl ClientShellState {
             .find(|(rect, _)| super::contains(*rect, point))
             .map(|(_, id)| id.clone())
         {
-            let open = &mut self.orcha_ui.open_projects;
-            if !open.remove(&id) {
-                open.insert(id);
+            let focused = self.snapshot.as_deref().is_some_and(|snapshot| {
+                snapshot
+                    .workspaces
+                    .iter()
+                    .any(|workspace| workspace.workspace_id == id && workspace.focused)
+            });
+            let expanded = self.orcha_ui.open_projects.contains(&id)
+                || (focused && !self.orcha_ui.folded_projects.contains(&id));
+            if expanded {
+                self.orcha_ui.open_projects.remove(&id);
+                self.orcha_ui.folded_projects.insert(id);
+            } else {
+                self.orcha_ui.folded_projects.remove(&id);
+                self.orcha_ui.open_projects.insert(id);
             }
             outcome.repaint = true;
             return true;
@@ -191,16 +217,19 @@ impl ClientShellState {
                 } else {
                     &self.config.orcha.git_gui
                 };
-                let command = if configured.trim().is_empty() {
-                    if ide {
-                        DETECT_IDE
-                    } else {
-                        DETECT_GIT_GUI
-                    }
+                if configured.trim().is_empty() {
+                    open_orcha_target(
+                        if ide {
+                            crate::platform::OrchaOpenTarget::Ide
+                        } else {
+                            crate::platform::OrchaOpenTarget::GitGui
+                        },
+                        &root,
+                        1,
+                    );
                 } else {
-                    configured.as_str()
-                };
-                spawn_with_path(command, &root);
+                    spawn_with_path(configured, &root);
+                }
             }
             return true;
         }
@@ -278,11 +307,29 @@ impl ClientShellState {
         self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::Handoff { selected, pane });
     }
 
+    pub(super) fn open_new_workspace_popup(&mut self) {
+        let project = self
+            .snapshot
+            .as_deref()
+            .and_then(|snapshot| {
+                snapshot
+                    .workspaces
+                    .iter()
+                    .find(|workspace| workspace.focused)
+            })
+            .map(|workspace| workspace.label.clone());
+        self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::NewWorkspace {
+            selected: 0,
+            project,
+        });
+    }
+
     fn popup_len(&self) -> usize {
         match &self.orcha_ui.popup {
             Some(super::orcha_popup::OrchaPopup::Accounts { .. }) => {
-                self.accounts.data().map_or(0, <[_]>::len)
+                self.accounts.data().map_or(0, <[_]>::len) + 1
             }
+            Some(super::orcha_popup::OrchaPopup::AddAccount { names, .. }) => names.len() + 1,
             Some(super::orcha_popup::OrchaPopup::Handoff { .. }) => {
                 super::orcha_popup::HANDOFF_TARGETS.len()
             }
@@ -292,7 +339,8 @@ impl ClientShellState {
             Some(super::orcha_popup::OrchaPopup::Import { .. }) => {
                 self.orcha_ui.import_sources.len()
             }
-            None => 0,
+            Some(super::orcha_popup::OrchaPopup::NewWorkspace { .. }) => 3,
+            Some(super::orcha_popup::OrchaPopup::Welcome(_)) | None => 0,
         }
     }
 
@@ -300,10 +348,13 @@ impl ClientShellState {
         match &mut self.orcha_ui.popup {
             Some(
                 super::orcha_popup::OrchaPopup::Accounts { selected, .. }
+                | super::orcha_popup::OrchaPopup::AddAccount { selected, .. }
                 | super::orcha_popup::OrchaPopup::Handoff { selected, .. }
                 | super::orcha_popup::OrchaPopup::NewAgent { selected, .. }
+                | super::orcha_popup::OrchaPopup::NewWorkspace { selected, .. }
                 | super::orcha_popup::OrchaPopup::Import { selected, .. },
             ) => *selected = index,
+            Some(super::orcha_popup::OrchaPopup::Welcome(welcome)) => welcome.selected = index,
             None => {}
         }
     }
@@ -312,10 +363,13 @@ impl ClientShellState {
         match &self.orcha_ui.popup {
             Some(
                 super::orcha_popup::OrchaPopup::Accounts { selected, .. }
+                | super::orcha_popup::OrchaPopup::AddAccount { selected, .. }
                 | super::orcha_popup::OrchaPopup::Handoff { selected, .. }
                 | super::orcha_popup::OrchaPopup::NewAgent { selected, .. }
+                | super::orcha_popup::OrchaPopup::NewWorkspace { selected, .. }
                 | super::orcha_popup::OrchaPopup::Import { selected, .. },
             ) => *selected,
+            Some(super::orcha_popup::OrchaPopup::Welcome(welcome)) => welcome.selected,
             None => 0,
         }
     }
@@ -367,6 +421,24 @@ impl ClientShellState {
         };
         let orcha = self.config.orcha.clone();
         match popup {
+            // the setup handles its own keys and clicks
+            super::orcha_popup::OrchaPopup::Welcome(_) => return,
+            super::orcha_popup::OrchaPopup::NewWorkspace { project, .. } => {
+                self.orcha_ui.popup = None;
+                if index == 0 && project.is_some() {
+                    self.record_binding(
+                        crate::input::KeybindMatch::Action(
+                            crate::input::KeybindAction::NewWorkspace,
+                        ),
+                        outcome,
+                    );
+                } else if index == 1 {
+                    self.browse_project_folder();
+                } else if index == 2 || (index == 0 && project.is_none()) {
+                    self.open_new_project_folder_overlay();
+                }
+                return;
+            }
             // a check flips; the button past the rows imports
             super::orcha_popup::OrchaPopup::Import { .. } => {
                 if index >= self.orcha_ui.import_sources.len() {
@@ -376,6 +448,21 @@ impl ClientShellState {
                 }
             }
             super::orcha_popup::OrchaPopup::Accounts { pane, .. } => {
+                let count = self.accounts.data().map_or(0, <[_]>::len);
+                if index >= count {
+                    let names = self
+                        .accounts
+                        .data()
+                        .map(super::orcha_popup::account_name_choices)
+                        .unwrap_or_default();
+                    self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::AddAccount {
+                        selected: 0,
+                        names,
+                        typed: String::new(),
+                        pane,
+                    });
+                    return;
+                }
                 let Some(account) = self
                     .accounts
                     .data()
@@ -384,7 +471,7 @@ impl ClientShellState {
                 else {
                     return;
                 };
-                if account.current && !alternate {
+                if account.current && !alternate && !account.signed_out() {
                     return;
                 }
                 let cwd = pane
@@ -474,6 +561,14 @@ impl ClientShellState {
                 }
                 return;
             }
+            super::orcha_popup::OrchaPopup::AddAccount { names, typed, .. } => {
+                let name = if index < names.len() {
+                    names[index].clone()
+                } else {
+                    typed
+                };
+                self.add_claude_account(&name);
+            }
             super::orcha_popup::OrchaPopup::Handoff { pane, .. } => {
                 let Some((agent, mode, _)) = super::orcha_popup::HANDOFF_TARGETS.get(index) else {
                     return;
@@ -488,6 +583,80 @@ impl ClientShellState {
         self.orcha_ui.popup = None;
     }
 
+    /// Create `name` as a Claude account and open its sign-in.
+    fn add_claude_account(&mut self, name: &str) {
+        let name: String = name
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
+            .flat_map(|ch| ch.to_lowercase())
+            .collect();
+        if name.is_empty() {
+            return;
+        }
+        run_detached(
+            fill(&self.config.orcha.add_command, &[("name", &name)]),
+            &[],
+        );
+        self.accounts.refresh_soon();
+        self.orcha_ui.popup = None;
+    }
+
+    /// ADD ACCOUNT: arrows move, letters fill the name row, esc goes back.
+    fn route_add_account_key(
+        &mut self,
+        key: &crate::input::TerminalKey,
+        outcome: &mut ClientShellInput,
+    ) {
+        use crossterm::event::KeyCode;
+        outcome.repaint = true;
+        let Some(super::orcha_popup::OrchaPopup::AddAccount {
+            selected,
+            names,
+            typed,
+            pane,
+        }) = self.orcha_ui.popup.clone()
+        else {
+            return;
+        };
+        let len = names.len() + 1;
+        match key.code {
+            KeyCode::Esc => {
+                self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::Accounts {
+                    selected: self.accounts.data().map_or(0, <[_]>::len),
+                    pane,
+                });
+            }
+            KeyCode::Up | KeyCode::BackTab if len > 0 => {
+                self.popup_select((selected + len - 1) % len);
+            }
+            KeyCode::Down | KeyCode::Tab if len > 0 => {
+                self.popup_select((selected + 1) % len);
+            }
+            KeyCode::Backspace => {
+                let mut typed = typed;
+                typed.pop();
+                self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::AddAccount {
+                    selected: names.len(),
+                    names,
+                    typed,
+                    pane,
+                });
+            }
+            KeyCode::Enter => self.popup_activate(selected, false, outcome),
+            KeyCode::Char(ch) if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' => {
+                let mut typed = typed;
+                typed.push(ch.to_ascii_lowercase());
+                self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::AddAccount {
+                    selected: names.len(),
+                    names,
+                    typed,
+                    pane,
+                });
+            }
+            _ => {}
+        }
+    }
+
     /// Keys while an orcha popup is open: arrows/j k move, ↵ acts, ⌥↵ the
     /// alternate action, H hands off, esc closes.
     pub(super) fn route_orcha_popup_key(
@@ -496,6 +665,20 @@ impl ClientShellState {
         outcome: &mut ClientShellInput,
     ) {
         use crossterm::event::{KeyCode, KeyModifiers};
+        if matches!(
+            self.orcha_ui.popup,
+            Some(super::orcha_popup::OrchaPopup::Welcome(_))
+        ) {
+            self.route_welcome_key(key, outcome);
+            return;
+        }
+        if matches!(
+            self.orcha_ui.popup,
+            Some(super::orcha_popup::OrchaPopup::AddAccount { .. })
+        ) {
+            self.route_add_account_key(key, outcome);
+            return;
+        }
         outcome.repaint = true;
         let len = self.popup_len();
         let selected = self.popup_selected();
@@ -559,6 +742,13 @@ impl ClientShellState {
         outcome: &mut ClientShellInput,
     ) {
         use crossterm::event::{MouseButton, MouseEventKind};
+        if matches!(
+            self.orcha_ui.popup,
+            Some(super::orcha_popup::OrchaPopup::Welcome(_))
+        ) {
+            self.handle_welcome_mouse(mouse, outcome);
+            return;
+        }
         if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
             return;
         }
@@ -678,12 +868,14 @@ impl ClientShellState {
         outcome.repaint = true;
     }
 
-    /// Ctrl+click on a path in a pane: a folder opens in Finder, a file in
+    /// Ctrl+click on a path in a pane: a folder opens in the file manager, a file in
     /// the editor (at its `:line`). Relative paths are the pane's. Returns
     /// false when nothing exists there.
     pub(super) fn open_path_link(&mut self, pane_id: &str, text: &str) -> bool {
         let (raw, line) = split_line(text);
-        let home = std::env::var("HOME").unwrap_or_default();
+        let home = crate::platform::user_home_dir()
+            .map(|home| home.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let expanded = match raw.strip_prefix('~') {
             Some(rest) => format!("{home}{rest}"),
             None => raw.to_owned(),
@@ -713,14 +905,17 @@ impl ClientShellState {
         }
         let shown = path.to_string_lossy().into_owned();
         if path.is_dir() {
-            spawn_with_env(OPEN_FOLDER, &shown, 1);
+            open_orcha_target(crate::platform::OrchaOpenTarget::Folder, &shown, 1);
         } else {
-            let command = if self.config.orcha.ide.trim().is_empty() {
-                OPEN_FILE
+            if self.config.orcha.ide.trim().is_empty() {
+                open_orcha_target(
+                    crate::platform::OrchaOpenTarget::File,
+                    &shown,
+                    line.unwrap_or(1),
+                );
             } else {
-                self.config.orcha.ide.as_str()
-            };
-            spawn_with_env(command, &shown, line.unwrap_or(1));
+                spawn_with_env(&self.config.orcha.ide, &shown, line.unwrap_or(1));
+            }
         }
         true
     }
@@ -756,6 +951,13 @@ impl ClientShellState {
             return false;
         };
         self.orcha_ui.import_scan = None;
+        // the setup shows the list as one of its steps
+        if matches!(
+            self.orcha_ui.popup,
+            Some(super::orcha_popup::OrchaPopup::Welcome(_))
+        ) {
+            return self.welcome_sources_found(sources);
+        }
         let first_time = !crate::orcha_import::asked();
         crate::orcha_import::mark_asked();
         // nothing found on the first run: say nothing
@@ -789,6 +991,11 @@ impl ClientShellState {
         else {
             return;
         };
+        self.import_projects(&chosen, outcome);
+    }
+
+    /// Adds the projects of the sources checked in `chosen`.
+    pub(super) fn import_projects(&mut self, chosen: &[bool], outcome: &mut ClientShellInput) {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return;
         };
@@ -798,7 +1005,7 @@ impl ClientShellState {
             .orcha_ui
             .import_sources
             .iter()
-            .zip(&chosen)
+            .zip(chosen)
             .filter(|(_, on)| **on)
         {
             for (name, path) in &source.projects {
@@ -859,8 +1066,11 @@ impl ClientShellState {
             self.push_endpoint_method(method, outcome);
             outcome.repaint = true;
         }
-        // the first time: offer the projects other tools know about
-        if !crate::orcha_import::asked() {
+        // the first time: the setup, which offers the projects other tools
+        // know about too
+        if !super::orcha_welcome::done() {
+            self.open_welcome(outcome);
+        } else if !crate::orcha_import::asked() {
             self.start_import_scan();
         }
         self.start_update_check();
@@ -940,7 +1150,7 @@ fn workspace_for_folder<'a>(
 /// folder, else the folder. Not the home folder or `/`.
 fn launch_project() -> Option<std::path::PathBuf> {
     let cwd = std::env::current_dir().ok()?;
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let home = crate::platform::user_home_dir();
     if cwd.parent().is_none() || home.as_deref() == Some(cwd.as_path()) {
         return None;
     }

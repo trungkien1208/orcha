@@ -4,8 +4,9 @@
 //! with a yellow edge), one raised green primary action, and a footer with
 //! the keys.
 //!
-//! Popups here: ACCOUNTS (switch which account the chat runs on) and HAND
-//! OFF (continue the chat with another agent).
+//! Popups here: ACCOUNTS (switch which account the chat runs on), HAND
+//! OFF (continue the chat with another agent), IMPORT, NEW WORKSPACE and NEW
+//! AGENT. The first-run WELCOME lives in `orcha_welcome`.
 
 use crate::api::schema::AgentStatus;
 
@@ -21,6 +22,13 @@ pub(crate) enum OrchaPopup {
         selected: usize,
         pane: Option<String>,
     },
+    /// Pick a name for a new Claude account, then sign it in.
+    AddAccount {
+        selected: usize,
+        names: Vec<String>,
+        typed: String,
+        pane: Option<String>,
+    },
     /// Continue `pane`'s conversation with another agent.
     Handoff { selected: usize, pane: String },
     /// Bring in projects from other tools; `chosen` per source.
@@ -32,6 +40,13 @@ pub(crate) enum OrchaPopup {
         project: String,
         cwd: String,
     },
+    /// Choose the current project or another project folder for a workspace.
+    NewWorkspace {
+        selected: usize,
+        project: Option<String>,
+    },
+    /// The first-run setup (see `orcha_welcome`).
+    Welcome(super::orcha_welcome::Welcome),
 }
 
 /// Click targets of the open popup.
@@ -63,12 +78,12 @@ pub(super) const HANDOFF_TARGETS: [(&str, &str, &str); 6] = [
     ),
 ];
 
-struct Frame {
-    body: Rect,
+pub(super) struct Frame {
+    pub(super) body: Rect,
 }
 
 /// The template's shell: dims the page, draws the box, header and footer.
-fn popup_frame(
+pub(super) fn popup_frame(
     buffer: &mut Buffer,
     width: u16,
     body_height: u16,
@@ -204,7 +219,7 @@ fn popup_frame(
 /// A body row: a flat band across the popup. The keyboard cursor's band
 /// is on card with a yellow bar on the left (like the selected project);
 /// rows after the first get a thin rule above them.
-fn row_box(
+pub(super) fn row_box(
     buffer: &mut Buffer,
     rect: Rect,
     first: bool,
@@ -241,7 +256,7 @@ fn row_box(
 
 /// A button: the primary one raised green, the others outlined, a
 /// disabled one muted.
-fn button(
+pub(super) fn button(
     buffer: &mut Buffer,
     right: u16,
     y: u16,
@@ -278,9 +293,30 @@ fn button(
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ButtonKind {
+pub(super) enum ButtonKind {
     Primary,
     Plain,
+}
+
+/// Names offered for a new Claude account (`oc personal`, …).
+pub(super) const ADD_ACCOUNT_NAMES: [&str; 5] = ["personal", "work", "side", "team", "client"];
+
+/// Suggestions that are not already an account id.
+pub(super) fn account_name_choices(accounts: &[Account]) -> Vec<String> {
+    let taken: std::collections::HashSet<&str> = accounts
+        .iter()
+        .map(|account| {
+            account
+                .id
+                .strip_prefix("claude-")
+                .unwrap_or(account.id.as_str())
+        })
+        .collect();
+    ADD_ACCOUNT_NAMES
+        .iter()
+        .filter(|name| !taken.contains(*name))
+        .map(|name| (*name).to_owned())
+        .collect()
 }
 
 /// The account a switch should go to: most fuel among the others of the
@@ -303,8 +339,8 @@ pub(super) fn best_account(accounts: &[Account]) -> Option<usize> {
         .map(|(index, _)| index)
 }
 
-/// Rows are 2 lines with a thin rule between them.
-const ROW: u16 = 2;
+/// Name, gauges, then when each window resets. A thin rule sits between rows.
+const ROW: u16 = 3;
 
 fn rows_height(rows: usize) -> u16 {
     (rows.max(1) as u16) * (ROW + 1) - 1
@@ -350,7 +386,7 @@ fn render_accounts(
     let frame = popup_frame(
         buffer,
         88,
-        rows_height(accounts.len()),
+        rows_height(accounts.len().max(1)).saturating_add(2),
         "CONTINUE ON",
         &context,
         &[
@@ -371,16 +407,16 @@ fn render_accounts(
             "loading accounts…  (needs [orcha] accounts_command)",
             Style::default().fg(t.muted).bg(t.bg),
         );
-        return Some(());
     }
     let best = best_account(accounts);
     let current_kind = accounts
         .iter()
         .find(|account| account.current)
         .map(|account| account.kind.clone());
+    let list_bottom = frame.body.bottom().saturating_sub(2);
     let mut y = frame.body.y;
     for (index, account) in accounts.iter().enumerate() {
-        if y + ROW > frame.body.bottom() {
+        if y + ROW > list_bottom {
             break;
         }
         let rect = Rect::new(frame.body.x, y, frame.body.width, ROW);
@@ -397,10 +433,10 @@ fn render_accounts(
         } else {
             None
         };
-        let action = if account.current {
-            None
-        } else if account.signed_out() {
+        let action = if account.signed_out() {
             Some(("SIGN IN", ButtonKind::Plain))
+        } else if account.current {
+            None
         } else if index == selected {
             Some(("CONTINUE ↵", ButtonKind::Primary))
         } else {
@@ -422,6 +458,140 @@ fn render_accounts(
             hits,
         );
         y += ROW + 1;
+    }
+    let _ = y;
+    let index = accounts.len();
+    let rect = Rect::new(
+        frame.body.x,
+        frame.body.bottom().saturating_sub(1),
+        frame.body.width,
+        1,
+    );
+    let cursor = index == selected;
+    let fill = row_box(buffer, rect, accounts.is_empty(), cursor, t);
+    put_text(
+        buffer,
+        rect.x + 2,
+        rect.y,
+        20,
+        "+  ADD ACCOUNT",
+        Style::default()
+            .fg(t.ink)
+            .bg(fill)
+            .add_modifier(Modifier::BOLD),
+    );
+    let action = button(
+        buffer,
+        rect.right() - 1,
+        rect.y,
+        "ADD",
+        if cursor {
+            ButtonKind::Primary
+        } else {
+            ButtonKind::Plain
+        },
+        fill,
+        t,
+    );
+    hits.actions.push((action, index));
+    hits.rows.push((rect, index));
+    Some(())
+}
+
+/// ADD ACCOUNT: a suggested name, or whatever was typed.
+fn render_add_account(
+    buffer: &mut Buffer,
+    selected: usize,
+    names: &[String],
+    typed: &str,
+    t: &Brutal,
+    hits: &mut PopupHits,
+) -> Option<()> {
+    let rows = names.len() + 1;
+    let frame = popup_frame(
+        buffer,
+        64,
+        rows.max(1) as u16 * 2,
+        "ADD ACCOUNT",
+        "a Claude account, then sign in",
+        &[("↵", "add"), ("type", "a name"), ("esc", "back")],
+        "",
+        t,
+        hits,
+    )?;
+    let mut y = frame.body.y;
+    for (index, name) in names.iter().enumerate() {
+        if y >= frame.body.bottom() {
+            break;
+        }
+        let rect = Rect::new(frame.body.x, y, frame.body.width, 1);
+        let cursor = index == selected;
+        let fill = row_box(buffer, rect, index == 0, cursor, t);
+        put_text(
+            buffer,
+            rect.x + 2,
+            rect.y,
+            rect.width.saturating_sub(16),
+            &format!("oc {name}"),
+            Style::default()
+                .fg(t.ink)
+                .bg(fill)
+                .add_modifier(Modifier::BOLD),
+        );
+        let action = button(
+            buffer,
+            rect.right() - 1,
+            rect.y,
+            "ADD",
+            if cursor {
+                ButtonKind::Primary
+            } else {
+                ButtonKind::Plain
+            },
+            fill,
+            t,
+        );
+        hits.actions.push((action, index));
+        hits.rows.push((rect, index));
+        y += 2;
+    }
+    if y < frame.body.bottom() {
+        let index = names.len();
+        let rect = Rect::new(frame.body.x, y, frame.body.width, 1);
+        let cursor = index == selected;
+        let fill = row_box(buffer, rect, names.is_empty(), cursor, t);
+        let shown = if typed.is_empty() {
+            "type a name".to_owned()
+        } else {
+            format!("oc {typed}")
+        };
+        put_text(
+            buffer,
+            rect.x + 2,
+            rect.y,
+            rect.width.saturating_sub(16),
+            &shown,
+            Style::default()
+                .fg(if typed.is_empty() { t.muted } else { t.ink })
+                .bg(fill),
+        );
+        if !typed.is_empty() {
+            let action = button(
+                buffer,
+                rect.right() - 1,
+                rect.y,
+                "ADD",
+                if cursor {
+                    ButtonKind::Primary
+                } else {
+                    ButtonKind::Plain
+                },
+                fill,
+                t,
+            );
+            hits.actions.push((action, index));
+        }
+        hits.rows.push((rect, index));
     }
     Some(())
 }
@@ -490,10 +660,18 @@ fn account_row(
     } else {
         shown * GAUGE_COLS + (shown - 1) * 2
     };
-    let note = match (&account.email, &account.error) {
-        (Some(email), _) => email.clone(),
-        (None, Some(error)) => error.clone(),
-        _ => String::new(),
+    let note = if account.signed_out() {
+        account
+            .error
+            .clone()
+            .or_else(|| account.email.clone())
+            .unwrap_or_default()
+    } else {
+        match (&account.email, &account.error) {
+            (Some(email), _) => email.clone(),
+            (None, Some(error)) => error.clone(),
+            _ => String::new(),
+        }
     };
     let note_x = name_x;
     let note_width = right.saturating_sub(note_x + gauges_width + 2);
@@ -538,6 +716,33 @@ fn account_row(
                 .add_modifier(Modifier::BOLD),
         );
         gx += GAUGE_COLS + 2;
+    }
+    let resets: Vec<String> = account
+        .windows
+        .iter()
+        .take(2)
+        .filter_map(|window| {
+            window
+                .reset
+                .as_deref()
+                .filter(|reset| !reset.is_empty())
+                .map(|reset| {
+                    format!(
+                        "{} {}",
+                        window.label.trim(),
+                        super::accounts::resets_in(reset)
+                    )
+                })
+        })
+        .collect();
+    if !resets.is_empty() {
+        put_right_text(
+            buffer,
+            Rect::new(rect.x, y + 2, right.saturating_sub(rect.x), 1),
+            y + 2,
+            &resets.join("   "),
+            Style::default().fg(t.muted).bg(fill),
+        );
     }
     hits.rows.push((rect, index));
 }
@@ -635,6 +840,93 @@ fn render_new_agent(
         let action = button(buffer, rect.right() - 1, y, "OPEN", kind, fill, t);
         hits.actions.push((action, index));
         hits.rows.push((rect, index));
+    }
+    Some(())
+}
+
+fn render_new_workspace(
+    buffer: &mut Buffer,
+    selected: usize,
+    project: Option<&str>,
+    t: &Brutal,
+    hits: &mut PopupHits,
+) -> Option<()> {
+    let frame = popup_frame(
+        buffer,
+        72,
+        rows_height(3),
+        "NEW WORKSPACE",
+        "choose where the project starts",
+        &[("↵", "choose"), ("↑↓", "move")],
+        "esc close",
+        t,
+        hits,
+    )?;
+    let options = [
+        (
+            "Current project",
+            project
+                .map(|project| format!("create a workspace in {project}"))
+                .unwrap_or_else(|| "no project is selected".to_owned()),
+            if project.is_some() {
+                "CREATE"
+            } else {
+                "CHOOSE"
+            },
+        ),
+        (
+            "Another folder",
+            "browse for a project folder on this computer".to_owned(),
+            "BROWSE",
+        ),
+        (
+            "Enter folder path",
+            "paste an absolute project folder path".to_owned(),
+            "CHOOSE",
+        ),
+    ];
+    let mut y = frame.body.y;
+    for (index, (title, detail, action_label)) in options.iter().enumerate() {
+        if y + ROW > frame.body.bottom() {
+            break;
+        }
+        let rect = Rect::new(frame.body.x, y, frame.body.width, ROW);
+        let fill = row_box(buffer, rect, index == 0, index == selected, t);
+        put_text(
+            buffer,
+            rect.x + 2,
+            y,
+            rect.width.saturating_sub(18),
+            title,
+            Style::default()
+                .fg(t.ink)
+                .bg(fill)
+                .add_modifier(Modifier::BOLD),
+        );
+        put_text(
+            buffer,
+            rect.x + 2,
+            y + 1,
+            rect.width.saturating_sub(18),
+            detail,
+            Style::default().fg(t.muted).bg(fill),
+        );
+        let action = button(
+            buffer,
+            rect.right() - 1,
+            y,
+            action_label,
+            if index == selected {
+                ButtonKind::Primary
+            } else {
+                ButtonKind::Plain
+            },
+            fill,
+            t,
+        );
+        hits.actions.push((action, index));
+        hits.rows.push((rect, index));
+        y += ROW + 1;
     }
     Some(())
 }
@@ -855,7 +1147,7 @@ pub(super) fn render_popup(
     buffer: &mut Buffer,
     popup: &OrchaPopup,
     accounts: Option<&[Account]>,
-    imports: &[crate::orcha_import::ImportSource],
+    ui: &OrchaUiState,
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
 ) -> PopupHits {
@@ -874,16 +1166,30 @@ pub(super) fn render_popup(
                 &mut hits,
             );
         }
+        OrchaPopup::AddAccount {
+            selected,
+            names,
+            typed,
+            ..
+        } => {
+            let _ = render_add_account(buffer, *selected, names, typed, &t, &mut hits);
+        }
         OrchaPopup::Handoff { selected, pane } => {
             let _ = render_handoff(buffer, *selected, pane, snapshot, config, &t, &mut hits);
         }
         OrchaPopup::Import { selected, chosen } => {
-            let _ = render_import(buffer, *selected, chosen, imports, &t, &mut hits);
+            let _ = render_import(buffer, *selected, chosen, &ui.import_sources, &t, &mut hits);
+        }
+        OrchaPopup::Welcome(welcome) => {
+            let _ = super::orcha_welcome::render(buffer, welcome, ui, config, &t, &mut hits);
         }
         OrchaPopup::NewAgent {
             selected, project, ..
         } => {
             let _ = render_new_agent(buffer, *selected, project, accounts, config, &t, &mut hits);
+        }
+        OrchaPopup::NewWorkspace { selected, project } => {
+            let _ = render_new_workspace(buffer, *selected, project.as_deref(), &t, &mut hits);
         }
     }
     hits

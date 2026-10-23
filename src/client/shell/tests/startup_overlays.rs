@@ -1196,8 +1196,8 @@ fn client_settings_preview_restore_and_endpoint_integrations_are_owned_by_overla
 
     state.open_settings_overlay();
     state.compose(106, 30).expect("settings overlay");
-    // theme, font, ligatures, ide, git, indicators, sound, toasts, then integrations
-    for _ in 0..7 {
+    // theme, font, size, ligatures, ide, git, indicators, sound, toasts, then integrations
+    for _ in 0..8 {
         let next = state.handle_input_bytes(b"\t");
         assert!(next.actions.is_empty());
     }
@@ -1314,4 +1314,30 @@ fn client_settings_preview_restore_and_endpoint_integrations_are_owned_by_overla
             ..
         })) if integration_messages == &["installed codex"]
     ));
+}
+
+#[test]
+fn settings_font_size_lists_point_sizes() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_settings_overlay();
+    state.handle_input_bytes(b"\t");
+    state.handle_input_bytes(b"\t");
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::Settings(ClientSettingsOverlay {
+            section: ClientSettingsSection::FontSize,
+            ..
+        }))
+    ));
+    let frame = state.compose(106, 30).expect("font size");
+    let text = frame
+        .cells
+        .iter()
+        .map(|cell| cell.symbol.as_str())
+        .collect::<String>();
+    assert!(text.contains("font size"));
+    assert!(text.contains("11 pt"));
+    assert!(text.contains("how big the terminal's text is"));
 }

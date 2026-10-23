@@ -1,7 +1,7 @@
 //! orcha: the standalone app identity (docs/orcha/SPEC.md §3.11).
 //!
 //! The same binary is orcha when it is run as `orcha` (or with `ORCHA_APP=1`):
-//! its config and sessions live in `~/.config/orcha` instead of herdr's, the
+//! its config and sessions live in its platform config folder instead of herdr's, the
 //! first run imports herdr's config and workspaces once, and the orcha-config
 //! commands (`orcha setup`, `orcha menu`, …) are handed to that tool.
 
@@ -12,9 +12,11 @@ pub(crate) const ORCHA_APP_ENV_VAR: &str = "ORCHA_APP";
 /// orcha's own version; its GitHub releases are tagged `orcha-<version>`.
 pub(crate) const ORCHA_VERSION: &str = "0.1.2";
 const RELEASES_API: &str = "https://api.github.com/repos/trungkien1208/orcha/releases/latest";
-/// Installs or updates the app and its extras (see install.sh).
-const INSTALL_COMMAND: &str =
+/// Installs or updates the app and its extras on Unix (see install.sh).
+const INSTALL_COMMAND_UNIX: &str =
     "curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.sh | sh";
+/// Installs or updates the Windows package (see install.ps1).
+const INSTALL_COMMAND_WINDOWS: &str = "Invoke-Expression ((Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.ps1').Content)";
 /// The newest release seen, checked at most once a day.
 const RELEASE_CACHE: &str = ".latest-release";
 const IMPORT_MARKER: &str = ".imported-from-herdr";
@@ -51,22 +53,22 @@ pub(crate) fn claim_identity() {
     }
 }
 
-/// `$XDG_CONFIG_HOME`, else `~/.config`.
+/// The platform's user config root, respecting explicit XDG overrides.
 fn config_base() -> Option<PathBuf> {
-    match std::env::var("XDG_CONFIG_HOME") {
-        Ok(dir) => Some(PathBuf::from(dir)),
-        Err(_) => Some(PathBuf::from(std::env::var_os("HOME")?).join(".config")),
-    }
+    crate::platform::orcha_config_base_dir()
 }
 
-/// orcha-config's CLI: `~/.config/orcha/scripts` links into its checkout.
-/// orcha-config lives in `~/.config/orcha` whatever this app's own config
-/// folder is (a dev build keeps its config in `orcha-dev`).
+/// orcha-config's CLI: the config folder's `orcha/scripts` links into its
+/// checkout. orcha-config shares that folder in a release (a dev build keeps
+/// its app config separate as `orcha-dev`).
 pub(crate) fn config_tool() -> Option<PathBuf> {
     let scripts = config_base()?.join("orcha").join("scripts");
     let checkout = std::fs::canonicalize(scripts).ok()?.parent()?.to_path_buf();
-    let tool = checkout.join("bin").join("orcha");
-    tool.is_file().then_some(tool)
+    let bin = checkout.join("bin");
+    crate::platform::orcha_config_tool_candidates()
+        .iter()
+        .map(|name| bin.join(name))
+        .find(|tool| tool.is_file())
 }
 
 /// orcha's own commands: `--version`, `update`, `uninstall`; and
@@ -102,7 +104,7 @@ pub(crate) fn maybe_run_config_tool(args: &[String]) -> Option<i32> {
         );
         return Some(2);
     };
-    let status = std::process::Command::new(tool).args(&args[1..]).status();
+    let status = crate::platform::orcha_tool_command(&tool, &args[1..]).status();
     Some(status.ok().and_then(|status| status.code()).unwrap_or(1))
 }
 
@@ -159,9 +161,10 @@ pub(crate) fn newer_release() -> Option<String> {
 /// Runs the installer: the latest app and extras. `quiet` keeps its output
 /// off the screen (the app runs it behind its own UI).
 pub(crate) fn run_installer(quiet: bool) -> bool {
-    let mut command = std::process::Command::new("sh");
-    command.arg("-c").arg(INSTALL_COMMAND);
+    let mut command =
+        crate::platform::orcha_installer_command(INSTALL_COMMAND_UNIX, INSTALL_COMMAND_WINDOWS);
     if quiet {
+        crate::platform::configure_background_command(&mut command);
         command
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -177,7 +180,11 @@ pub(crate) fn run_installer(quiet: bool) -> bool {
 
 fn update_from_cli() -> i32 {
     if !run_installer(false) {
-        eprintln!("orcha update failed. Try again, or run:\n  {INSTALL_COMMAND}");
+        let instruction = crate::platform::orcha_installer_instruction(
+            INSTALL_COMMAND_UNIX,
+            INSTALL_COMMAND_WINDOWS,
+        );
+        eprintln!("orcha update failed. Try again, or run:\n  {instruction}");
         return 1;
     }
     println!("Quit orcha and open it again to use the new version. Your agents keep running.");
@@ -197,10 +204,8 @@ fn ask(question: &str) -> bool {
 /// everything the installer put in, and, if asked, the settings and saved
 /// projects too. A checkout someone cloned by hand is left alone.
 fn uninstall() -> i32 {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_default();
-    println!("This removes orcha: the app, its extras, its hooks in Claude Code and Codex, the logo font and the lines it added to ~/.zshrc.");
+    let home = crate::platform::user_home_dir().unwrap_or_default();
+    println!("{}", crate::platform::orcha_uninstall_intro());
     println!("Agents running inside orcha are stopped.");
     if !ask("Uninstall orcha?") {
         println!("Nothing changed.");
@@ -215,9 +220,8 @@ fn uninstall() -> i32 {
             .status();
     }
     if let Some(tool) = config_tool() {
-        let _ = std::process::Command::new(&tool)
-            .args(["uninstall", "--all"])
-            .status();
+        let args = ["uninstall".to_owned(), "--all".to_owned()];
+        let _ = crate::platform::orcha_tool_command(&tool, &args).status();
         // the extras' folder, when the installer made it
         let installed = std::env::var_os("ORCHA_DIR")
             .map(PathBuf::from)
@@ -254,6 +258,22 @@ fn uninstall() -> i32 {
     }
     if let Some(me) = me.filter(|me| me.starts_with(home.join(".local/bin"))) {
         let _ = std::fs::remove_file(me);
+    }
+    match crate::platform::remove_orcha_installation() {
+        #[cfg(not(windows))]
+        Ok(crate::platform::OrchaUninstallResult::Unsupported) => {}
+        #[cfg(windows)]
+        Ok(crate::platform::OrchaUninstallResult::NotInstalled) => println!(
+            "No managed Windows installation was found; this executable was left in place."
+        ),
+        #[cfg(windows)]
+        Ok(crate::platform::OrchaUninstallResult::Scheduled(path)) => {
+            println!("Removing {} after this process exits.", path.display());
+        }
+        Err(err) => {
+            eprintln!("could not remove the managed installation: {err}");
+            return 1;
+        }
     }
     println!("orcha is uninstalled. Thanks for trying it 🐋🍵");
     0

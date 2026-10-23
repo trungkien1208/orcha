@@ -12,6 +12,8 @@ herdr status
 
 Also record your operating system, outer terminal name and version, whether the session is local or remote, and whether tmux is involved.
 
+If startup reports that a server is listening but its status API is unavailable, run `herdr status` (or `herdr --session <name> status` for a named session) to check it again. Startup bounds each status response wait and retries once for a temporarily unavailable API. A slow or incomplete response does not cause Herdr to replace the listening server automatically.
+
 ## The CJK IME window is misplaced or the cursor flickers on Windows
 
 Herdr defaults to a cell-drawn cursor on native Windows and WSL because native cursors can flicker, jump, or show stale positions while ConPTY-based multiplexers repaint the screen. A cell-drawn cursor cannot provide the native cursor anchor used by Korean, Japanese, and Chinese IME composition UI.

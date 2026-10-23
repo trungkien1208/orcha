@@ -236,6 +236,138 @@ pub(crate) fn configure_background_command(command: &mut std::process::Command) 
     configure_background_command_platform(command);
 }
 
+/// Builds the shell command used by ORCHA's optional command integrations.
+/// The platform implementation owns which shell receives this command text.
+pub(crate) fn orcha_shell_command(command: &str) -> std::process::Command {
+    let mut process = orcha_shell_command_platform(command);
+    configure_background_command(&mut process);
+    process
+}
+
+/// Expands a leading `~/` command path while preserving the shell's argument
+/// boundary and quoting rules.
+pub(crate) fn expand_orcha_home_command(command: &str) -> String {
+    expand_orcha_home_command_platform(command)
+}
+
+/// Invokes ORCHA's separately installed config CLI with argv preserved.
+pub(crate) fn orcha_tool_command(
+    program: &std::path::Path,
+    args: &[String],
+) -> std::process::Command {
+    orcha_tool_command_platform(program, args)
+}
+
+/// Builds the host shell command that fetches and runs ORCHA's installer.
+pub(crate) fn orcha_installer_command(
+    unix_command: &str,
+    windows_command: &str,
+) -> std::process::Command {
+    orcha_installer_command_platform(unix_command, windows_command)
+}
+
+pub(crate) fn orcha_installer_instruction(
+    unix_command: &'static str,
+    windows_command: &'static str,
+) -> &'static str {
+    orcha_installer_instruction_platform(unix_command, windows_command)
+}
+
+/// Opens a project, file, or repository with the host platform's usual app
+/// discovery and fallback behavior.
+pub(crate) fn open_orcha_target(
+    target: OrchaOpenTarget,
+    path: &std::path::Path,
+    line: u32,
+) -> std::process::Command {
+    let mut process = open_orcha_target_platform(target, path, line);
+    configure_background_command(&mut process);
+    process
+}
+
+/// The kind of path an ORCHA toolbar or terminal link wants to open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OrchaOpenTarget {
+    Ide,
+    GitGui,
+    File,
+    Folder,
+}
+
+/// The current user's profile directory, when the host exposes one.
+pub(crate) fn user_home_dir() -> Option<std::path::PathBuf> {
+    user_home_dir_platform()
+}
+
+/// The platform's user configuration root (XDG config on Unix, roaming
+/// application data on Windows).
+pub(crate) fn orcha_config_base_dir() -> Option<std::path::PathBuf> {
+    orcha_config_base_dir_platform()
+}
+
+/// The host's application support directory used when importing editor data.
+pub(crate) fn orcha_application_support_dir(home: &std::path::Path) -> std::path::PathBuf {
+    orcha_application_support_dir_platform(home)
+}
+
+/// Default ORCHA command strings for the host shell and script layout.
+pub(crate) fn orcha_default_commands() -> (&'static str, &'static str, &'static str) {
+    orcha_default_commands_platform()
+}
+
+/// Windows can list installed commands for ORCHA's IDE and Git GUI settings.
+/// Other hosts keep their existing app discovery.
+pub(crate) fn orcha_installed_apps(names: &[&str]) -> Option<Vec<(String, String)>> {
+    orcha_installed_apps_platform(names)
+}
+
+/// Executable names accepted for ORCHA's optional config CLI on this host.
+pub(crate) fn orcha_config_tool_candidates() -> &'static [&'static str] {
+    orcha_config_tool_candidates_platform()
+}
+
+/// Removes the managed ORCHA application install, returning its path when one
+/// was found. Source builds and unmanaged copies are left in place.
+pub(crate) fn remove_orcha_installation() -> std::io::Result<OrchaUninstallResult> {
+    remove_orcha_installation_platform()
+}
+
+pub(crate) fn orcha_uninstall_intro() -> &'static str {
+    orcha_uninstall_intro_platform()
+}
+
+#[derive(Debug)]
+pub(crate) enum OrchaUninstallResult {
+    #[cfg(not(windows))]
+    Unsupported,
+    #[cfg(windows)]
+    NotInstalled,
+    #[cfg(windows)]
+    Scheduled(std::path::PathBuf),
+}
+
+/// Decode a native folder dialog's result. An empty successful result means
+/// cancellation; preserve spaces in the selected folder's name.
+fn project_folder_picker_result(
+    output: std::process::Output,
+) -> std::io::Result<Option<std::path::PathBuf>> {
+    if !output.status.success() {
+        return Err(std::io::Error::other(
+            "the folder dialog could not be opened",
+        ));
+    }
+    let path = String::from_utf8(output.stdout)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let path = path.trim_end_matches(['\r', '\n']);
+    Ok((!path.is_empty()).then(|| std::path::PathBuf::from(path)))
+}
+
+/// Converts a local `file://` URI from an editor's recent-project database to
+/// a host-native path. Remote and non-file URIs return `None`.
+pub(crate) fn local_file_uri_path(uri: &str) -> Option<String> {
+    local_file_uri_path_platform(uri)
+}
+
 #[cfg(not(windows))]
 fn configure_background_command_platform(_command: &mut std::process::Command) {}
 
@@ -461,16 +593,46 @@ pub(crate) fn end_cli_output() {}
 mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::*;
+#[cfg(target_os = "linux")]
+use linux::{
+    expand_orcha_home_command_platform, local_file_uri_path_platform, open_orcha_target_platform,
+    orcha_application_support_dir_platform, orcha_config_base_dir_platform,
+    orcha_config_tool_candidates_platform, orcha_default_commands_platform,
+    orcha_installed_apps_platform, orcha_installer_command_platform,
+    orcha_installer_instruction_platform, orcha_shell_command_platform,
+    orcha_tool_command_platform, orcha_uninstall_intro_platform,
+    remove_orcha_installation_platform, user_home_dir_platform,
+};
 
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
 pub use macos::*;
+#[cfg(target_os = "macos")]
+use macos::{
+    expand_orcha_home_command_platform, local_file_uri_path_platform, open_orcha_target_platform,
+    orcha_application_support_dir_platform, orcha_config_base_dir_platform,
+    orcha_config_tool_candidates_platform, orcha_default_commands_platform,
+    orcha_installed_apps_platform, orcha_installer_command_platform,
+    orcha_installer_instruction_platform, orcha_shell_command_platform,
+    orcha_tool_command_platform, orcha_uninstall_intro_platform,
+    remove_orcha_installation_platform, user_home_dir_platform,
+};
 
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
 pub use windows::*;
+#[cfg(target_os = "windows")]
+use windows::{
+    expand_orcha_home_command_platform, local_file_uri_path_platform, open_orcha_target_platform,
+    orcha_application_support_dir_platform, orcha_config_base_dir_platform,
+    orcha_config_tool_candidates_platform, orcha_default_commands_platform,
+    orcha_installed_apps_platform, orcha_installer_command_platform,
+    orcha_installer_instruction_platform, orcha_shell_command_platform,
+    orcha_tool_command_platform, orcha_uninstall_intro_platform,
+    remove_orcha_installation_platform, user_home_dir_platform,
+};
 
 #[cfg(not(windows))]
 pub(crate) use process_cwd as pane_process_cwd;
@@ -479,6 +641,16 @@ pub(crate) use process_cwd as pane_process_cwd;
 mod fallback;
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 pub use fallback::*;
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+use fallback::{
+    expand_orcha_home_command_platform, local_file_uri_path_platform, open_orcha_target_platform,
+    orcha_application_support_dir_platform, orcha_config_base_dir_platform,
+    orcha_config_tool_candidates_platform, orcha_default_commands_platform,
+    orcha_installed_apps_platform, orcha_installer_command_platform,
+    orcha_installer_instruction_platform, orcha_shell_command_platform,
+    orcha_tool_command_platform, orcha_uninstall_intro_platform,
+    remove_orcha_installation_platform, user_home_dir_platform,
+};
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn available_pane_shell_from_job(child_pid: u32, job: ForegroundJob) -> Option<String> {

@@ -47,7 +47,7 @@ pub(super) fn render_settings_overlay(
     } else {
         22
     };
-    let popup = popup(buffer.area, 92, height)?;
+    let popup = popup(buffer.area, 98, height)?;
     let inner = panel(buffer, popup, palette.accent, palette.panel_bg)?;
     if inner.width < 20 || inner.height < 8 {
         return None;
@@ -181,13 +181,15 @@ pub(super) fn render_settings_overlay(
                 choice_hits.push((rect, index));
             }
         }
-        ClientSettingsSection::Font | ClientSettingsSection::Ligatures
+        ClientSettingsSection::Font
+        | ClientSettingsSection::FontSize
+        | ClientSettingsSection::Ligatures
             if !crate::client::shell::brutal::host_is_ghostty() =>
         {
             render_choice_section(
                 buffer,
                 content,
-                "font and ligatures",
+                "font, size and ligatures",
                 "orcha sets these in Ghostty only; pick them in this terminal's own settings",
                 &[],
                 0,
@@ -232,6 +234,36 @@ pub(super) fn render_settings_overlay(
                 );
                 choice_hits.push((rect, index));
             }
+            if let Some(note) = &settings.appearance.note {
+                put_text(
+                    buffer,
+                    content.x + 1,
+                    content.bottom().saturating_sub(1),
+                    content.width,
+                    note,
+                    Style::default().fg(palette.green).bg(palette.panel_bg),
+                );
+            }
+        }
+        ClientSettingsSection::FontSize => {
+            let now = settings.appearance.font_size;
+            let labels: Vec<String> = crate::client::shell::settings::FONT_SIZES
+                .map(|size| {
+                    let mark = if size == now { "  (now)" } else { "" };
+                    format!("{size} pt{mark}")
+                })
+                .collect();
+            let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+            render_choice_section(
+                buffer,
+                content,
+                "font size",
+                "how big the terminal's text is; orcha's default is 15",
+                &labels,
+                settings.selected,
+                palette,
+                &mut choice_hits,
+            );
             if let Some(note) = &settings.appearance.note {
                 put_text(
                     buffer,

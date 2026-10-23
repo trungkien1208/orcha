@@ -105,6 +105,7 @@ pub(super) struct OrchaHits {
     pub(super) update: Rect,
     /// orcha: the PROCESS card, when it is on screen (its trains animate).
     pub(super) process: Rect,
+    pub(super) process_toggle: Rect,
     pub(super) settings: Rect,
     pub(super) fuel: Rect,
     pub(super) fuel_hint: Rect,
@@ -125,9 +126,15 @@ pub(super) struct OrchaHits {
     pub(super) popup: super::orcha_popup::PopupHits,
 }
 
+/// (name, command) of an IDE or Git GUI found on this machine.
+type WelcomeApp = (String, String);
+
 /// orcha: presentation state of the orcha chrome (client only).
 #[derive(Default)]
 pub(crate) struct OrchaUiState {
+    /// Native folder dialog, awaited without blocking the terminal input loop.
+    pub(super) project_folder_picker:
+        Option<std::sync::mpsc::Receiver<std::io::Result<Option<std::path::PathBuf>>>>,
     /// The project orcha was started in was opened (or found open) already.
     pub(super) launch_project_done: bool,
     /// Projects other tools know about, being looked up off the input path.
@@ -144,6 +151,9 @@ pub(crate) struct OrchaUiState {
     pub(super) import_sources: Vec<crate::orcha_import::ImportSource>,
     /// Projects expanded in the sidebar besides the selected one.
     pub(super) open_projects: HashSet<String>,
+    /// Explicitly folded projects, including the currently selected project.
+    pub(super) folded_projects: HashSet<String>,
+    pub(super) process_expanded: bool,
     pub(super) history_open: bool,
     pub(super) worktrees_open: bool,
     /// Animation frame of the PROCESS trains.
@@ -155,6 +165,12 @@ pub(crate) struct OrchaUiState {
     pub(super) low_fuel_hint: Option<String>,
     /// Accounts the CONTINUE ON popup was already offered for (once each).
     pub(super) low_fuel_offered: HashSet<String>,
+    /// WELCOME: the IDEs and the Git GUIs found ("auto" first in each).
+    pub(super) welcome_apps: (Vec<WelcomeApp>, Vec<WelcomeApp>),
+    /// WELCOME: the agent hooks; none while the list is on its way.
+    pub(super) welcome_integrations: Option<Vec<crate::api::schema::IntegrationInfo>>,
+    /// WELCOME: the theme kept so far, put back when the setup is skipped.
+    pub(super) welcome_theme: Option<(String, Palette)>,
 }
 
 #[derive(Default)]
@@ -377,6 +393,7 @@ pub(super) enum ClientRenameTarget {
         cwd: Option<String>,
         suggested_name: String,
     },
+    NewProjectFolder,
     Workspace {
         workspace_id: String,
     },
@@ -462,6 +479,7 @@ pub(super) struct ClientGlobalMenuOverlay {
 pub(super) enum ClientSettingsSection {
     Theme,
     Font,
+    FontSize,
     Ligatures,
     Ide,
     GitUi,
@@ -475,6 +493,7 @@ impl ClientSettingsSection {
     pub(super) const ALL: &[Self] = &[
         Self::Theme,
         Self::Font,
+        Self::FontSize,
         Self::Ligatures,
         Self::Ide,
         Self::GitUi,
@@ -488,6 +507,7 @@ impl ClientSettingsSection {
         match self {
             Self::Theme => "theme",
             Self::Font => "font",
+            Self::FontSize => "size",
             Self::Ligatures => "ligatures",
             Self::Ide => "ide",
             Self::GitUi => "git",
@@ -518,6 +538,8 @@ pub(super) struct ClientSettingsOverlay {
 pub(super) struct OrchaAppearance {
     pub(super) fonts: Vec<String>,
     pub(super) font: String,
+    /// The terminal's font size in points.
+    pub(super) font_size: u16,
     pub(super) ligatures: bool,
     pub(super) note: Option<String>,
     /// (name, command) of the IDEs and Git GUIs found; "auto" first.
@@ -1695,6 +1717,9 @@ impl ClientShellState {
                 }
                 Some(_) => {}
             }
+        }
+        if self.config.sidebar_tree {
+            super::orcha_projects::normalize_project_labels(&mut snapshot);
         }
         self.snapshot = Some(snapshot);
         self.reconcile_pending_workspace_highlight();

@@ -126,12 +126,17 @@ impl Brutal {
 
     /// An agent's color: Claude yellow, Codex green, Cursor blue.
     pub(super) fn agent(&self, agent: Option<&str>) -> Color {
-        match agent.unwrap_or("").to_ascii_lowercase().as_str() {
-            "claude" => self.yellow,
-            "codex" => self.green,
-            "cursor" => self.blue,
-            "gemini" => self.pink,
-            _ => self.card,
+        let agent = agent.unwrap_or("");
+        if agent.eq_ignore_ascii_case("claude") {
+            self.yellow
+        } else if agent.eq_ignore_ascii_case("codex") {
+            self.green
+        } else if agent.eq_ignore_ascii_case("cursor") {
+            self.blue
+        } else if agent.eq_ignore_ascii_case("gemini") {
+            self.pink
+        } else {
+            self.card
         }
     }
 
@@ -344,9 +349,10 @@ pub(super) fn model_label(model: &str) -> String {
 }
 
 /// A pane's model label: the `model` token an integration reports, else the
-/// agent's name.
+/// agent's name. A logo the tab namer stored at the front of the name is
+/// dropped: the chrome draws that logo itself.
 pub(super) fn agent_label(agent: &ClientShellAgent) -> String {
-    agent
+    let raw = agent
         .tokens
         .iter()
         .find(|(key, value)| key == "model" && !value.trim().is_empty())
@@ -354,7 +360,46 @@ pub(super) fn agent_label(agent: &ClientShellAgent) -> String {
         .or_else(|| agent.display_agent.clone())
         .or_else(|| agent.agent.clone())
         .or_else(|| agent.name.clone())
-        .unwrap_or_else(|| "agent".to_owned())
+        .unwrap_or_else(|| "agent".to_owned());
+    let name = strip_leading_agent_mark(&raw);
+    if name.is_empty() {
+        agent
+            .agent
+            .clone()
+            .or_else(|| agent.name.clone())
+            .unwrap_or_else(|| "agent".to_owned())
+    } else {
+        name
+    }
+}
+
+/// "󰚩 Cursor" → "Cursor". The mark is an Agent Icons glyph or a fallback symbol.
+fn strip_leading_agent_mark(label: &str) -> String {
+    let trimmed = label.trim_start();
+    let Some(mark) = trimmed.chars().next() else {
+        return String::new();
+    };
+    let owned = ('\u{100000}'..='\u{100003}').contains(&mark)
+        || matches!(
+            mark,
+            '✳' | '◎'
+                | '▲'
+                | '✦'
+                | '◇'
+                | '⚡'
+                | '◆'
+                | '◈'
+                | '◉'
+                | '◐'
+                | '✧'
+                | '▶'
+                | '●'
+        );
+    if owned {
+        trimmed[mark.len_utf8()..].trim_start().to_owned()
+    } else {
+        trimmed.to_owned()
+    }
 }
 
 /// What the agent is working on: the `task` token, else its terminal title.
@@ -389,16 +434,6 @@ pub(crate) fn host_is_ghostty() -> bool {
     })
 }
 
-/// The thin shared rule between stacked cards: a one-eighth block at the
-/// top of the cell in Ghostty, the common upper-eighth elsewhere.
-pub(super) fn top_rule_glyph() -> &'static str {
-    if host_is_ghostty() {
-        "\u{1FB80}"
-    } else {
-        "▔"
-    }
-}
-
 pub(super) fn icon_font_installed() -> bool {
     if cfg!(test) || !host_is_ghostty() {
         return false;
@@ -426,20 +461,42 @@ pub(super) fn orcha_icon(icon_font: bool) -> &'static str {
 
 /// The agent's logo: the Agent Icons font glyph when installed, else a symbol.
 pub(super) fn agent_logo(agent: Option<&str>, icon_font: bool) -> &'static str {
-    match (agent.unwrap_or("").to_ascii_lowercase().as_str(), icon_font) {
-        ("claude", true) => "\u{100000}",
-        ("codex", true) => "\u{100001}",
-        ("cursor", true) => "\u{100002}",
-        ("claude", false) => "✳",
-        ("codex", false) => "◎",
-        ("cursor", false) => "▲",
-        _ => "▶",
+    let agent = agent.unwrap_or("");
+    if agent.eq_ignore_ascii_case("claude") {
+        if icon_font {
+            "\u{100000}"
+        } else {
+            "✳"
+        }
+    } else if agent.eq_ignore_ascii_case("codex") {
+        if icon_font {
+            "\u{100001}"
+        } else {
+            "◎"
+        }
+    } else if agent.eq_ignore_ascii_case("cursor") {
+        if icon_font {
+            "\u{100002}"
+        } else {
+            "▲"
+        }
+    } else if agent.eq_ignore_ascii_case("gemini") {
+        "✦"
+    } else {
+        "▶"
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stored_logo_is_not_part_of_the_name() {
+        assert_eq!(strip_leading_agent_mark("\u{100002} Cursor"), "Cursor");
+        assert_eq!(strip_leading_agent_mark("\u{100001} Codex"), "Codex");
+        assert_eq!(strip_leading_agent_mark("Cursor"), "Cursor");
+    }
 
     #[test]
     fn model_names_read_like_the_mockup() {

@@ -23,6 +23,31 @@ pub(crate) use notifications::{
 
 static ALLOW_UNELEVATED_CLIENTS: OnceLock<bool> = OnceLock::new();
 
+pub(crate) fn pick_project_folder() -> std::io::Result<Option<PathBuf>> {
+    let mut command = std::process::Command::new("powershell.exe");
+    command.args([
+        "-NoLogo",
+        "-NoProfile",
+        "-STA",
+        "-Command",
+        r#"
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = 'Choose a project folder for ORCHA'
+$dialog.ShowNewFolderButton = $false
+try {
+    if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        [Console]::Write($dialog.SelectedPath)
+    }
+} finally { $dialog.Dispose() }
+"#,
+    ]);
+    super::configure_background_command(&mut command);
+    super::project_folder_picker_result(command.output()?)
+}
+
 pub(crate) fn allow_unelevated_clients() {
     let _ = ALLOW_UNELEVATED_CLIENTS.set(true);
 }
@@ -1146,6 +1171,271 @@ fn cmd_encoded_powershell_command(script: &str) -> String {
         .collect::<Vec<_>>();
     let encoded = base64::engine::general_purpose::STANDARD.encode(utf16);
     format!("powershell.exe -NoLogo -NoProfile -EncodedCommand {encoded}")
+}
+
+fn encoded_powershell_process(script: &str, noninteractive: bool) -> std::process::Command {
+    use base64::Engine as _;
+
+    let utf16 = script
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(utf16);
+    let mut process = std::process::Command::new("powershell.exe");
+    process.args(["-NoLogo", "-NoProfile"]);
+    if noninteractive {
+        process.arg("-NonInteractive");
+    }
+    process.arg("-EncodedCommand").arg(encoded);
+    process
+}
+
+pub(crate) fn orcha_tool_command_platform(
+    program: &std::path::Path,
+    args: &[String],
+) -> std::process::Command {
+    use super::quote_powershell_arg as quote;
+
+    let program = quote(&program.to_string_lossy());
+    let args = args
+        .iter()
+        .map(|arg| quote(arg))
+        .collect::<Vec<_>>()
+        .join(", ");
+    encoded_powershell_process(
+        &format!("& {program} @({args}); if ($null -ne $LASTEXITCODE) {{ exit $LASTEXITCODE }}"),
+        false,
+    )
+}
+
+pub(crate) fn orcha_installer_command_platform(
+    _unix_command: &str,
+    windows_command: &str,
+) -> std::process::Command {
+    let mut process = std::process::Command::new("powershell.exe");
+    process
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+        ])
+        .arg(windows_command);
+    process
+}
+
+pub(crate) fn orcha_installer_instruction_platform(
+    _unix_command: &'static str,
+    windows_command: &'static str,
+) -> &'static str {
+    windows_command
+}
+
+pub(crate) fn orcha_shell_command_platform(command: &str) -> std::process::Command {
+    // `$P` and `$L` are the variables used by the existing ORCHA command
+    // templates. Populate them from the environment before evaluating a
+    // Windows PowerShell command configured by the user.
+    encoded_powershell_process(&format!("$P = $env:P; $L = $env:L; {command}"), true)
+}
+
+pub(crate) fn expand_orcha_home_command_platform(command: &str) -> String {
+    let Some(rest) = command.strip_prefix("~/") else {
+        return command.to_owned();
+    };
+    let Some(home) = user_home_dir_platform() else {
+        return command.to_owned();
+    };
+    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    let path = home.join(&rest[..end]);
+    let is_python = path
+        .extension()
+        .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("py"));
+    let path = super::quote_powershell_arg(&path.to_string_lossy());
+    let invoke = if is_python {
+        format!("python {path}")
+    } else {
+        format!("& {path}")
+    };
+    format!("{invoke}{}", &rest[end..])
+}
+
+pub(crate) fn open_orcha_target_platform(
+    target: super::OrchaOpenTarget,
+    path: &std::path::Path,
+    line: u32,
+) -> std::process::Command {
+    use super::quote_powershell_arg as quote;
+
+    let path = path.to_string_lossy();
+    let path = quote(&path);
+    let line = line.to_string();
+    let script = match target {
+        super::OrchaOpenTarget::Ide => format!(
+            "$path = {path}; foreach ($name in @('cursor', 'code', 'zed', 'subl', 'idea')) {{ $app = Get-Command $name -ErrorAction SilentlyContinue; if ($app -and $app.Source) {{ & $app.Source $path; exit }} }}; & 'explorer.exe' $path"
+        ),
+        super::OrchaOpenTarget::GitGui => format!(
+            "$path = {path}; foreach ($name in @('fork', 'sourcetree', 'github', 'gitkraken')) {{ $app = Get-Command $name -ErrorAction SilentlyContinue; if ($app -and $app.Source) {{ & $app.Source $path; exit }} }}; & 'explorer.exe' $path"
+        ),
+        super::OrchaOpenTarget::File => format!(
+            "$path = {path}; $line = {line}; foreach ($name in @('cursor', 'code')) {{ $app = Get-Command $name -ErrorAction SilentlyContinue; if ($app -and $app.Source) {{ & $app.Source --goto ($path + ':' + $line); exit }} }}; $app = Get-Command 'zed' -ErrorAction SilentlyContinue; if ($app -and $app.Source) {{ & $app.Source ($path + ':' + $line); exit }}; & 'explorer.exe' $path"
+        ),
+        super::OrchaOpenTarget::Folder => {
+            format!("& 'explorer.exe' {path}")
+        }
+    };
+    encoded_powershell_process(&script, true)
+}
+
+pub(crate) fn user_home_dir_platform() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .or_else(|| {
+            let mut home = std::env::var_os("HOMEDRIVE")?;
+            home.push(std::env::var_os("HOMEPATH")?);
+            Some(PathBuf::from(home))
+        })
+        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+}
+
+pub(crate) fn orcha_config_base_dir_platform() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("XDG_CONFIG_HOME") {
+        return Some(dir.into());
+    }
+    if let Some(dir) = std::env::var_os("APPDATA") {
+        return Some(dir.into());
+    }
+    user_home_dir_platform()
+        .map(|home| home.join("AppData").join("Roaming"))
+        .or_else(|| user_home_dir_platform().map(|home| home.join(".config")))
+}
+
+pub(crate) fn orcha_application_support_dir_platform(_home: &std::path::Path) -> PathBuf {
+    std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .or_else(orcha_config_base_dir_platform)
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+pub(crate) fn orcha_default_commands_platform() -> (&'static str, &'static str, &'static str) {
+    (
+        "python ",
+        r#""$env:APPDATA\orcha\scripts\limits.py""#,
+        r#""$env:APPDATA\orcha\scripts\handoff.py""#,
+    )
+}
+
+pub(crate) fn orcha_installed_apps_platform(names: &[&str]) -> Option<Vec<(String, String)>> {
+    const EXTENSIONS: [&str; 4] = ["", ".exe", ".cmd", ".bat"];
+    let directories = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let mut installed = Vec::new();
+    for name in names {
+        let Some(command) = orcha_app_command(name) else {
+            continue;
+        };
+        let available = directories.iter().any(|directory| {
+            EXTENSIONS
+                .iter()
+                .any(|extension| directory.join(format!("{command}{extension}")).is_file())
+        });
+        if available {
+            installed.push(((*name).to_owned(), format!("{command} {{path}}")));
+        }
+    }
+    Some(installed)
+}
+
+pub(crate) fn orcha_config_tool_candidates_platform() -> &'static [&'static str] {
+    &["orcha.cmd", "orcha.exe", "orcha.ps1"]
+}
+
+pub(crate) fn remove_orcha_installation_platform() -> std::io::Result<super::OrchaUninstallResult> {
+    let Ok(local_app_data) = std::env::var("LOCALAPPDATA") else {
+        return Ok(super::OrchaUninstallResult::NotInstalled);
+    };
+    let install_root = PathBuf::from(local_app_data).join("Programs").join("Orcha");
+    let executable = std::env::current_exe()?;
+    let Some(release_directory) = executable.parent() else {
+        return Ok(super::OrchaUninstallResult::NotInstalled);
+    };
+    let Some(releases_directory) = release_directory.parent() else {
+        return Ok(super::OrchaUninstallResult::NotInstalled);
+    };
+    if !releases_directory
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("releases"))
+        || !same_windows_path(releases_directory.parent(), &install_root)
+        || !install_root.join("bin").join("orcha.cmd").is_file()
+    {
+        return Ok(super::OrchaUninstallResult::NotInstalled);
+    }
+
+    let install_root_text = install_root.to_string_lossy();
+    let bin_directory_text = install_root.join("bin").to_string_lossy().into_owned();
+    let powershell_literal = |value: &str| format!("'{}'", value.replace('\'', "''"));
+    let bin = powershell_literal(&bin_directory_text);
+    let cleanup_root = powershell_literal(&install_root_text);
+    let script = format!(
+        "$bin = {bin}; $userPath = [Environment]::GetEnvironmentVariable('Path', 'User'); if ($null -ne $userPath) {{ $remaining = foreach ($entry in ($userPath -split ';')) {{ if ([string]::IsNullOrWhiteSpace($entry)) {{ continue }}; try {{ $candidate = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($entry.Trim().Trim([char]34))).TrimEnd([char]92); if (-not $candidate.Equals($bin, [System.StringComparison]::OrdinalIgnoreCase)) {{ $entry }} }} catch {{ $entry }} }}; [Environment]::SetEnvironmentVariable('Path', ($remaining -join ';'), 'User') }}; $cleanup = 'Start-Sleep -Seconds 2; Remove-Item -LiteralPath ' + {cleanup_root} + ' -Recurse -Force -ErrorAction SilentlyContinue'; $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cleanup)); Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoLogo', '-NoProfile', '-EncodedCommand', $encoded) | Out-Null"
+    );
+    let status = encoded_powershell_process(&script, false).status()?;
+    if !status.success() {
+        return Err(std::io::Error::other(format!(
+            "PowerShell exited with {status} while removing ORCHA"
+        )));
+    }
+    Ok(super::OrchaUninstallResult::Scheduled(install_root))
+}
+
+pub(crate) fn orcha_uninstall_intro_platform() -> &'static str {
+    "This removes the managed orcha app and its PATH entry, plus its extras and settings."
+}
+
+fn same_windows_path(candidate: Option<&std::path::Path>, expected: &std::path::Path) -> bool {
+    let Some(candidate) = candidate else {
+        return false;
+    };
+    let normalize = |path: &std::path::Path| {
+        path.to_string_lossy()
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_ascii_lowercase()
+    };
+    normalize(candidate) == normalize(expected)
+}
+
+fn orcha_app_command(name: &str) -> Option<&'static str> {
+    match name {
+        "Cursor" => Some("cursor"),
+        "Visual Studio Code" => Some("code"),
+        "Zed" => Some("zed"),
+        "Windsurf" => Some("windsurf"),
+        "WebStorm" => Some("webstorm"),
+        "IntelliJ IDEA" | "IntelliJ IDEA CE" => Some("idea"),
+        "PyCharm" => Some("pycharm"),
+        "GoLand" => Some("goland"),
+        "RustRover" => Some("rustrover"),
+        "Sublime Text" => Some("subl"),
+        "Fork" => Some("fork"),
+        "GitHub Desktop" => Some("github"),
+        "Sourcetree" => Some("sourcetree"),
+        "GitKraken" => Some("gitkraken"),
+        "Sublime Merge" => Some("smerge"),
+        "SmartGit" => Some("smartgit"),
+        _ => None,
+    }
+}
+
+pub(crate) fn local_file_uri_path_platform(uri: &str) -> Option<String> {
+    let path = uri.strip_prefix("file://")?;
+    let path = path.strip_prefix("/").unwrap_or(path);
+    if path.as_bytes().get(1) == Some(&b':') {
+        Some(path.replace('/', "\\"))
+    } else {
+        None
+    }
 }
 
 pub(crate) fn detached_custom_command_process_platform(command: &str) -> std::process::Command {
@@ -5036,7 +5326,9 @@ mod tests {
                 30,
                 20,
                 "codex.exe",
-                &["C:\\Users\\herdr\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe"],
+                &[
+                    "C:\\Users\\herdr\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe",
+                ],
             ),
             test_entry(40, 30, "node_repl.exe", &["node_repl.exe"]),
             test_entry(

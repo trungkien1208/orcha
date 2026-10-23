@@ -197,7 +197,10 @@ fn run_client_with_mode(
     let shell_config = client_rendered_shell.then(|| {
         shell::ClientShellConfig::from_config(&loaded_config.config)
             .with_startup_config_diagnostic(startup_config_diagnostic)
-            .with_startup_onboarding(loaded_config.config.should_show_onboarding())
+            .with_startup_onboarding(
+                // orcha has its own first-run setup (orcha_welcome)
+                loaded_config.config.should_show_onboarding() && !crate::orcha_app::is_orcha(),
+            )
             .with_keybinding_source(keybinding_source)
             .with_process_endpoint_preferences(&socket_path)
     });

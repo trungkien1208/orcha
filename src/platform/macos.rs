@@ -7,6 +7,20 @@ use std::process::{Command, Stdio};
 use std::ptr::NonNull;
 use std::sync::OnceLock;
 
+pub(crate) fn pick_project_folder() -> std::io::Result<Option<PathBuf>> {
+    let output = Command::new("osascript")
+        .args([
+            "-e",
+            r#"try
+return POSIX path of (choose folder with prompt "Choose a project folder for ORCHA")
+on error number -128
+return ""
+end try"#,
+        ])
+        .output()?;
+    super::project_folder_picker_result(output)
+}
+
 pub(super) const REMOTE_BRIDGE_CLOCK: libc::clockid_t = libc::CLOCK_MONOTONIC;
 
 use super::{
@@ -198,6 +212,120 @@ pub(crate) fn detached_custom_command_process_platform(command: &str) -> std::pr
     let mut command = std::process::Command::new(&argv[0]);
     command.args(&argv[1..]);
     command
+}
+
+pub(crate) fn orcha_shell_command_platform(command: &str) -> std::process::Command {
+    let mut process = std::process::Command::new("sh");
+    process.arg("-c").arg(command);
+    process
+}
+
+pub(crate) fn expand_orcha_home_command_platform(command: &str) -> String {
+    let Some(rest) = command.strip_prefix("~/") else {
+        return command.to_owned();
+    };
+    let Some(home) = user_home_dir_platform() else {
+        return command.to_owned();
+    };
+    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    let path = home.join(&rest[..end]);
+    format!("{}{}", shell_quote(&path.to_string_lossy()), &rest[end..])
+}
+
+pub(crate) fn orcha_tool_command_platform(
+    program: &std::path::Path,
+    args: &[String],
+) -> std::process::Command {
+    let mut process = std::process::Command::new(program);
+    process.args(args);
+    process
+}
+
+pub(crate) fn orcha_installer_command_platform(
+    unix_command: &str,
+    _windows_command: &str,
+) -> std::process::Command {
+    let mut process = std::process::Command::new("sh");
+    process.arg("-c").arg(unix_command);
+    process
+}
+
+pub(crate) fn orcha_installer_instruction_platform(
+    unix_command: &'static str,
+    _windows_command: &'static str,
+) -> &'static str {
+    unix_command
+}
+
+pub(crate) fn open_orcha_target_platform(
+    target: super::OrchaOpenTarget,
+    path: &std::path::Path,
+    line: u32,
+) -> std::process::Command {
+    let script = match target {
+        super::OrchaOpenTarget::Ide => {
+            r#"for c in cursor code zed subl idea; do command -v "$c" >/dev/null 2>&1 && exec "$c" "$P"; done; open "$P""#
+        }
+        super::OrchaOpenTarget::GitGui => {
+            r#"for a in Fork SourceTree "GitHub Desktop" Tower GitKraken; do [ -d "/Applications/$a.app" ] && exec open -a "$a" "$P"; done; command -v gitk >/dev/null 2>&1 && cd "$P" && exec gitk --all; open "$P""#
+        }
+        super::OrchaOpenTarget::File => {
+            r#"for c in cursor code; do command -v "$c" >/dev/null 2>&1 && exec "$c" -g "$P:$L"; done; command -v zed >/dev/null 2>&1 && exec zed "$P:$L"; open "$P""#
+        }
+        super::OrchaOpenTarget::Folder => r#"open "$P""#,
+    };
+    let mut process = std::process::Command::new("sh");
+    process
+        .arg("-c")
+        .arg(script)
+        .env("P", path)
+        .env("L", line.to_string());
+    process
+}
+
+pub(crate) fn user_home_dir_platform() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME").map(Into::into)
+}
+
+pub(crate) fn orcha_config_base_dir_platform() -> Option<std::path::PathBuf> {
+    if let Some(dir) = std::env::var_os("XDG_CONFIG_HOME") {
+        return Some(dir.into());
+    }
+    user_home_dir_platform().map(|home| home.join(".config"))
+}
+
+pub(crate) fn orcha_application_support_dir_platform(home: &std::path::Path) -> std::path::PathBuf {
+    home.join("Library").join("Application Support")
+}
+
+pub(crate) fn orcha_default_commands_platform() -> (&'static str, &'static str, &'static str) {
+    (
+        "",
+        "~/.config/orcha/scripts/limits.py",
+        "~/.config/orcha/scripts/handoff.py",
+    )
+}
+
+pub(crate) fn orcha_installed_apps_platform(_names: &[&str]) -> Option<Vec<(String, String)>> {
+    None
+}
+
+pub(crate) fn orcha_config_tool_candidates_platform() -> &'static [&'static str] {
+    &["orcha"]
+}
+
+pub(crate) fn remove_orcha_installation_platform() -> std::io::Result<super::OrchaUninstallResult> {
+    Ok(super::OrchaUninstallResult::Unsupported)
+}
+
+pub(crate) fn orcha_uninstall_intro_platform() -> &'static str {
+    "This removes orcha: the app, its extras, its hooks in Claude Code and Codex, the logo font and the lines it added to ~/.zshrc."
+}
+
+pub(crate) fn local_file_uri_path_platform(uri: &str) -> Option<String> {
+    uri.strip_prefix("file://")
+        .filter(|path| path.starts_with('/'))
+        .map(str::to_owned)
 }
 
 pub(crate) fn pane_custom_command_pty_builder_platform(

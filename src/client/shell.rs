@@ -32,6 +32,8 @@ mod notifications;
 mod orcha_actions;
 mod orcha_chrome;
 mod orcha_popup;
+mod orcha_projects;
+mod orcha_welcome;
 mod overlay_input;
 mod preferences;
 mod render;

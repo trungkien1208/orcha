@@ -2,8 +2,6 @@ use std::io;
 use std::path::Path;
 use std::time::Duration;
 
-use crate::api::schema::{Method, Request, ResponseResult};
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeStatus {
     pub version: Option<String>,
@@ -22,15 +20,11 @@ pub fn read_runtime_status_at(
     let client = crate::api::client::ApiClient::for_target(
         crate::api::client::ConnectionTarget::SocketPath(socket_path.to_path_buf()),
     );
-    let request = Request {
-        id: "runtime:status".into(),
-        method: Method::Ping(crate::api::schema::PingParams::default()),
-    };
-    let response = client
-        .request_value_with_timeout(&request, timeout)
-        .and_then(crate::api::client::parse_response_value);
-    let response = match response {
-        Ok(response) => response,
+    // Use the same deadline reader as status probes elsewhere. A socket receive
+    // timeout can surface as WouldBlock on macOS and is unsupported by Windows
+    // named pipes; neither is a reliable request deadline.
+    match client.status_with_timeout(timeout) {
+        Ok(status) => Ok(Some(status)),
         Err(crate::api::client::ApiClientError::Io(err))
             if matches!(
                 err.kind(),
@@ -39,22 +33,8 @@ pub fn read_runtime_status_at(
                     | io::ErrorKind::TimedOut
             ) =>
         {
-            return Ok(None);
+            Ok(None)
         }
-        Err(err) => return Err(io::Error::other(err)),
-    };
-    match response.result {
-        ResponseResult::Pong {
-            version,
-            protocol,
-            capabilities,
-        } => Ok(Some(RuntimeStatus {
-            version: Some(version),
-            protocol: Some(protocol),
-            capabilities,
-        })),
-        result => Err(io::Error::other(format!(
-            "server status request returned unexpected result: {result:?}"
-        ))),
+        Err(err) => Err(io::Error::other(err)),
     }
 }

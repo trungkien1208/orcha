@@ -2,7 +2,7 @@
 //! bottom status bar). Run with `--nocapture` to see the composed screen.
 use super::*;
 use crate::client::shell::git_panel::GitPanelData;
-use crate::protocol::ClientShellTabStatusSegment;
+use crate::protocol::{ClientShellPane, ClientShellTabStatusSegment};
 
 fn orcha_state(right_panel: bool, status_bar: bool) -> ClientShellState {
     let mut projected = snapshot();
@@ -92,6 +92,7 @@ fn demo_history() -> Vec<crate::client::shell::git_panel::HistoryLine> {
 #[test]
 fn five_regions_compose() {
     let mut state = orcha_state(true, true);
+    state.orcha_ui.process_expanded = true;
     let frame = state.compose(140, 30).expect("frame");
     let rows = frame_rows(&frame);
     for row in &rows {
@@ -126,7 +127,7 @@ fn five_regions_compose() {
     assert!(all.contains("WORKTREES"));
     assert!(all.contains("PROJECTS") && all.contains("PROCESS"));
     assert!(all.contains("+ NEW") && all.contains("menu"));
-    assert!(all.contains("1 RUNNING"), "only running agents are trains");
+    assert!(all.contains("1 ACTIVE"), "only active agents are trains");
     assert!(
         state.hits.agents.iter().any(|(_, pane)| pane == "pane_2"),
         "agent rows are clickable"
@@ -147,14 +148,144 @@ fn folds_open_from_the_panel() {
 }
 
 #[test]
+fn new_button_offers_current_project_or_another_folder() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+
+    let mut current = orcha_state(true, true);
+    current.compose(140, 40).expect("shell frame");
+    let button = current.hits.new_workspace;
+    let mut outcome = ClientShellInput::default();
+    assert!(current.handle_orcha_click((button.x, button.y), &mut outcome));
+    assert!(matches!(
+        current.orcha_ui.popup.as_ref(),
+        Some(crate::client::shell::orcha_popup::OrchaPopup::NewWorkspace {
+            selected: 0,
+            project: Some(project),
+        }) if project == "client-shell"
+    ));
+    current.compose(140, 40).expect("new workspace choices");
+    assert_eq!(current.hits.orcha.popup.actions.len(), 3);
+    let create = current.hits.orcha.popup.actions[0].0;
+    current.handle_orcha_popup_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: create.x,
+            row: create.y,
+            modifiers: KeyModifiers::empty(),
+        },
+        &mut outcome,
+    );
+    assert!(outcome.actions.iter().any(|action| matches!(
+        action,
+        ClientShellAction::Endpoint { request, .. }
+            if matches!(&request.method, crate::api::schema::Method::WorkspaceCreate(_))
+    )));
+
+    let mut folder = orcha_state(true, true);
+    folder.compose(140, 40).expect("shell frame");
+    let button = folder.hits.new_workspace;
+    folder.handle_orcha_click((button.x, button.y), &mut outcome);
+    folder.compose(140, 40).expect("new workspace choices");
+    let choose = folder.hits.orcha.popup.actions[2].0;
+    folder.handle_orcha_popup_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: choose.x,
+            row: choose.y,
+            modifiers: KeyModifiers::empty(),
+        },
+        &mut outcome,
+    );
+    let Some(ClientShellOverlay::Rename(rename)) = folder.overlay.as_mut() else {
+        panic!("folder choice should open a path prompt");
+    };
+    assert!(matches!(
+        &rename.target,
+        ClientRenameTarget::NewProjectFolder
+    ));
+    rename.input.insert("/tmp/another-project");
+    folder.save_rename_overlay(&mut outcome);
+    assert!(outcome.actions.iter().any(|action| matches!(
+        action,
+        ClientShellAction::Endpoint { request, .. }
+            if matches!(
+                &request.method,
+                crate::api::schema::Method::WorkspaceCreate(params)
+                    if params.source_workspace_id.is_none()
+                        && params.cwd.as_deref() == Some("/tmp/another-project")
+            )
+    )));
+}
+
+#[test]
+fn project_labels_disambiguate_home_without_overwriting_custom_names() {
+    let mut snapshot = snapshot();
+    for (path, expected) in [
+        ("/Users/hibari/", "hibari #1"),
+        (r"C:\Users\Hibari\", "Hibari #1"),
+    ] {
+        snapshot.workspaces[0].label = "~".into();
+        snapshot.workspaces[0].new_workspace_cwd = path.into();
+        super::super::orcha_projects::normalize_project_labels(&mut snapshot);
+        assert_eq!(snapshot.workspaces[0].label, expected);
+    }
+    snapshot.workspaces[0].label = "~".into();
+    snapshot.workspaces[0].custom_label = true;
+    super::super::orcha_projects::normalize_project_labels(&mut snapshot);
+    assert_eq!(snapshot.workspaces[0].label, "~");
+}
+
+#[test]
+fn project_folder_picker_confirms_selection_and_handles_cancel_or_failure() {
+    let mut state = orcha_state(true, true);
+    let complete = |state: &mut ClientShellState, result| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(result).expect("picker result");
+        state.orcha_ui.project_folder_picker = Some(rx);
+        state.poll_project_folder_picker()
+    };
+    assert!(!complete(&mut state, Ok(None)));
+    assert!(state.overlay.is_none());
+    assert!(complete(
+        &mut state,
+        Ok(Some("/tmp/project with spaces".into()))
+    ));
+    let Some(ClientShellOverlay::Rename(rename)) = state.overlay.as_ref() else {
+        panic!("the selected path needs confirmation");
+    };
+    assert_eq!(rename.input.trim(), "/tmp/project with spaces");
+    let mut outcome = ClientShellInput::default();
+    state.save_rename_overlay(&mut outcome);
+    assert!(outcome.actions.iter().any(|action| matches!(
+        action,
+        ClientShellAction::Endpoint { request, .. }
+            if matches!(&request.method, crate::api::schema::Method::WorkspaceCreate(params)
+                if params.cwd.as_deref() == Some("/tmp/project with spaces"))
+    )));
+    assert!(complete(
+        &mut state,
+        Err(std::io::ErrorKind::NotFound.into())
+    ));
+    assert!(state.overlay.is_some(), "manual entry remains available");
+    state.overlay = None;
+    state.active_endpoint_id =
+        ClientEndpointId::Ssh(crate::client::endpoint::ProfileId::generate());
+    assert!(!complete(&mut state, Ok(Some("/tmp/local-project".into()))));
+    assert!(
+        state.overlay.is_none(),
+        "local paths cannot reach a remote endpoint"
+    );
+}
+
+#[test]
 fn accounts_popup_lists_fuel() {
     use crate::client::shell::accounts::{Account, FuelWindow};
     let mut state = orcha_state(true, true);
-    let window = |label: &str, left: u8| FuelWindow {
+    let window = |label: &str, left: u8, reset: &str| FuelWindow {
         key: label.to_lowercase(),
         label: label.into(),
         left,
-        reset: None,
+        reset: Some(reset.into()),
     };
     state.accounts.set_for_test(Some(vec![
         Account {
@@ -164,7 +295,7 @@ fn accounts_popup_lists_fuel() {
             email: Some("me@example.com".into()),
             current: true,
             error: None,
-            windows: vec![window("5H", 8), window("WEEK", 18)],
+            windows: vec![window("5H", 8, "1h 12m"), window("WEEK", 18, "3d 5h")],
             signed_in: None,
         },
         Account {
@@ -174,10 +305,16 @@ fn accounts_popup_lists_fuel() {
             email: Some("you@example.com".into()),
             current: false,
             error: None,
-            windows: vec![window("5H", 70), window("WEEK", 64)],
+            windows: vec![window("5H", 70, "4h 02m"), window("WEEK", 64, "6d 1h")],
             signed_in: None,
         },
     ]));
+    let panel = state.compose(140, 40).expect("fuel panel");
+    let panel_text = frame_rows(&panel).join("\n");
+    assert!(
+        panel_text.contains("resets in 1h 12m") && panel_text.contains("resets in 3d 5h"),
+        "the fuel panel says when 5H and WEEK reset:\n{panel_text}"
+    );
     state.open_accounts_overlay();
     let frame = state.compose(140, 40).expect("frame");
     let all = frame_rows(&frame).join("\n");
@@ -186,13 +323,21 @@ fn accounts_popup_lists_fuel() {
     }
     assert!(all.contains("CONTINUE ON") && all.contains("IN USE") && all.contains("BEST"));
     assert!(
+        all.contains("5H resets in 1h 12m") && all.contains("WEEK resets in 3d 5h"),
+        "each account says when its windows reset:\n{all}"
+    );
+    assert!(
         all.contains("continue") && all.contains("8% left"),
         "says how low"
     );
+    assert!(
+        all.contains("ADD ACCOUNT"),
+        "there is a place to add one:\n{all}"
+    );
     assert_eq!(
         state.hits.orcha.popup.actions.len(),
-        1,
-        "only the other account switches"
+        2,
+        "the other account switches, and ADD"
     );
     assert!(state.update_low_fuel_hint(), "8% left offers a switch");
 
@@ -207,6 +352,66 @@ fn accounts_popup_lists_fuel() {
         state.orcha_ui.popup,
         Some(crate::client::shell::orcha_popup::OrchaPopup::NewAgent { selected: 1, .. })
     ));
+}
+
+#[test]
+fn accounts_popup_offers_sign_in_on_the_current_expired_row() {
+    use crate::client::shell::accounts::Account;
+    let mut state = orcha_state(true, true);
+    state.accounts.set_for_test(Some(vec![Account {
+        id: "work".into(),
+        kind: "claude".into(),
+        label: "Claude · work".into(),
+        email: Some("me@example.com".into()),
+        current: true,
+        error: Some("sign-in expired: open Claude with this account once".into()),
+        windows: Vec::new(),
+        signed_in: Some(true),
+    }]));
+    state.open_accounts_overlay();
+    let frame = state.compose(140, 40).expect("frame");
+    let all = frame_rows(&frame).join("\n");
+    assert!(
+        all.contains("SIGN IN"),
+        "expired current account still has SIGN IN:\n{all}"
+    );
+    assert!(
+        all.contains("sign-in expired"),
+        "shows why fuel is missing, not only the email:\n{all}"
+    );
+    assert!(all.contains("ADD ACCOUNT"));
+    assert_eq!(state.hits.orcha.popup.actions.len(), 2);
+}
+
+#[test]
+fn add_account_offers_a_free_name_and_what_you_type() {
+    use crate::client::shell::accounts::Account;
+    let mut state = orcha_state(true, true);
+    state.accounts.set_for_test(Some(vec![Account {
+        id: "claude-work".into(),
+        kind: "claude".into(),
+        label: "Claude · work".into(),
+        email: None,
+        current: true,
+        error: None,
+        windows: Vec::new(),
+        signed_in: Some(true),
+    }]));
+    state.open_accounts_overlay();
+    // down onto ADD, then open the name list
+    state.handle_input_bytes(b"j\r");
+    let frame = state.compose(140, 40).expect("add account");
+    let all = frame_rows(&frame).join("\n");
+    assert!(all.contains("ADD ACCOUNT"), "{all}");
+    assert!(all.contains("oc personal"), "{all}");
+    assert!(
+        !all.contains("oc work"),
+        "work is already an account:\n{all}"
+    );
+    state.handle_input_bytes(b"jo");
+    let frame = state.compose(140, 40).expect("typed name");
+    let all = frame_rows(&frame).join("\n");
+    assert!(all.contains("oc jo"), "{all}");
 }
 
 #[test]
@@ -563,4 +768,146 @@ fn orcha_preview() {
         .collect();
     let json = serde_json::json!({"width": frame.width, "height": frame.height, "cells": cells});
     std::fs::write(out, json.to_string()).expect("write");
+}
+
+#[test]
+fn welcome_walks_the_setup_and_skip_puts_the_theme_back() {
+    use crate::api::schema::{IntegrationInfo, IntegrationState, IntegrationTarget};
+    use crate::client::shell::orcha_popup::OrchaPopup;
+    use crate::client::shell::orcha_welcome::Step;
+    use crate::input::TerminalKey;
+    use crate::raw_input::RawInputEvent;
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    fn show(state: &mut ClientShellState) -> String {
+        let frame = state.compose(140, 40).expect("frame");
+        let rows = frame_rows(&frame);
+        for row in &rows {
+            eprintln!("|{row}|");
+        }
+        rows.join("\n")
+    }
+    fn press(state: &mut ClientShellState, code: KeyCode) {
+        state.handle_raw_events(vec![RawInputEvent::Key(TerminalKey::new(
+            code,
+            KeyModifiers::NONE,
+        ))]);
+    }
+    fn go(state: &mut ClientShellState, step: Step) {
+        if let Some(OrchaPopup::Welcome(welcome)) = state.orcha_ui.popup.as_mut() {
+            welcome.step = step;
+            welcome.selected = 0;
+        }
+    }
+
+    let mut state = orcha_state(true, true);
+    let theme = state.config.theme_name.clone();
+    let mut outcome = ClientShellInput::default();
+    state.open_welcome(&mut outcome);
+    let all = show(&mut state);
+    assert!(all.contains("WELCOME TO ORCHA") && all.contains("step 1 of 5"));
+    assert!(all.contains("START SETUP") && all.contains("skip setup"));
+
+    // the theme step previews the theme under the cursor
+    press(&mut state, KeyCode::Enter);
+    let all = show(&mut state);
+    assert!(all.contains("pick a look") && all.contains("matcha-dark"));
+    press(&mut state, KeyCode::Down);
+    assert_ne!(
+        state.config.theme_name, theme,
+        "the page follows the cursor"
+    );
+
+    // apps: the IDE and Git groups
+    go(&mut state, Step::Apps);
+    let all = show(&mut state);
+    assert!(all.contains("IDE ·") && all.contains("GIT ·"));
+
+    // agents: missing hooks start checked, installed and absent ones can't be
+    let info = |target, label: &str, available, state| IntegrationInfo {
+        target,
+        label: label.into(),
+        command: String::new(),
+        available,
+        state,
+    };
+    assert!(state.welcome_integrations_listed(vec![
+        info(
+            IntegrationTarget::Claude,
+            "Claude",
+            true,
+            IntegrationState::NotInstalled
+        ),
+        info(
+            IntegrationTarget::Codex,
+            "Codex",
+            true,
+            IntegrationState::Current
+        ),
+        info(
+            IntegrationTarget::Pi,
+            "Pi",
+            false,
+            IntegrationState::NotInstalled
+        ),
+    ]));
+    go(&mut state, Step::Agents);
+    let all = show(&mut state);
+    assert!(all.contains("INSTALL 1 · NEXT") && all.contains("not available on this device"));
+    press(&mut state, KeyCode::Down);
+    press(&mut state, KeyCode::Char(' '));
+    assert!(
+        show(&mut state).contains("INSTALL 1 · NEXT"),
+        "installed rows don't check"
+    );
+
+    // projects: what the scan found
+    assert!(
+        state.welcome_sources_found(vec![crate::orcha_import::ImportSource {
+            name: "VS Code".into(),
+            projects: vec![("matcha-house".into(), "/tmp/matcha-house".into())],
+        }])
+    );
+    go(&mut state, Step::Projects);
+    let all = show(&mut state);
+    assert!(all.contains("VS Code · 1") && all.contains("IMPORT 1 · FINISH"));
+    press(&mut state, KeyCode::Char(' '));
+    assert!(show(&mut state).contains("FINISH ↵"));
+
+    // esc: the tried theme goes back, the setup closes
+    press(&mut state, KeyCode::Esc);
+    assert!(state.orcha_ui.popup.is_none());
+    assert_eq!(state.config.theme_name, theme);
+}
+
+#[test]
+fn project_card_lists_a_shell_pane() {
+    let mut state = orcha_state(true, true);
+    let snapshot = state.snapshot.as_mut().expect("snapshot");
+    let workspace_id = snapshot.workspaces[0].workspace_id.clone();
+    let tab_id = snapshot.tabs[0].tab_id.clone();
+    snapshot.panes.push(ClientShellPane {
+        pane_id: "pane_shell".into(),
+        workspace_id,
+        tab_id,
+        label: None,
+        cwd: Some("/tmp/matcha-house".into()),
+        foreground_cwd: None,
+        focused: false,
+        right_click_passthrough: false,
+    });
+    let frame = state.compose(140, 40).expect("frame");
+    let all = frame_rows(&frame).join("\n");
+    assert!(
+        all.contains("Shell"),
+        "a plain terminal shows under the project: {all}"
+    );
+    assert!(
+        state
+            .hits
+            .agents
+            .iter()
+            .any(|(_, pane)| pane == "pane_shell"),
+        "the shell row is clickable"
+    );
 }

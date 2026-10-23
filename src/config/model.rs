@@ -351,6 +351,8 @@ pub struct OrchaConfig {
     pub open_command: String,
     /// Sign an account in, in a new pane: `{id}`.
     pub login_command: String,
+    /// Add a Claude account and sign it in: `{name}` (personal, work, …).
+    pub add_command: String,
     /// Start an account's agent in a new tab: `{id}`, `{workspace}`, `{cwd}`.
     pub new_agent_command: String,
     /// Continue `{pane}`'s chat with another agent: `{agent}` and `{mode}`
@@ -369,15 +371,19 @@ pub struct OrchaConfig {
 
 impl Default for OrchaConfig {
     fn default() -> Self {
+        let (script_prefix, limits_script, handoff_script) =
+            crate::platform::orcha_default_commands();
         Self {
             fuel: FuelPlacement::Panel,
-            accounts_command: "~/.config/orcha/scripts/limits.py json".into(),
-            switch_command: "~/.config/orcha/scripts/limits.py switch {id} {pane}".into(),
-            open_command: "~/.config/orcha/scripts/limits.py open {id}".into(),
-            login_command: "~/.config/orcha/scripts/limits.py login-pane {id}".into(),
-            new_agent_command: "~/.config/orcha/scripts/limits.py new {id} {workspace} {cwd}"
-                .into(),
-            handoff_command: "~/.config/orcha/scripts/handoff.py {pane} {agent} {mode}".into(),
+            accounts_command: format!("{script_prefix}{limits_script} json"),
+            switch_command: format!("{script_prefix}{limits_script} switch {{id}} {{pane}}"),
+            open_command: format!("{script_prefix}{limits_script} open {{id}}"),
+            login_command: format!("{script_prefix}{limits_script} login-pane {{id}}"),
+            add_command: format!("{script_prefix}{limits_script} add {{name}}"),
+            new_agent_command: format!(
+                "{script_prefix}{limits_script} new {{id}} {{workspace}} {{cwd}}"
+            ),
+            handoff_command: format!("{script_prefix}{handoff_script} {{pane}} {{agent}} {{mode}}"),
             ide: String::new(),
             git_gui: String::new(),
             pane_paper: true,

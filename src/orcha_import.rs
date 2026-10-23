@@ -31,13 +31,13 @@ pub(crate) fn mark_asked() {
 
 /// Every source with at least one folder still on disk.
 pub(crate) fn find_sources() -> Vec<ImportSource> {
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+    let Some(home) = crate::platform::user_home_dir() else {
         return Vec::new();
     };
-    let support = home.join("Library/Application Support");
+    let support = crate::platform::orcha_application_support_dir(&home);
     let mut sources = vec![ImportSource {
         name: "Orca".into(),
-        projects: orca_projects(&home),
+        projects: orca_projects(&home, &support),
     }];
     for (name, folder) in [
         ("VS Code", "Code"),
@@ -72,7 +72,7 @@ fn folder_name(path: &str) -> String {
 }
 
 fn push_unique(out: &mut Vec<(String, String)>, name: Option<&str>, path: &str) {
-    let path = path.trim_end_matches('/');
+    let path = path.trim_end_matches(['/', '\\']);
     if path.is_empty() || out.iter().any(|(_, seen)| seen == path) {
         return;
     }
@@ -83,11 +83,8 @@ fn push_unique(out: &mut Vec<(String, String)>, name: Option<&str>, path: &str) 
     out.push((name, path.to_owned()));
 }
 
-fn orca_projects(home: &Path) -> Vec<(String, String)> {
-    let roots = [
-        home.join("Library/Application Support/orca"),
-        home.join(".config/orca"),
-    ];
+fn orca_projects(home: &Path, support: &Path) -> Vec<(String, String)> {
+    let roots = [support.join("orca"), home.join(".config/orca")];
     let Some(root) = roots.iter().find(|root| root.is_dir()) else {
         return Vec::new();
     };
@@ -153,11 +150,12 @@ fn parse_vscode_recent(text: &str) -> Vec<(String, String)> {
         // only local folders: not files, remotes or .code-workspace files
         let Some(path) = entry["folderUri"]
             .as_str()
-            .and_then(|uri| uri.strip_prefix("file://"))
+            .map(percent_decode)
+            .and_then(|uri| crate::platform::local_file_uri_path(&uri))
         else {
             continue;
         };
-        push_unique(&mut out, None, &percent_decode(path));
+        push_unique(&mut out, None, &path);
         if out.len() == RECENT_LIMIT {
             break;
         }
