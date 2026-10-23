@@ -41,23 +41,15 @@
 
 macOS on Apple Silicon. Best in [Ghostty](https://ghostty.org); other terminals work with plain symbols instead of the agent logos.
 
-**1. The app**
+One line, no questions:
 
 ```sh
-mkdir -p ~/.local/bin
-curl -fsSL -o ~/.local/bin/orcha https://github.com/trungkien1208/orcha/releases/latest/download/orcha-macos-arm64
-chmod +x ~/.local/bin/orcha
+curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.sh | sh
 ```
 
-Make sure `~/.local/bin` is on your `PATH`.
+It puts the app in `~/.local/bin/orcha` and the extras (fuel and account scripts, hand-off, theme, logo font) in `~/.orcha`. Run it again to update.
 
-**2. The extras** (fuel, account switch, hand-off, theme, logo font)
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha-config/main/install.sh | sh
-```
-
-**3. Run it** where your projects live
+Then open a new terminal window where your projects live and run:
 
 ```sh
 orcha
