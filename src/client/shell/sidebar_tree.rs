@@ -104,21 +104,22 @@ fn render_buttons(
         return;
     }
     let menu_width = (width * 2 / 5).clamp(10, 16);
-    let new_rect = Rect::new(x, y, width.saturating_sub(menu_width + 2), 3);
-    super::orcha_chrome::boxed_label(buffer, new_rect, "+ NEW", t.chip_text, t.green, true, t);
+    let new_rect = Rect::new(x, y, width.saturating_sub(menu_width + 3), 1);
+    brutal::pill(buffer, new_rect, "+ NEW", t.chip_text, t.green, false, t);
+    brutal::draw_shadow(buffer, new_rect, t.shadow, t.bg);
     hits.new_workspace = new_rect;
     let attention = super::global_menu::global_menu_attention(snapshot);
-    let menu_rect = Rect::new(new_rect.right() + 2, y, menu_width, 3);
+    let menu_rect = Rect::new(x + width - menu_width, y, menu_width, 1);
     let label = if attention { "● menu" } else { "≡ menu" };
-    super::orcha_chrome::boxed_label(buffer, menu_rect, label, t.ink, t.bg, false, t);
+    brutal::pill(buffer, menu_rect, label, t.ink, t.card, true, t);
     if attention {
         put_text(
             buffer,
             menu_rect.x + (menu_rect.width.saturating_sub(6)) / 2,
-            y + 1,
+            y,
             1,
             "●",
-            Style::default().fg(t.pink).bg(t.bg),
+            Style::default().fg(t.pink).bg(t.card),
         );
     }
     hits.global_launcher = menu_rect;
@@ -278,8 +279,8 @@ fn render_project_card(
     }
 }
 
-/// A folded project: a thin box around one row, its name and a mark per
-/// agent.
+/// A folded project: one row on a card, a thick line down each side, its
+/// name and a mark per agent.
 fn render_folded_project(
     buffer: &mut Buffer,
     rect: Rect,
@@ -288,10 +289,10 @@ fn render_folded_project(
     t: &Brutal,
     hits: &mut ShellHitMap,
 ) {
-    // light: an outline on the paper; dark: a card, black lines vanish on charcoal
-    let fill = if brutal::is_light(t.bg) { t.bg } else { t.card };
-    brutal::draw_box(buffer, rect, Edge::Light, t.line, fill, t.bg);
-    let y = rect.y + 1;
+    let fill = t.card;
+    let row = Rect::new(rect.x, rect.y, rect.width, 1);
+    brutal::pill(buffer, row, "", t.ink, fill, true, t);
+    let y = row.y;
     let x = rect.x + 2;
     put_text(buffer, x, y, 2, "▸ ", Style::default().fg(t.ink).bg(fill));
     hits.orcha
@@ -385,7 +386,7 @@ fn render_process(
             .bg(t.ink)
             .add_modifier(Modifier::BOLD),
     );
-    y += 2;
+    y += 1;
     let leg = (width / 4).max(4);
     // a narrow sidebar gets short station names
     let names: [&str; 4] = if leg >= 6 {
@@ -523,7 +524,7 @@ pub(crate) fn render_sidebar_tree(
 
     render_buttons(buffer, x, area.y, width, snapshot, config, &t, hits);
 
-    let label_y = area.y + 3;
+    let label_y = area.y + 2;
     put_text(
         buffer,
         x,
@@ -567,7 +568,7 @@ pub(crate) fn render_sidebar_tree(
     } else {
         trains.len() as u16 * TRAIN_ROWS
     };
-    let process_height = (6 + rows_for_trains).min(area.height.saturating_sub(10));
+    let process_height = (5 + rows_for_trains).min(area.height.saturating_sub(10));
     let process = Rect::new(x, area.bottom().saturating_sub(process_height), width, process_height);
     if process_height >= 5 {
         render_process(
@@ -583,7 +584,7 @@ pub(crate) fn render_sidebar_tree(
     }
 
     // projects between the label and PROCESS
-    let body = Rect::new(x, label_y + 1, width, process.y.saturating_sub(label_y + 1));
+    let body = Rect::new(x, label_y + 2, width, process.y.saturating_sub(label_y + 2));
     hits.workspace_body = body;
     let entries = super::sidebar::workspace_entries(snapshot, state.collapsed_groups);
     let mut items = Vec::new();
@@ -608,12 +609,21 @@ pub(crate) fn render_sidebar_tree(
     let heights: Vec<u16> = items
         .iter()
         .map(|(_, agents, project_state)| match project_state {
-            ProjectState::Folded => 3,
+            ProjectState::Folded => 1,
             _ => 3 + agents.len() as u16,
         })
         .collect();
-    // the boxes' own edges leave the gaps between them
-    let gaps = vec![0; items.len()];
+    // a blank row after a folded row; boxes' own edges leave their gaps
+    let gaps: Vec<u16> = items
+        .iter()
+        .enumerate()
+        .map(|(index, (_, _, project_state))| {
+            let next_folded = items
+                .get(index + 1)
+                .is_some_and(|(_, _, next)| *next == ProjectState::Folded);
+            u16::from(*project_state == ProjectState::Folded && next_folded)
+        })
+        .collect();
     let mut metrics =
         super::scroll::list_scroll_metrics(&heights, &gaps, body.height, *state.workspace_scroll);
     if !body.is_empty() && std::mem::take(state.reveal_focused_workspace) {

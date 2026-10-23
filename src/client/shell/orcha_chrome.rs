@@ -8,34 +8,7 @@ use super::brutal::{self, Brutal, Edge};
 use super::render::{display_width, put_text};
 use super::*;
 
-/// A boxed label: a heavy-edged block, the text bold in its middle row.
-pub(super) fn boxed_label(
-    buffer: &mut Buffer,
-    rect: Rect,
-    text: &str,
-    fg: ratatui::style::Color,
-    fill: ratatui::style::Color,
-    shadow: bool,
-    t: &Brutal,
-) {
-    brutal::draw_box(buffer, rect, Edge::Heavy, t.line, fill, t.bg);
-    if shadow {
-        brutal::draw_box_shadow(buffer, rect, t.shadow, t.bg);
-    }
-    let inner = rect.width.saturating_sub(if shadow { 3 } else { 2 });
-    let width = display_width(text).min(inner);
-    let x = rect.x + 1 + inner.saturating_sub(width) / 2;
-    put_text(
-        buffer,
-        x,
-        rect.y + rect.height / 2,
-        width,
-        text,
-        Style::default().fg(fg).bg(fill).add_modifier(Modifier::BOLD),
-    );
-}
-
-/// Header, three rows: the boxed ORCHA chip with the icon, the counts, the
+/// Header, one row: the pink ORCHA chip with the icon, the counts, the
 /// low-fuel offer, and the outlined settings button.
 pub(super) fn render_header(
     buffer: &mut Buffer,
@@ -46,17 +19,10 @@ pub(super) fn render_header(
     hits: &mut ShellHitMap,
 ) {
     let t = Brutal::new(&config.palette);
-    // the margin row above belongs to the page too (only the background:
-    // other regions' glyphs keep their colors)
-    let page = Rect::new(0, 0, buffer.area.width, area.bottom()).intersection(buffer.area);
-    buffer.set_style(page, Style::default().bg(t.bg));
-    if area.height < 3 {
-        return;
-    }
     let icon = brutal::orcha_icon(config.icon_font);
     let label = format!("{icon} ORCHA");
-    let chip = Rect::new(area.x, area.y, display_width(&label) + 4, 3);
-    boxed_label(buffer, chip, &label, t.chip_text, t.pink, false, &t);
+    let chip = Rect::new(area.x, area.y, display_width(&label) + 4, 1);
+    brutal::pill(buffer, chip, &label, t.chip_text, t.pink, false, &t);
     let projects = snapshot.workspaces.len();
     let agents = snapshot.agents.len();
     let counts = format!(
@@ -64,12 +30,11 @@ pub(super) fn render_header(
         if projects == 1 { "" } else { "s" },
         if agents == 1 { "" } else { "s" },
     );
-    let mid = area.y + 1;
     let x = chip.right() + 2;
     put_text(
         buffer,
         x,
-        mid,
+        area.y,
         area.right().saturating_sub(x),
         &counts,
         Style::default().fg(t.muted).bg(t.bg),
@@ -79,30 +44,31 @@ pub(super) fn render_header(
         area.right().saturating_sub(display_width(text) + 4),
         area.y,
         display_width(text) + 4,
-        3,
+        1,
     );
-    if button.x > x + display_width(&counts) + 4 {
-        boxed_label(buffer, button, text, t.ink, t.bg, false, &t);
-        hits.orcha.settings = button;
-        // low fuel: a red offer left of settings, a click opens the accounts
-        if let Some(hint) = &ui.low_fuel_hint {
-            let hint = format!(" ⚠ {hint} ");
-            let room = button.x.saturating_sub(x + display_width(&counts) + 4);
-            let width = display_width(&hint).min(room);
-            let hx = button.x.saturating_sub(width + 2);
-            put_text(
-                buffer,
-                hx,
-                mid,
-                width,
-                &hint,
-                Style::default()
-                    .fg(t.card)
-                    .bg(t.red)
-                    .add_modifier(Modifier::BOLD),
-            );
-            hits.orcha.fuel_hint = Rect::new(hx, mid, width, 1);
-        }
+    if button.x <= x + display_width(&counts) + 4 {
+        return;
+    }
+    brutal::pill(buffer, button, text, t.ink, t.card, true, &t);
+    hits.orcha.settings = button;
+    // low fuel: a red offer left of settings, a click opens the accounts
+    if let Some(hint) = &ui.low_fuel_hint {
+        let hint = format!(" ⚠ {hint} ");
+        let room = button.x.saturating_sub(x + display_width(&counts) + 4);
+        let width = display_width(&hint).min(room);
+        let hx = button.x.saturating_sub(width + 2);
+        put_text(
+            buffer,
+            hx,
+            area.y,
+            width,
+            &hint,
+            Style::default()
+                .fg(t.card)
+                .bg(t.red)
+                .add_modifier(Modifier::BOLD),
+        );
+        hits.orcha.fuel_hint = Rect::new(hx, area.y, width, 1);
     }
 }
 
@@ -122,7 +88,7 @@ pub(super) fn render_frame_and_tabs(
     hits: &mut ShellHitMap,
 ) {
     let t = Brutal::new(&config.palette);
-    let top = tab_area.y.saturating_sub(1);
+    let top = tab_area.y;
     let paper = Rect::new(
         frame.x.saturating_sub(2),
         top,
@@ -188,28 +154,25 @@ pub(super) fn render_frame_and_tabs(
         if x + w > limit {
             break;
         }
+        // the open tab is a raised piece of the frame; the others are cards
         let open = tab.focused;
-        let fill = if open { t.frame } else { t.bg };
-        let edge = Style::default().fg(t.line).bg(t.bg);
-        let (right_x, inner) = (x + w - 1, Rect::new(x + 1, y, w - 2, 1));
-        // the top edge, then the sides around the label
+        let fill = if open { t.frame } else { t.card };
+        let rect = Rect::new(x, y, w, 1);
+        brutal::pill(buffer, rect, "", t.ink, fill, true, &t);
         if open {
-            put_text(buffer, x, top, w, &"▂".repeat(usize::from(w)), edge);
-            put_text(buffer, x, y, 1, "▐", Style::default().fg(t.line).bg(fill));
-            put_text(buffer, right_x, y, 1, "▌", Style::default().fg(t.line).bg(fill));
-            // the open tab and the frame are one shape
+            // the frame's top edge opens under it
             let joint = Style::default().fg(t.line).bg(t.frame);
-            put_text(buffer, x, frame.y, 1, "▟", edge);
-            for cx in x + 1..right_x {
+            put_text(buffer, x, frame.y, 1, "▁", Style::default().fg(t.line).bg(t.bg));
+            for cx in x + 1..x + w - 1 {
                 put_text(buffer, cx, frame.y, 1, " ", joint);
             }
-            put_text(buffer, right_x, frame.y, 1, "▙", edge);
-        } else {
-            put_text(buffer, x + 1, top, w - 2, &"▁".repeat(usize::from(w - 2)), edge);
-            put_text(buffer, x, y, 1, "▕", edge);
-            put_text(buffer, right_x, y, 1, "▏", edge);
+            put_text(buffer, x + w - 1, frame.y, 1, "▁", Style::default().fg(t.line).bg(t.bg));
+            // a lip over the open tab
+            let lip = Style::default().fg(t.line).bg(t.bg);
+            put_text(buffer, x, y.saturating_sub(1), 1, "▁", lip);
+            put_text(buffer, x + 1, y.saturating_sub(1), w - 2, &"▁".repeat(usize::from(w - 2)), lip);
+            put_text(buffer, x + w - 1, y.saturating_sub(1), 1, "▁", lip);
         }
-        buffer.set_style(inner, Style::default().bg(fill));
         let name = label(tab);
         let mut style = Style::default()
             .fg(if open { t.ink } else { t.muted })
@@ -230,7 +193,7 @@ pub(super) fn render_frame_and_tabs(
             mark,
             Style::default().fg(color).bg(fill),
         );
-        hits.tabs.push((Rect::new(x, top, w, 2), tab.tab_id.clone()));
+        hits.tabs.push((rect, tab.tab_id.clone()));
         x += w + 1;
         shown_until = index + 1;
     }
@@ -239,7 +202,7 @@ pub(super) fn render_frame_and_tabs(
         let more = format!(" +{hidden} ▾ ");
         let w = display_width(&more);
         put_text(buffer, x, y, w, &more, Style::default().fg(t.muted).bg(t.bg));
-        hits.tab_scroll_right = Rect::new(x, top, w, 2);
+        hits.tab_scroll_right = Rect::new(x, y, w, 1);
         x += w + 1;
     }
     if config.mouse_capture && x + 3 <= right {
@@ -254,7 +217,7 @@ pub(super) fn render_frame_and_tabs(
                 .bg(t.bg)
                 .add_modifier(Modifier::BOLD),
         );
-        hits.new_tab = Rect::new(x, top, 3, 2);
+        hits.new_tab = Rect::new(x, y, 3, 1);
     }
     if let Some(insert) = tab_drag_insert_index {
         let at = tabs

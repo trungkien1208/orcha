@@ -622,19 +622,17 @@ fn orcha_layout(
     sidebar_width: u16,
     panel_width: Option<u16>,
 ) -> Option<ClientShellLayout> {
-    const MARGIN_X: u16 = 2;
+    const MARGIN_X: u16 = 1;
     const GAP_X: u16 = 2;
-    const HEADER: u16 = 3;
-    const STATUS: u16 = 3;
-    if rows < 24 || cols < 90 {
+    if rows < 20 || cols < 90 {
         return None;
     }
     let width = cols - 2 * MARGIN_X;
-    let header = Rect::new(MARGIN_X, 1, width, HEADER);
-    let status_bar = Rect::new(MARGIN_X, rows - 1 - STATUS, width, STATUS);
-    // box edges leave most of their row empty: that is the gap
-    let body_y = header.bottom();
-    let body_height = status_bar.y.saturating_sub(body_y);
+    // one row each, at the very top and bottom
+    let header = Rect::new(MARGIN_X, 0, width, 1);
+    let status_bar = Rect::new(MARGIN_X, rows - 1, width, 1);
+    let body_y = header.bottom() + 1;
+    let body_height = status_bar.y.saturating_sub(body_y + 1);
     let sidebar = Rect::new(MARGIN_X, body_y, sidebar_width.min(width / 3), body_height);
     let rest = width.saturating_sub(sidebar.width + GAP_X);
     // the panel only when the panes keep room
@@ -649,23 +647,23 @@ fn orcha_layout(
     } else {
         cols - MARGIN_X
     };
-    // two rows of tabs over the frame: their top edges, then their labels
+    // the tabs' row, then the frame they sit on
     let frame = Rect::new(
         main_x,
-        body_y + 2,
+        body_y + 1,
         main_right.saturating_sub(main_x),
-        body_height.saturating_sub(2),
+        body_height.saturating_sub(1),
     );
     Some(ClientShellLayout {
         sidebar,
-        tab_bar: Rect::new(frame.x + 1, body_y + 1, frame.width.saturating_sub(2), 1),
+        tab_bar: Rect::new(frame.x + 1, body_y, frame.width.saturating_sub(2), 1),
         mobile_header: Rect::default(),
         // the panes sit in the frame with a padding of a row and two columns
         pane_surface: Rect::new(
             frame.x + 2,
-            frame.y + 2,
+            frame.y + 1,
             frame.width.saturating_sub(4),
-            frame.height.saturating_sub(4),
+            frame.height.saturating_sub(2),
         ),
         status_bar,
         right_panel,

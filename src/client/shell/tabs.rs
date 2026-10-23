@@ -250,23 +250,11 @@ pub(crate) fn render_status_bar(
 ) {
     let t = super::super::brutal::Brutal::new(&config.palette);
     let bg = t.status_bg;
-    // the margin around it is page; a bar of three rows is one bar of two
+    // the margin around it is page
     let page = Rect::new(0, outer.y, buffer.area.width, buffer.area.bottom() - outer.y)
         .intersection(buffer.area);
     buffer.set_style(page, Style::default().bg(t.bg));
     let area = Rect::new(outer.x, outer.y + outer.height / 2, outer.width, 1);
-    if outer.height >= 3 {
-        let edge = Style::default().fg(bg).bg(t.bg);
-        put_text(buffer, outer.x, outer.y, outer.width, &"▄".repeat(usize::from(outer.width)), edge);
-        put_text(
-            buffer,
-            outer.x,
-            outer.bottom() - 1,
-            outer.width,
-            &"▀".repeat(usize::from(outer.width)),
-            edge,
-        );
-    }
     buffer.set_style(area, Style::default().bg(bg).fg(t.status_text));
     let mut parts: Vec<&str> = Vec::new();
     for segment in &snapshot.tab_bar_right {

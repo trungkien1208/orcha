@@ -336,9 +336,10 @@ pub(super) fn fuel_color(left: u8, t: &Brutal) -> ratatui::style::Color {
 pub(super) fn draw_gauge(buffer: &mut Buffer, x: u16, y: u16, left: u8, bg: ratatui::style::Color, t: &Brutal) {
     let color = fuel_color(left, t);
     let filled = (u16::from(left) + 5) / 10;
+    // ten flat segments, like the mockup's marks
     for index in 0..10u16 {
         let fg = if index < filled { color } else { t.empty };
-        put_text(buffer, x + index, y, 1, "▌", Style::default().fg(fg).bg(bg));
+        put_text(buffer, x + index, y, 1, "▬", Style::default().fg(fg).bg(bg));
     }
 }
 
@@ -447,7 +448,9 @@ pub(super) fn render_git_panel(
     let mut rows: Vec<Row<'_>> = Vec::new();
     // a rule between sections; its line sits mid-row, half a row of air each side
     let section = |rows: &mut Vec<Row<'_>>| {
-        rows.push(if rows.is_empty() { Row::Blank } else { Row::Rule });
+        if !rows.is_empty() {
+            rows.push(Row::Rule);
+        }
     };
 
     if let Some(account) = fuel {
@@ -547,7 +550,6 @@ pub(super) fn render_git_panel(
         );
         rows.push(Row::NewWorktree);
     }
-    rows.push(Row::Blank);
     draw_rows(buffer, area, &rows, config, &t, hits);
 }
 

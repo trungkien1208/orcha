@@ -130,9 +130,10 @@ impl Edge {
     fn glyphs(self) -> [&'static str; 8] {
         match self {
             // ~3 px like the mockup's thick lines: half a column, a quarter row
-            // corners carry the horizontal line: a quadrant would stick out
-            Edge::Heavy => ["▂", "▂", "▂", "▐", "▌", "▔", "▔", "▔"],
-            Edge::Light => [" ", "▁", " ", "▕", "▏", " ", "▔", " "],
+            // eighth-block lines hug the fill; their corners would be an
+            // eighth of a cell, so they stay blank rather than stick out
+            // (heavy boxes get their weight from the shadow)
+            Edge::Heavy | Edge::Light => [" ", "▁", " ", "▕", "▏", " ", "▔", " "],
             Edge::Dashed => ["┌", "┄", "┐", "┆", "┆", "└", "┄", "┘"],
         }
     }
@@ -182,22 +183,73 @@ pub(super) fn draw_box(
     set(buffer, right, bottom, br, style);
 }
 
-/// The hard shadow of a heavy box, merged into its right and bottom
-/// edges: the right edge becomes a full column, the bottom a half row.
+/// The hard shadow of a box, merged into its right and bottom edges: half
+/// a cell of line and shadow down the right, half a row along the bottom.
 pub(super) fn draw_box_shadow(buffer: &mut Buffer, rect: Rect, shadow: Color, page: Color) {
     if rect.width < 2 || rect.height < 2 {
         return;
     }
     let style = Style::reset().fg(shadow).bg(page);
     let (right, bottom) = (rect.right() - 1, rect.bottom() - 1);
-    set(buffer, right, rect.y, "▂", style);
     for y in rect.y + 1..bottom {
-        set(buffer, right, y, "█", style);
+        set(buffer, right, y, "▌", style);
     }
-    set(buffer, rect.x, bottom, "▀", style);
-    for x in rect.x + 1..=right {
+    for x in rect.x + 1..right {
         set(buffer, x, bottom, "▀", style);
     }
+    set(buffer, right, bottom, "▀", style);
+}
+
+/// The hard shadow of a one-row block (a button): half a cell right and
+/// down, on the row under it.
+pub(super) fn draw_shadow(buffer: &mut Buffer, rect: Rect, shadow: Color, page: Color) {
+    let style = Style::reset().fg(shadow).bg(page);
+    let (right, below) = (rect.right(), rect.bottom());
+    for y in rect.y..below {
+        set(buffer, right, y, if y == rect.y { "▖" } else { "▌" }, style);
+    }
+    set(buffer, rect.x, below, "▝", style);
+    for x in rect.x + 1..right {
+        set(buffer, x, below, "▀", style);
+    }
+    set(buffer, right, below, "▘", style);
+}
+
+/// A one-row block: filled, the text bold and centered; with `edges`, a
+/// thick line down each side (an outlined button or a folded card).
+#[allow(clippy::too_many_arguments)] // one block, all inputs are distinct facts
+pub(super) fn pill(
+    buffer: &mut Buffer,
+    rect: Rect,
+    text: &str,
+    fg: Color,
+    fill: Color,
+    edges: bool,
+    t: &Brutal,
+) {
+    if rect.width < 3 {
+        return;
+    }
+    for x in rect.x..rect.right() {
+        set(buffer, x, rect.y, " ", Style::reset().bg(fill));
+    }
+    if edges {
+        set(buffer, rect.x, rect.y, "▕", Style::reset().fg(t.line).bg(t.bg));
+        set(buffer, rect.right() - 1, rect.y, "▏", Style::reset().fg(t.line).bg(t.bg));
+    }
+    if text.is_empty() {
+        return;
+    }
+    let inner = rect.width.saturating_sub(2);
+    let width = display_width(text).min(inner);
+    put_text(
+        buffer,
+        rect.x + 1 + inner.saturating_sub(width) / 2,
+        rect.y,
+        width,
+        text,
+        Style::default().fg(fg).bg(fill).add_modifier(Modifier::BOLD),
+    );
 }
 
 /// A run of colored cells with padded bold text; returns its width.
