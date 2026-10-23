@@ -92,7 +92,6 @@ fn demo_history() -> Vec<crate::client::shell::git_panel::HistoryLine> {
 #[test]
 fn five_regions_compose() {
     let mut state = orcha_state(true, true);
-    state.orcha_ui.process_expanded = true;
     let frame = state.compose(140, 30).expect("frame");
     let rows = frame_rows(&frame);
     for row in &rows {
@@ -910,4 +909,62 @@ fn project_card_lists_a_shell_pane() {
             .any(|(_, pane)| pane == "pane_shell"),
         "the shell row is clickable"
     );
+}
+
+#[test]
+fn open_with_popup_suggests_an_app_and_the_check_flips_remember() {
+    use crate::client::shell::orcha_popup::{OpenChoice, OrchaPopup};
+    let mut state = orcha_state(true, true);
+    state.orcha_ui.popup = Some(OrchaPopup::OpenWith {
+        selected: 0,
+        path: "/tmp/shot.png".into(),
+        line: 1,
+        extension: "png".into(),
+        choices: vec![
+            OpenChoice::System,
+            OpenChoice::Editor {
+                name: String::new(),
+                command: String::new(),
+            },
+            OpenChoice::Reveal,
+        ],
+        remember: true,
+    });
+    let frame = state.compose(140, 40).expect("open with");
+    if let Ok(path) = std::env::var("ORCHA_POPUP_PREVIEW_OUT") {
+        let cells: Vec<_> = frame
+            .cells
+            .iter()
+            .map(|cell| serde_json::json!([cell.symbol, cell.fg, cell.bg, cell.modifier]))
+            .collect();
+        let json =
+            serde_json::json!({"width": frame.width, "height": frame.height, "cells": cells});
+        std::fs::write(path, json.to_string()).expect("preview");
+    }
+    let text = frame_rows(&frame).join("\n");
+    assert!(text.contains("OPEN WITH"));
+    assert!(text.contains("shot.png"));
+    assert!(text.contains("Default app  · suggested"));
+    assert!(text.contains("always open .png files this way"));
+    // three OPEN buttons and the remember check
+    assert_eq!(state.hits.orcha.popup.actions.len(), 4);
+    let (check, index) = state.hits.orcha.popup.actions[3];
+    assert_eq!(index, 3);
+    let mut outcome = ClientShellInput::default();
+    state.handle_orcha_popup_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: check.x,
+            row: check.y,
+            modifiers: KeyModifiers::empty(),
+        },
+        &mut outcome,
+    );
+    assert!(matches!(
+        state.orcha_ui.popup,
+        Some(OrchaPopup::OpenWith {
+            remember: false,
+            ..
+        })
+    ));
 }

@@ -73,7 +73,7 @@ When an account runs low, **CONTINUE ON** picks the best next place for the chat
 |---|---|
 | **New agent** | `+ NEW`, pick Claude, Codex or Cursor and the account |
 | **Settings** | `⚙ settings` top right: theme, font, IDE, Git app |
-| **Open a file** | Ctrl+click any path an agent prints |
+| **Open a file** | Ctrl+click any path an agent prints. Folders open in Finder/Explorer; the first time a file type comes up, pick its app (editor, default app or folder) and orcha remembers it |
 | **IDE / Git app** | the `↗ IDE` / `↗ Git` buttons in the right panel |
 | **Import projects** | `≡ menu` → import projects |
 | **Quit** | `⏻ quit` top right, or `≡ menu` → quit to terminal. Your agents keep running; `orcha` brings you back |

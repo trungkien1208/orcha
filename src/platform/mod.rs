@@ -291,7 +291,9 @@ pub(crate) enum OrchaOpenTarget {
     Ide,
     GitGui,
     File,
-    Folder,
+    /// The system's choice: the file manager for a folder, the registered
+    /// app for a file (image viewer, PDF reader, browser, ...).
+    SystemDefault,
 }
 
 /// The current user's profile directory, when the host exposes one.

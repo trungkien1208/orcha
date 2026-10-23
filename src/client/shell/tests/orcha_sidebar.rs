@@ -141,7 +141,8 @@ fn idle_projects_fit_without_boxes_or_repeated_shell_paths() {
     assert!(!sidebar.contains('□') && !sidebar.contains('■'));
     assert!(!sidebar.contains("Shell ORCHA"));
     let header = state.hits.workspaces[0].rect.y as usize;
-    assert_eq!(state.hits.workspaces[15].rect.y as usize, header + 17);
+    // selected project: header, branch, one pane, a blank separator
+    assert_eq!(state.hits.workspaces[15].rect.y as usize, header + 18);
 }
 
 #[test]
@@ -235,25 +236,25 @@ fn branch_does_not_compete_with_project_name_and_shell_row_keeps_its_target() {
 }
 
 #[test]
-fn activity_footer_expands_on_demand_and_stops_rendering_animation_when_folded() {
+fn activity_footer_starts_open_and_stops_rendering_animation_when_folded() {
     let mut state = sidebar_state(2, true);
     add_agent(&mut state, 0, "Codex", AgentStatus::Working);
     add_agent(&mut state, 1, "Cursor", AgentStatus::Blocked);
-    let frame = state.compose(120, 42).expect("compact footer");
+    let frame = state.compose(120, 42).expect("open activity");
+    assert!(frame_rows(&frame).join("\n").contains("PROCESS"));
+    assert!(!state.hits.orcha.process.is_empty());
+    let toggle = state.hits.orcha.process_toggle;
+    let mut outcome = ClientShellInput::default();
+    assert!(state.handle_orcha_click((toggle.x, toggle.y), &mut outcome));
+    let frame = state.compose(120, 42).expect("folded activity");
     assert!(frame_rows(&frame)
         .join("\n")
         .contains("1 running · 1 needs you"));
     assert!(state.hits.orcha.process.is_empty());
     let toggle = state.hits.orcha.process_toggle;
-    let mut outcome = ClientShellInput::default();
     assert!(state.handle_orcha_click((toggle.x, toggle.y), &mut outcome));
-    let frame = state.compose(120, 42).expect("expanded activity");
-    assert!(frame_rows(&frame).join("\n").contains("PROCESS"));
+    state.compose(120, 42).expect("reopened activity");
     assert!(!state.hits.orcha.process.is_empty());
-    let toggle = state.hits.orcha.process_toggle;
-    assert!(state.handle_orcha_click((toggle.x, toggle.y), &mut outcome));
-    state.compose(120, 42).expect("folded activity");
-    assert!(state.hits.orcha.process.is_empty());
     assert!(
         outcome.actions.is_empty(),
         "activity layout never changes the runtime"
@@ -321,8 +322,15 @@ fn orcha_sidebar_preview() {
     if std::env::var("ORCHA_SIDEBAR_PREVIEW_ACTIVE").is_ok() {
         let mut extra = state.snapshot.as_ref().expect("snapshot").panes[0].clone();
         extra.pane_id = "pane_extra".into();
+        extra.tab_id = "tab_extra".into();
         extra.focused = false;
-        state.snapshot.as_mut().expect("snapshot").panes.push(extra);
+        let mut tab = state.snapshot.as_ref().expect("snapshot").tabs[0].clone();
+        tab.tab_id = "tab_extra".into();
+        tab.number = 2;
+        tab.focused = false;
+        let data = state.snapshot.as_mut().expect("snapshot");
+        data.tabs.push(tab);
+        data.panes.push(extra);
         add_agent(&mut state, 0, "Cursor", AgentStatus::Working);
         add_agent(&mut state, 16, "Codex", AgentStatus::Idle);
         add_agent(&mut state, 1, "Codex", AgentStatus::Working);
@@ -341,4 +349,44 @@ fn orcha_sidebar_preview() {
         serde_json::json!({"width":frame.width,"height":frame.height,"cells":cells}).to_string(),
     )
     .expect("preview");
+}
+
+#[test]
+fn project_panes_show_as_a_tree_numbered_by_tab() {
+    let mut state = sidebar_state(1, false);
+    {
+        let data = state.snapshot.as_mut().expect("snapshot");
+        let mut tab = data.tabs[0].clone();
+        tab.tab_id = "tab_2".into();
+        tab.number = 2;
+        tab.focused = false;
+        data.tabs.push(tab);
+        let mut pane = data.panes[0].clone();
+        pane.pane_id = "pane_2".into();
+        pane.tab_id = "tab_2".into();
+        pane.focused = false;
+        data.panes.push(pane);
+    }
+    add_agent(&mut state, 0, "Claude", AgentStatus::Working);
+    let frame = state.compose(120, 42).expect("frame");
+    let rows = frame_rows(&frame);
+    let first = rows
+        .iter()
+        .position(|row| row.contains("├ 1"))
+        .expect("first tab opens the tree");
+    assert!(rows[first + 1].contains("└ 2"), "second tab closes it");
+    assert!(rows[first + 1].contains("Shell"));
+    assert!(
+        rows[first + 2].trim().is_empty() || !rows[first + 2].contains('│'),
+        "a blank row follows the open project"
+    );
+}
+
+#[test]
+fn single_tab_project_hides_tab_numbers() {
+    let mut state = sidebar_state(1, false);
+    let frame = state.compose(120, 42).expect("frame");
+    let rows = frame_rows(&frame);
+    let row = rows.iter().find(|row| row.contains('└')).expect("pane row");
+    assert!(!row.contains("└ 1"), "one tab needs no number");
 }

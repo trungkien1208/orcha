@@ -43,6 +43,121 @@ fn spawn_with_env(command: &str, path: &str, line: u32) {
     }
 }
 
+/// Files an editor can't show well open in the system's app for their type:
+/// pictures, PDFs, media, office documents, web pages, archives. Everything
+/// else (code, text, config, unknown types) goes to the editor at its line.
+fn opens_in_system_app(path: &std::path::Path) -> bool {
+    const SYSTEM_APP_EXTENSIONS: &[&str] = &[
+        // pictures
+        "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "ico", "heic", "avif",
+        // documents
+        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "pages", "numbers",
+        "key", "rtf", "epub", // web pages open in the browser
+        "html", "htm", // media
+        "mp4", "mov", "m4v", "avi", "mkv", "webm", "mp3", "wav", "m4a", "aac", "flac", "ogg",
+        // archives and installers
+        "zip", "tar", "gz", "tgz", "7z", "rar", "dmg", "pkg", "msi",
+    ];
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            SYSTEM_APP_EXTENSIONS
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(extension))
+        })
+}
+
+/// Folders skipped when looking for a bare file name.
+const SKIPPED_DIRS: &[&str] = &["node_modules", "target", "dist", "build", "vendor"];
+
+/// Breadth-first search for `name` under `root`, shallowest match first,
+/// bounded so a click never stalls on a huge tree.
+fn find_file_named(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    const MAX_ENTRIES: usize = 20_000;
+    let mut seen = 0usize;
+    let mut queue = std::collections::VecDeque::from([root.to_path_buf()]);
+    while let Some(dir) = queue.pop_front() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut subdirs = Vec::new();
+        for entry in entries.flatten() {
+            seen += 1;
+            if seen > MAX_ENTRIES {
+                return None;
+            }
+            let file_name = entry.file_name();
+            let Some(file_name) = file_name.to_str() else {
+                continue;
+            };
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                if !file_name.starts_with('.') && !SKIPPED_DIRS.contains(&file_name) {
+                    subdirs.push(entry.path());
+                }
+            } else if file_name == name {
+                return Some(entry.path());
+            }
+        }
+        subdirs.sort();
+        queue.extend(subdirs);
+    }
+    None
+}
+
+/// The apps offered for a file, the suggested one first: the system's app
+/// for documents and pictures, the editor for code and text.
+fn open_choices(path: &std::path::Path, ide: &str) -> Vec<super::orcha_popup::OpenChoice> {
+    use super::orcha_popup::OpenChoice;
+    let mut editors = vec![OpenChoice::Editor {
+        name: String::new(),
+        command: if ide.trim().is_empty() {
+            String::new()
+        } else {
+            ide.to_owned()
+        },
+    }];
+    // Installed editors, at most four, besides the configured one.
+    for (name, command) in super::settings::installed_apps(super::settings::IDE_APPS)
+        .into_iter()
+        .filter(|(_, command)| !command.is_empty() && command != ide)
+        .take(4)
+    {
+        editors.push(OpenChoice::Editor { name, command });
+    }
+    let mut choices = Vec::new();
+    if opens_in_system_app(path) {
+        choices.push(OpenChoice::System);
+        choices.extend(editors);
+    } else {
+        choices.extend(editors);
+        choices.push(OpenChoice::System);
+    }
+    choices.push(OpenChoice::Reveal);
+    choices
+}
+
+fn open_with_choice(choice: &super::orcha_popup::OpenChoice, path: &str, line: u32) {
+    use super::orcha_popup::OpenChoice;
+    match choice {
+        OpenChoice::System => {
+            open_orcha_target(crate::platform::OrchaOpenTarget::SystemDefault, path, 1);
+        }
+        OpenChoice::Reveal => {
+            let folder = std::path::Path::new(path)
+                .parent()
+                .map_or_else(|| path.to_owned(), |dir| dir.to_string_lossy().into_owned());
+            open_orcha_target(crate::platform::OrchaOpenTarget::SystemDefault, &folder, 1);
+        }
+        OpenChoice::Editor { command, .. } if command.trim().is_empty() => {
+            open_orcha_target(crate::platform::OrchaOpenTarget::File, path, line);
+        }
+        OpenChoice::Editor { command, .. } => spawn_with_env(command, path, line),
+    }
+}
+
 fn open_orcha_target(target: crate::platform::OrchaOpenTarget, path: &str, line: u32) {
     let child = crate::platform::open_orcha_target(target, std::path::Path::new(path), line)
         .stdin(std::process::Stdio::null())
@@ -103,7 +218,7 @@ impl ClientShellState {
         }
         let hits = &self.hits.orcha;
         if super::contains(hits.process_toggle, point) {
-            self.orcha_ui.process_expanded = !self.orcha_ui.process_expanded;
+            self.orcha_ui.process_folded = !self.orcha_ui.process_folded;
             outcome.repaint = true;
             return true;
         }
@@ -340,6 +455,7 @@ impl ClientShellState {
                 self.orcha_ui.import_sources.len()
             }
             Some(super::orcha_popup::OrchaPopup::NewWorkspace { .. }) => 3,
+            Some(super::orcha_popup::OrchaPopup::OpenWith { choices, .. }) => choices.len(),
             Some(super::orcha_popup::OrchaPopup::Welcome(_)) | None => 0,
         }
     }
@@ -352,6 +468,7 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::Handoff { selected, .. }
                 | super::orcha_popup::OrchaPopup::NewAgent { selected, .. }
                 | super::orcha_popup::OrchaPopup::NewWorkspace { selected, .. }
+                | super::orcha_popup::OrchaPopup::OpenWith { selected, .. }
                 | super::orcha_popup::OrchaPopup::Import { selected, .. },
             ) => *selected = index,
             Some(super::orcha_popup::OrchaPopup::Welcome(welcome)) => welcome.selected = index,
@@ -367,6 +484,7 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::Handoff { selected, .. }
                 | super::orcha_popup::OrchaPopup::NewAgent { selected, .. }
                 | super::orcha_popup::OrchaPopup::NewWorkspace { selected, .. }
+                | super::orcha_popup::OrchaPopup::OpenWith { selected, .. }
                 | super::orcha_popup::OrchaPopup::Import { selected, .. },
             ) => *selected,
             Some(super::orcha_popup::OrchaPopup::Welcome(welcome)) => welcome.selected,
@@ -423,6 +541,26 @@ impl ClientShellState {
         match popup {
             // the setup handles its own keys and clicks
             super::orcha_popup::OrchaPopup::Welcome(_) => return,
+            // a choice opens the file; the check past the rows flips `remember`
+            super::orcha_popup::OrchaPopup::OpenWith {
+                path,
+                line,
+                extension,
+                choices,
+                remember,
+                ..
+            } => {
+                let Some(choice) = choices.get(index) else {
+                    self.toggle_open_with_remember();
+                    return;
+                };
+                self.orcha_ui.popup = None;
+                if remember && !extension.is_empty() {
+                    self.save_open_with(&extension, choice);
+                }
+                open_with_choice(choice, &path, line);
+                return;
+            }
             super::orcha_popup::OrchaPopup::NewWorkspace { project, .. } => {
                 self.orcha_ui.popup = None;
                 if index == 0 && project.is_some() {
@@ -706,6 +844,14 @@ impl ClientShellState {
             {
                 self.toggle_import(selected);
             }
+            KeyCode::Char(' ')
+                if matches!(
+                    self.orcha_ui.popup,
+                    Some(super::orcha_popup::OrchaPopup::OpenWith { .. })
+                ) =>
+            {
+                self.toggle_open_with_remember();
+            }
             KeyCode::Enter => {
                 let alternate = key.modifiers.contains(KeyModifiers::ALT);
                 self.popup_activate(selected, alternate, outcome);
@@ -868,8 +1014,9 @@ impl ClientShellState {
         outcome.repaint = true;
     }
 
-    /// Ctrl+click on a path in a pane: a folder opens in the file manager, a file in
-    /// the editor (at its `:line`). Relative paths are the pane's. Returns
+    /// Ctrl+click on a path in a pane: a folder opens in the file manager,
+    /// a picture, PDF, web page or other document in the system's app for it,
+    /// and code or text in the editor (at its `:line`). Relative paths are the pane's. Returns
     /// false when nothing exists there.
     pub(super) fn open_path_link(&mut self, pane_id: &str, text: &str) -> bool {
         let (raw, line) = split_line(text);
@@ -901,23 +1048,100 @@ impl ClientShellState {
             }
         }
         if !path.exists() {
-            return false;
-        }
-        let shown = path.to_string_lossy().into_owned();
-        if path.is_dir() {
-            open_orcha_target(crate::platform::OrchaOpenTarget::Folder, &shown, 1);
-        } else {
-            if self.config.orcha.ide.trim().is_empty() {
-                open_orcha_target(
-                    crate::platform::OrchaOpenTarget::File,
-                    &shown,
-                    line.unwrap_or(1),
-                );
-            } else {
-                spawn_with_env(&self.config.orcha.ide, &shown, line.unwrap_or(1));
+            // the agent may print a path from its repository root, or a bare name
+            match self.find_printed_path(pane_id, &expanded) {
+                Some(found) => path = found,
+                None => {
+                    self.show_notice(format!("can't find {raw}"));
+                    return true;
+                }
             }
         }
+        let shown = path.to_string_lossy().into_owned();
+        let line = line.unwrap_or(1);
+        if path.is_dir() {
+            open_orcha_target(crate::platform::OrchaOpenTarget::SystemDefault, &shown, 1);
+            return true;
+        }
+        let extension = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .filter(|extension| extension.chars().all(|c| c.is_ascii_alphanumeric()))
+            .map(str::to_ascii_lowercase)
+            .unwrap_or_default();
+        if let Some(choice) = self
+            .config
+            .orcha
+            .open_with
+            .get(&extension)
+            .filter(|_| !extension.is_empty())
+            .and_then(|value| super::orcha_popup::OpenChoice::from_config_value(value))
+        {
+            open_with_choice(&choice, &shown, line);
+            return true;
+        }
+        let choices = open_choices(&path, &self.config.orcha.ide);
+        self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::OpenWith {
+            selected: 0,
+            path: shown,
+            line,
+            extension,
+            choices,
+            remember: true,
+        });
         true
+    }
+
+    fn toggle_open_with_remember(&mut self) {
+        if let Some(super::orcha_popup::OrchaPopup::OpenWith { remember, .. }) =
+            self.orcha_ui.popup.as_mut()
+        {
+            *remember = !*remember;
+        }
+    }
+
+    /// Keeps the app for `extension`, in memory and in `[orcha.open_with]`.
+    fn save_open_with(&mut self, extension: &str, choice: &super::orcha_popup::OpenChoice) {
+        let value = choice.config_value();
+        self.config
+            .orcha
+            .open_with
+            .insert(extension.to_owned(), value.clone());
+        let path = crate::config::config_path();
+        let key = extension.to_owned();
+        let _ = crate::thread_spawn::spawn_named("orcha-open-with", move || {
+            let content = std::fs::read_to_string(&path).unwrap_or_default();
+            let quoted = format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""));
+            let updated =
+                crate::config::upsert_section_value(&content, "orcha.open_with", &key, &quoted);
+            if let Err(err) = std::fs::write(&path, updated) {
+                tracing::warn!(err = %err, "orcha: failed to save how .{key} files open");
+            }
+        });
+    }
+
+    /// A printed path that isn't under the pane's folder: try the pane's
+    /// repository root, then (for a bare file name) a short search of it.
+    fn find_printed_path(&self, pane_id: &str, printed: &str) -> Option<std::path::PathBuf> {
+        let cwd = self.snapshot.as_deref().and_then(|snapshot| {
+            snapshot
+                .panes
+                .iter()
+                .find(|pane| pane.pane_id == pane_id)
+                .and_then(|pane| pane.foreground_cwd.clone().or_else(|| pane.cwd.clone()))
+        })?;
+        let root = std::path::Path::new(&cwd)
+            .ancestors()
+            .find(|dir| dir.join(".git").exists())?
+            .to_path_buf();
+        let candidate = root.join(printed);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        if printed.contains('/') || printed.contains('\\') {
+            return None;
+        }
+        find_file_named(&root, printed)
     }
 
     /// Looks for projects to import off the input path; the popup opens
@@ -1169,6 +1393,108 @@ fn launch_project() -> Option<std::path::PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::orcha_popup::OpenChoice;
+
+    #[test]
+    fn open_choices_suggest_the_system_app_for_documents_and_the_editor_for_code() {
+        use std::path::Path;
+        let picture = super::open_choices(Path::new("shot.png"), "");
+        assert_eq!(picture[0], OpenChoice::System);
+        assert_eq!(picture.last(), Some(&OpenChoice::Reveal));
+        let code = super::open_choices(Path::new("main.rs"), "zed {path}");
+        assert_eq!(
+            code[0],
+            OpenChoice::Editor {
+                name: String::new(),
+                command: "zed {path}".into()
+            }
+        );
+        assert!(code.contains(&OpenChoice::System));
+    }
+
+    #[test]
+    fn open_choices_round_trip_through_the_config() {
+        for choice in [
+            OpenChoice::System,
+            OpenChoice::Reveal,
+            OpenChoice::Editor {
+                name: String::new(),
+                command: String::new(),
+            },
+            OpenChoice::Editor {
+                name: String::new(),
+                command: "open -a 'Zed' {path}".into(),
+            },
+        ] {
+            assert_eq!(
+                OpenChoice::from_config_value(&choice.config_value()),
+                Some(choice)
+            );
+        }
+        assert_eq!(OpenChoice::from_config_value("nonsense"), None);
+    }
+
+    #[test]
+    fn open_with_section_parses_and_saves() {
+        let config: crate::config::Config =
+            toml::from_str("[orcha.open_with]\npng = \"system\"\nrs = \"editor\"\n")
+                .expect("config");
+        assert_eq!(
+            config.orcha.open_with.get("png").map(String::as_str),
+            Some("system")
+        );
+        let saved = crate::config::upsert_section_value(
+            "[orcha]\nide = \"\"\n",
+            "orcha.open_with",
+            "pdf",
+            "\"folder\"",
+        );
+        let config: crate::config::Config = toml::from_str(&saved).expect("saved config");
+        assert_eq!(
+            config.orcha.open_with.get("pdf").map(String::as_str),
+            Some("folder")
+        );
+    }
+
+    #[test]
+    fn a_bare_file_name_is_found_in_the_repository() {
+        let root = std::env::temp_dir().join(format!("orcha-find-{}", std::process::id()));
+        let deep = root.join("src/client");
+        std::fs::create_dir_all(&deep).expect("dirs");
+        std::fs::create_dir_all(root.join("node_modules/x")).expect("dirs");
+        std::fs::write(root.join("node_modules/x/app.rs"), "").expect("file");
+        std::fs::write(deep.join("app.rs"), "").expect("file");
+        assert_eq!(
+            super::find_file_named(&root, "app.rs"),
+            Some(deep.join("app.rs"))
+        );
+        assert_eq!(super::find_file_named(&root, "missing.rs"), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn documents_open_in_their_app_and_code_in_the_editor() {
+        use std::path::Path;
+        for path in [
+            "shot.PNG",
+            "spec.pdf",
+            "report.docx",
+            "index.html",
+            "demo.mp4",
+        ] {
+            assert!(super::opens_in_system_app(Path::new(path)), "{path}");
+        }
+        for path in [
+            "main.rs",
+            "README.md",
+            "logo.svg",
+            "Makefile",
+            "config.toml",
+        ] {
+            assert!(!super::opens_in_system_app(Path::new(path)), "{path}");
+        }
+    }
+
     use super::*;
 
     #[test]

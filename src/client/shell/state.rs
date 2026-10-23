@@ -153,7 +153,8 @@ pub(crate) struct OrchaUiState {
     pub(super) open_projects: HashSet<String>,
     /// Explicitly folded projects, including the currently selected project.
     pub(super) folded_projects: HashSet<String>,
-    pub(super) process_expanded: bool,
+    /// PROCESS starts open; a click folds it to one line.
+    pub(super) process_folded: bool,
     pub(super) history_open: bool,
     pub(super) worktrees_open: bool,
     /// Animation frame of the PROCESS trains.
@@ -1964,6 +1965,13 @@ impl ClientShellState {
         });
         self.copy_feedback_deadline = Some(now + std::time::Duration::from_secs(2));
         true
+    }
+
+    /// A short message in the copy-feedback toast, shown for three seconds.
+    pub(crate) fn show_notice(&mut self, message: String) {
+        self.copy_feedback = Some(crate::app::state::CopyFeedback { message });
+        self.copy_feedback_deadline =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
     }
 
     pub(crate) fn tick_copy_feedback(&mut self, now: std::time::Instant) -> bool {

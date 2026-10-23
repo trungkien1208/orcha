@@ -1280,7 +1280,7 @@ pub(crate) fn open_orcha_target_platform(
         super::OrchaOpenTarget::File => format!(
             "$path = {path}; $line = {line}; foreach ($name in @('cursor', 'code')) {{ $app = Get-Command $name -ErrorAction SilentlyContinue; if ($app -and $app.Source) {{ & $app.Source --goto ($path + ':' + $line); exit }} }}; $app = Get-Command 'zed' -ErrorAction SilentlyContinue; if ($app -and $app.Source) {{ & $app.Source ($path + ':' + $line); exit }}; & 'explorer.exe' $path"
         ),
-        super::OrchaOpenTarget::Folder => {
+        super::OrchaOpenTarget::SystemDefault => {
             format!("& 'explorer.exe' {path}")
         }
     };

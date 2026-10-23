@@ -379,7 +379,7 @@ pub(crate) fn open_orcha_target_platform(
         super::OrchaOpenTarget::File => {
             r#"for c in cursor code; do command -v "$c" >/dev/null 2>&1 && exec "$c" -g "$P:$L"; done; command -v zed >/dev/null 2>&1 && exec zed "$P:$L"; xdg-open "$P""#
         }
-        super::OrchaOpenTarget::Folder => r#"xdg-open "$P""#,
+        super::OrchaOpenTarget::SystemDefault => r#"xdg-open "$P""#,
     };
     let mut process = std::process::Command::new("sh");
     process

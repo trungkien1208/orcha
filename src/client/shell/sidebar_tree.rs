@@ -351,14 +351,16 @@ impl ProjectActivity {
 
 #[derive(Default)]
 struct ProjectRows<'a> {
-    rows: Vec<ProjectRow<'a>>,
+    // Each pane with its tab number, in tab order.
+    rows: Vec<(usize, ProjectRow<'a>)>,
+    tabs: usize,
     activity: ProjectActivity,
     // At most three distinct agent logos. Active agents replace idle ones.
     logos: [Option<&'a ClientShellAgent>; 3],
 }
 
 impl<'a> ProjectRows<'a> {
-    fn push(&mut self, row: ProjectRow<'a>) {
+    fn push(&mut self, tab: usize, row: ProjectRow<'a>) {
         if let ProjectRow::Agent(agent) = row {
             let activity = ProjectActivity::from_status(agent.agent_status);
             if activity >= ProjectActivity::Running && self.activity < ProjectActivity::Running {
@@ -385,7 +387,7 @@ impl<'a> ProjectRows<'a> {
                 }
             }
         }
-        self.rows.push(row);
+        self.rows.push((tab, row));
     }
 }
 
@@ -399,6 +401,13 @@ fn project_rows_by_workspace<'a>(
             .or_insert(agent);
     }
 
+    let tab_numbers: HashMap<&str, usize> = snapshot
+        .tabs
+        .iter()
+        .map(|tab| (tab.tab_id.as_str(), tab.number))
+        .collect();
+    let tab_of = |tab_id: &str| tab_numbers.get(tab_id).copied().unwrap_or(usize::MAX);
+
     let mut rows_by_workspace: HashMap<&str, ProjectRows<'_>> = HashMap::new();
     for pane in &snapshot.panes {
         let row = agents_by_pane
@@ -408,7 +417,7 @@ fn project_rows_by_workspace<'a>(
         rows_by_workspace
             .entry(pane.workspace_id.as_str())
             .or_default()
-            .push(row);
+            .push(tab_of(&pane.tab_id), row);
     }
 
     for agent in &snapshot.agents {
@@ -416,8 +425,18 @@ fn project_rows_by_workspace<'a>(
             rows_by_workspace
                 .entry(agent.workspace_id.as_str())
                 .or_default()
-                .push(ProjectRow::Agent(agent));
+                .push(tab_of(&agent.tab_id), ProjectRow::Agent(agent));
         }
+    }
+    for project in rows_by_workspace.values_mut() {
+        // Stable: panes keep their order inside a tab.
+        project.rows.sort_by_key(|(tab, _)| *tab);
+        project.tabs = project
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(index, (tab, _))| *index == 0 || project.rows[index - 1].0 != *tab)
+            .count();
     }
     rows_by_workspace
 }
@@ -455,7 +474,7 @@ pub(crate) fn render_sidebar_tree(
     let mut blocked = 0;
     for agent in snapshot.agents.iter().filter(|agent| running(agent)) {
         blocked += usize::from(agent.agent_status == AgentStatus::Blocked);
-        if state.orcha_ui.process_expanded && total_running < MAX_TRAINS {
+        if !state.orcha_ui.process_folded && total_running < MAX_TRAINS {
             let project = snapshot
                 .workspaces
                 .iter()
@@ -468,7 +487,7 @@ pub(crate) fn render_sidebar_tree(
     }
     let visible_trains = total_running.min(MAX_TRAINS);
     // An idle sidebar needs only one quiet footer row.
-    let process_height = if visible_trains == 0 || !state.orcha_ui.process_expanded {
+    let process_height = if visible_trains == 0 || state.orcha_ui.process_folded {
         1
     } else {
         (4 + visible_trains as u16 * TRAIN_ROWS).min(area.height.saturating_sub(10))
@@ -574,7 +593,8 @@ pub(crate) fn render_sidebar_tree(
                 1
             } else {
                 let branch = workspace.focused && workspace.branch.is_some();
-                1u16.saturating_add(u16::from(branch))
+                // The last row stays blank to separate the next project.
+                2u16.saturating_add(u16::from(branch))
                     .saturating_add(u16::try_from(project.rows.len()).unwrap_or(u16::MAX))
             }
         })
@@ -618,9 +638,14 @@ pub(crate) fn render_sidebar_tree(
         if y.saturating_add(height) > body.bottom() {
             break;
         }
+        let content = if *expanded {
+            height.saturating_sub(1).max(1)
+        } else {
+            height
+        };
         render_project(
             buffer,
-            Rect::new(x, y, row_width, height),
+            Rect::new(x, y, row_width, content),
             workspace,
             project,
             *expanded,
@@ -650,7 +675,15 @@ pub(crate) fn render_sidebar_tree(
     }
 }
 
-/// Flat project row with an optional branch and indented, clickable panes.
+fn tab_number_width(tab: usize) -> u16 {
+    if tab == usize::MAX {
+        1
+    } else {
+        u16::try_from(tab.to_string().len()).unwrap_or(1)
+    }
+}
+
+/// Project row with an optional branch and its panes as a tree grouped by tab.
 #[allow(clippy::too_many_arguments)] // Render inputs are independent view facts.
 fn render_project(
     buffer: &mut Buffer,
@@ -781,9 +814,52 @@ fn render_project(
             y += 1;
         }
     }
-    for project_row in &project.rows {
+    // Tab numbers only help when there is more than one tab.
+    let number_width = if project.tabs > 1 {
+        project
+            .rows
+            .iter()
+            .map(|(tab, _)| tab_number_width(*tab))
+            .max()
+            .unwrap_or(1)
+            + 1
+    } else {
+        0
+    };
+    let last_tab = project.rows.last().map(|(tab, _)| *tab);
+    let guide_x = rect.x + 2;
+    let content_x = guide_x + 2 + number_width;
+    let content_width = right.saturating_sub(content_x);
+    for (index, (tab, project_row)) in project.rows.iter().enumerate() {
         if y >= rect.bottom() {
             break;
+        }
+        let first_in_tab = index == 0 || project.rows[index - 1].0 != *tab;
+        let in_last_tab = Some(*tab) == last_tab;
+        let guide = match (first_in_tab, in_last_tab) {
+            (true, true) => "└",
+            (true, false) => "├",
+            (false, true) => " ",
+            (false, false) => "│",
+        };
+        put_text(
+            buffer,
+            guide_x,
+            y,
+            1,
+            guide,
+            Style::default().fg(t.muted).bg(fill),
+        );
+        if number_width > 0 && first_in_tab && *tab != usize::MAX {
+            let number = tab.to_string();
+            put_text(
+                buffer,
+                guide_x + 2,
+                y,
+                number_width,
+                &number,
+                Style::default().fg(t.muted).bg(fill),
+            );
         }
         let (focused, pane_id, name, task, status, logo, color) = match project_row {
             ProjectRow::Agent(agent) => (
@@ -809,7 +885,7 @@ fn render_project(
                 t.muted,
             ),
         };
-        let row = Rect::new(name_x, y, available, 1);
+        let row = Rect::new(content_x, y, content_width, 1);
         let row_bg = if focused { t.frame } else { fill };
         buffer.set_style(row, Style::default().bg(row_bg));
         let logo_width = display_width(logo);
@@ -836,18 +912,22 @@ fn render_project(
         let note_width = display_width(note);
         let text_width = right.saturating_sub(text_x + note_width + u16::from(!note.is_empty()));
         let name_width = display_width(&name).min(text_width);
+        let name_style = Style::default().fg(t.ink).bg(row_bg);
         put_text(
             buffer,
             text_x,
             y,
             name_width,
             &brutal::clip(&name, usize::from(name_width)),
-            Style::default()
-                .fg(if active || focused { t.ink } else { t.muted })
-                .bg(row_bg),
+            if active || focused {
+                name_style.add_modifier(Modifier::BOLD)
+            } else {
+                name_style
+            },
         );
-        let task_x = text_x + name_width + 1;
-        let task_width = text_width.saturating_sub(name_width + 1);
+        // Two spaces keep the agent's name apart from its task.
+        let task_x = text_x + name_width + 2;
+        let task_width = text_width.saturating_sub(name_width + 2);
         put_text(
             buffer,
             task_x,

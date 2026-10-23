@@ -47,6 +47,80 @@ pub(crate) enum OrchaPopup {
     },
     /// The first-run setup (see `orcha_welcome`).
     Welcome(super::orcha_welcome::Welcome),
+    /// Ctrl+click on a file whose type has no saved app: choose one, and
+    /// keep it for the extension when `remember` is on.
+    OpenWith {
+        selected: usize,
+        path: String,
+        line: u32,
+        /// Lowercase extension; empty when the choice can't be kept.
+        extension: String,
+        choices: Vec<OpenChoice>,
+        remember: bool,
+    },
+}
+
+/// Where a clicked file opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum OpenChoice {
+    /// The app the system registered for the type (viewer, browser, ...).
+    System,
+    /// The folder holding the file, in the file manager.
+    Reveal,
+    /// An editor: `command` opens it (`{path}`), empty for the first found.
+    Editor { name: String, command: String },
+}
+
+impl OpenChoice {
+    /// The value kept in `[orcha.open_with]`.
+    pub(crate) fn config_value(&self) -> String {
+        match self {
+            Self::System => "system".to_owned(),
+            Self::Reveal => "folder".to_owned(),
+            Self::Editor { command, .. } if command.is_empty() => "editor".to_owned(),
+            Self::Editor { command, .. } => format!("editor:{command}"),
+        }
+    }
+
+    pub(crate) fn from_config_value(value: &str) -> Option<Self> {
+        match value {
+            "system" => Some(Self::System),
+            "folder" => Some(Self::Reveal),
+            "editor" => Some(Self::Editor {
+                name: String::new(),
+                command: String::new(),
+            }),
+            other => other.strip_prefix("editor:").map(|command| Self::Editor {
+                name: String::new(),
+                command: command.to_owned(),
+            }),
+        }
+    }
+
+    fn title(&self) -> String {
+        match self {
+            Self::System => "Default app".to_owned(),
+            Self::Reveal => "Show in folder".to_owned(),
+            Self::Editor { name, command } if command.is_empty() || name.is_empty() => {
+                "Editor".to_owned()
+            }
+            Self::Editor { name, .. } => name.clone(),
+        }
+    }
+
+    fn detail(&self, extension: &str) -> String {
+        match self {
+            Self::System if extension.is_empty() => {
+                "the app this computer uses for the file".to_owned()
+            }
+            Self::System => format!("the app this computer uses for .{extension} files"),
+            Self::Reveal => "open the folder and pick the file yourself".to_owned(),
+            Self::Editor { command, .. } if command.is_empty() => {
+                "your code editor, at the line the agent printed".to_owned()
+            }
+            Self::Editor { .. } => "open the file in this editor".to_owned(),
+        }
+    }
 }
 
 /// Click targets of the open popup.
@@ -1142,6 +1216,109 @@ fn render_import(
     Some(())
 }
 
+/// OPEN WITH: the suggested app first, then the other choices; a check
+/// under the list keeps the choice for the extension.
+#[allow(clippy::too_many_arguments)] // Render inputs are independent view facts.
+fn render_open_with(
+    buffer: &mut Buffer,
+    selected: usize,
+    path: &str,
+    extension: &str,
+    choices: &[OpenChoice],
+    remember: bool,
+    t: &Brutal,
+    hits: &mut PopupHits,
+) -> Option<()> {
+    let name = std::path::Path::new(path).file_name().map_or_else(
+        || path.to_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let frame = popup_frame(
+        buffer,
+        72,
+        rows_height(choices.len()) + 2,
+        "OPEN WITH",
+        &name,
+        &[("↵", "open"), ("↑↓", "move"), ("space", "remember")],
+        "esc close",
+        t,
+        hits,
+    )?;
+    let mut y = frame.body.y;
+    for (index, choice) in choices.iter().enumerate() {
+        if y + ROW > frame.body.bottom().saturating_sub(1) {
+            break;
+        }
+        let rect = Rect::new(frame.body.x, y, frame.body.width, ROW);
+        let fill = row_box(buffer, rect, index == 0, index == selected, t);
+        let mut title = choice.title();
+        if index == 0 {
+            title.push_str("  · suggested");
+        }
+        put_text(
+            buffer,
+            rect.x + 2,
+            y,
+            rect.width.saturating_sub(14),
+            &title,
+            Style::default()
+                .fg(t.ink)
+                .bg(fill)
+                .add_modifier(Modifier::BOLD),
+        );
+        put_text(
+            buffer,
+            rect.x + 2,
+            y + 1,
+            rect.width.saturating_sub(14),
+            &choice.detail(extension),
+            Style::default().fg(t.muted).bg(fill),
+        );
+        let action = button(
+            buffer,
+            rect.right() - 1,
+            y,
+            "OPEN",
+            if index == selected {
+                ButtonKind::Primary
+            } else {
+                ButtonKind::Plain
+            },
+            fill,
+            t,
+        );
+        hits.actions.push((action, index));
+        hits.rows.push((rect, index));
+        y += ROW + 1;
+    }
+    if !extension.is_empty() {
+        let y = frame.body.bottom().saturating_sub(1);
+        let check = brutal::chip(
+            buffer,
+            frame.body.x + 2,
+            y,
+            5,
+            if remember { "✓" } else { " " },
+            t.chip_text,
+            if remember { t.green } else { t.frame },
+        );
+        let label = format!("always open .{extension} files this way");
+        put_text(
+            buffer,
+            frame.body.x + 3 + check,
+            y,
+            display_width(&label),
+            &label,
+            Style::default().fg(t.ink).bg(t.bg),
+        );
+        hits.actions.push((
+            Rect::new(frame.body.x + 2, y, check + 1 + display_width(&label), 1),
+            choices.len(),
+        ));
+    }
+    Some(())
+}
+
 /// Draws the open popup over the composed frame.
 pub(super) fn render_popup(
     buffer: &mut Buffer,
@@ -1190,6 +1367,18 @@ pub(super) fn render_popup(
         }
         OrchaPopup::NewWorkspace { selected, project } => {
             let _ = render_new_workspace(buffer, *selected, project.as_deref(), &t, &mut hits);
+        }
+        OrchaPopup::OpenWith {
+            selected,
+            path,
+            extension,
+            choices,
+            remember,
+            ..
+        } => {
+            let _ = render_open_with(
+                buffer, *selected, path, extension, choices, *remember, &t, &mut hits,
+            );
         }
     }
     hits

@@ -367,6 +367,9 @@ pub struct OrchaConfig {
     pub pane_paper: bool,
     /// Under this % left of a plan window, offer to switch accounts. Default: 10.
     pub low_fuel_percent: u8,
+    /// How a Ctrl+clicked file opens, by lowercase extension (`[orcha.open_with]`):
+    /// "system", "folder", "editor" or "editor:<command>". Others ask.
+    pub open_with: std::collections::HashMap<String, String>,
 }
 
 impl Default for OrchaConfig {
@@ -388,6 +391,7 @@ impl Default for OrchaConfig {
             git_gui: String::new(),
             pane_paper: true,
             low_fuel_percent: 10,
+            open_with: std::collections::HashMap::new(),
         }
     }
 }
