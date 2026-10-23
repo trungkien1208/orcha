@@ -146,6 +146,7 @@ impl Brutal {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Edge {
     Heavy,
+    #[allow(dead_code)] // herdr's own boxes still name it
     Light,
 }
 

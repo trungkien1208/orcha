@@ -360,7 +360,7 @@ impl ClientShellState {
                 if let Some(pane) = &pane {
                     env.push(("HERDR_ACTIVE_PANE_ID", pane.clone()));
                 }
-                let signed_out = account.error.is_some() && account.windows.is_empty();
+                let signed_out = account.signed_out();
                 // another agent than the chat's: hand the chat off to it
                 let current_kind = self
                     .accounts
@@ -404,7 +404,7 @@ impl ClientShellState {
                 let account = self.accounts.data().and_then(|data| data.get(index)).cloned();
                 self.orcha_ui.popup = None;
                 match account {
-                    Some(account) if account.error.is_some() && account.windows.is_empty() => {
+                    Some(account) if account.signed_out() => {
                         run_detached(fill(&orcha.login_command, &[("id", &account.id)]), &[]);
                     }
                     Some(account) => run_detached(

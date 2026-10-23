@@ -37,12 +37,24 @@ pub(super) struct Account {
     pub error: Option<String>,
     #[serde(default)]
     pub windows: Vec<FuelWindow>,
+    /// There is a sign-in (its access token may have expired: the agent
+    /// refreshes it). Missing from older commands.
+    #[serde(default)]
+    pub signed_in: Option<bool>,
 }
 
 impl Account {
     /// Percent left of the window that runs out first.
     pub(super) fn lowest(&self) -> Option<u8> {
         self.windows.iter().map(|window| window.left).min()
+    }
+
+    /// Needs a sign-in before it can run anything.
+    pub(super) fn signed_out(&self) -> bool {
+        match self.signed_in {
+            Some(signed_in) => !signed_in,
+            None => self.error.is_some() && self.windows.is_empty(),
+        }
     }
 }
 

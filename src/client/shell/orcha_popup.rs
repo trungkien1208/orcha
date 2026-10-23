@@ -132,35 +132,25 @@ fn popup_frame(
     };
     rule(buffer, header_y + 1);
 
-    // footer: the keys on card, a heavy rule above
+    // footer: the keys as chips on card, a heavy rule above
     let footer_y = area.bottom() - 2;
     rule(buffer, footer_y - 1);
     buffer.set_style(Rect::new(inner_x, footer_y, inner_w, 1), Style::default().bg(t.card));
     let mut x = inner_x + 1;
     for (key, what) in keys {
-        let key_width = display_width(key);
+        let key_width = display_width(key) + 2;
         let what_width = display_width(what);
         if x + key_width + what_width + 3 > inner_x + inner_w {
             break;
         }
-        put_text(
-            buffer,
-            x,
-            footer_y,
-            key_width,
-            key,
-            Style::default()
-                .fg(t.ink)
-                .bg(t.card)
-                .add_modifier(Modifier::BOLD),
-        );
+        brutal::chip(buffer, x, footer_y, key_width, key, t.ink, t.frame);
         put_text(
             buffer,
             x + key_width + 1,
             footer_y,
             what_width,
             what,
-            Style::default().fg(t.ink).bg(t.card),
+            Style::default().fg(t.muted).bg(t.card),
         );
         x += key_width + what_width + 3;
     }
@@ -175,35 +165,37 @@ fn popup_frame(
     }
     Some(Frame {
         body: Rect::new(
-            inner_x + 1,
-            header_y + 3,
-            inner_w.saturating_sub(2),
-            footer_y.saturating_sub(header_y + 5),
+            inner_x,
+            header_y + 2,
+            inner_w,
+            footer_y.saturating_sub(header_y + 3),
         ),
     })
 }
 
-/// A body row: thin box; the current one heavy on card with a yellow edge;
-/// the keyboard cursor's border in pink.
-fn row_box(buffer: &mut Buffer, rect: Rect, current: bool, cursor: bool, t: &Brutal) -> ratatui::style::Color {
-    let line = if cursor { t.pink } else { t.line };
-    if current {
-        brutal::draw_box(buffer, rect, Edge::Heavy, line, t.card, t.bg);
-        for y in rect.y + 1..rect.bottom().saturating_sub(1) {
-            put_text(buffer, rect.x + 1, y, 1, "▌", Style::default().fg(t.yellow).bg(t.card));
-        }
-        t.card
-    } else {
-        brutal::draw_box(
+/// A body row: a flat band across the popup. The keyboard cursor's band
+/// is on card with a yellow bar on the left (like the selected project);
+/// rows after the first get a thin rule above them.
+fn row_box(buffer: &mut Buffer, rect: Rect, first: bool, cursor: bool, t: &Brutal) -> ratatui::style::Color {
+    let fill = if cursor { t.card } else { t.bg };
+    buffer.set_style(rect, Style::default().bg(fill));
+    if !first && rect.y > 0 {
+        let y = rect.y - 1;
+        put_text(
             buffer,
-            rect,
-            if cursor { Edge::Heavy } else { Edge::Light },
-            line,
-            t.bg,
-            t.bg,
+            rect.x + 1,
+            y,
+            rect.width.saturating_sub(2),
+            &"─".repeat(usize::from(rect.width.saturating_sub(2))),
+            Style::default().fg(t.empty).bg(t.bg),
         );
-        t.bg
     }
+    if cursor {
+        for y in rect.y..rect.bottom() {
+            put_text(buffer, rect.x, y, 1, "▌", Style::default().fg(t.yellow).bg(fill));
+        }
+    }
+    fill
 }
 
 /// A button: the primary one raised green, the others outlined, a
@@ -229,7 +221,6 @@ fn button(
             .fg(t.ink)
             .bg(t.frame)
             .add_modifier(Modifier::BOLD),
-        ButtonKind::Muted => Style::default().fg(t.muted).bg(fill),
     };
     put_text(buffer, x, y, width, &text, style);
     if kind == ButtonKind::Primary {
@@ -242,7 +233,6 @@ fn button(
 enum ButtonKind {
     Primary,
     Plain,
-    Muted,
 }
 
 /// The account a switch should go to: most fuel among the others of the
@@ -265,6 +255,13 @@ pub(super) fn best_account(accounts: &[Account]) -> Option<usize> {
         .map(|(index, _)| index)
 }
 
+/// Rows are 2 lines with a thin rule between them.
+const ROW: u16 = 2;
+
+fn rows_height(rows: usize) -> u16 {
+    (rows.max(1) as u16) * (ROW + 1) - 1
+}
+
 fn render_accounts(
     buffer: &mut Buffer,
     selected: usize,
@@ -276,8 +273,6 @@ fn render_accounts(
     hits: &mut PopupHits,
 ) -> Option<()> {
     let accounts = accounts.unwrap_or(&[]);
-    let row_height = 4;
-    let body_height = (accounts.len().max(1) as u16) * (row_height + 1);
     let context = pane
         .and_then(|pane| snapshot.agents.iter().find(|agent| agent.pane_id == pane))
         .map(|agent| {
@@ -288,7 +283,7 @@ fn render_accounts(
                 .map(|workspace| workspace.label.clone())
                 .unwrap_or_default();
             format!(
-                "this chat: {} {} · {project}",
+                "{} {} · {project}",
                 brutal::agent_logo(agent.agent.as_deref(), config.icon_font),
                 brutal::agent_label(agent)
             )
@@ -306,11 +301,11 @@ fn render_accounts(
     };
     let frame = popup_frame(
         buffer,
-        84,
-        body_height,
+        88,
+        rows_height(accounts.len()),
         "CONTINUE ON",
         &context,
-        &[("↵", "continue"), ("⌥↵", "summary first / new tab"), ("esc", "not now")],
+        &[("↵", "continue"), ("alt ↵", "summary first"), ("esc", "not now")],
         "",
         t,
         hits,
@@ -318,9 +313,9 @@ fn render_accounts(
     if accounts.is_empty() {
         put_text(
             buffer,
-            frame.body.x,
+            frame.body.x + 2,
             frame.body.y,
-            frame.body.width,
+            frame.body.width.saturating_sub(4),
             "loading accounts…  (needs [orcha] accounts_command)",
             Style::default().fg(t.muted).bg(t.bg),
         );
@@ -333,30 +328,29 @@ fn render_accounts(
         .map(|account| account.kind.clone());
     let mut y = frame.body.y;
     for (index, account) in accounts.iter().enumerate() {
-        if y + row_height > frame.body.bottom() + 1 {
+        if y + ROW > frame.body.bottom() {
             break;
         }
-        let rect = Rect::new(frame.body.x, y, frame.body.width, row_height);
+        let rect = Rect::new(frame.body.x, y, frame.body.width, ROW);
         // another agent: the chat is handed off; the same agent: it goes on as is
         let hand_off = current_kind.as_deref().is_some_and(|kind| kind != account.kind);
         let badge = if account.current {
-            Some(("IN USE", t.card, t.ink))
+            Some(("IN USE", t.ink, t.frame))
         } else if Some(index) == best {
             Some(("BEST", t.chip_text, t.green))
         } else if hand_off {
-            Some(("hand-off", t.ink, t.frame))
+            Some(("HAND-OFF", t.muted, t.bg))
         } else {
             None
         };
-        let signed_out = account.error.is_some() && account.windows.is_empty();
-        let (label, kind) = if account.current {
-            ("IN USE", ButtonKind::Muted)
-        } else if signed_out {
-            ("SIGN IN", ButtonKind::Plain)
-        } else if Some(index) == best {
-            ("CONTINUE ↵", ButtonKind::Primary)
+        let action = if account.current {
+            None
+        } else if account.signed_out() {
+            Some(("SIGN IN", ButtonKind::Plain))
+        } else if index == selected {
+            Some(("CONTINUE ↵", ButtonKind::Primary))
         } else {
-            ("CONTINUE", ButtonKind::Plain)
+            Some(("CONTINUE", ButtonKind::Plain))
         };
         account_row(
             buffer,
@@ -364,28 +358,29 @@ fn render_accounts(
             account,
             index,
             AccountRow {
-                current: account.current,
+                first: index == 0,
                 cursor: index == selected,
                 badge,
-                action: (label, kind),
-                clickable: !account.current,
+                action,
             },
             config,
             t,
             hits,
         );
-        y += row_height + 1;
+        y += ROW + 1;
     }
     Some(())
 }
 
 struct AccountRow<'a> {
-    current: bool,
+    first: bool,
     cursor: bool,
     badge: Option<(&'a str, ratatui::style::Color, ratatui::style::Color)>,
-    action: (&'a str, ButtonKind),
-    clickable: bool,
+    action: Option<(&'a str, ButtonKind)>,
 }
+
+/// Fuel columns: "WEEK " + 10 marks a cell apart + " 100%".
+const GAUGE_COLS: u16 = 5 + 19 + 5;
 
 /// One account: logo chip, name and badge, action button; email and the
 /// fuel gauges under them.
@@ -401,16 +396,17 @@ fn account_row(
     hits: &mut PopupHits,
 ) {
     let y = rect.y;
-    let fill = row_box(buffer, rect, row.current, row.cursor, t);
-    let x = rect.x + 3;
+    let fill = row_box(buffer, rect, row.first, row.cursor, t);
+    let x = rect.x + 2;
+    let right = rect.right().saturating_sub(2);
     let logo = brutal::agent_logo(Some(&account.kind), config.icon_font);
-    let chip_width = brutal::chip(buffer, x, y + 1, 4, logo, t.chip_text, t.agent(Some(&account.kind)));
+    let chip_width = brutal::chip(buffer, x, y, 4, logo, t.chip_text, t.agent(Some(&account.kind)));
     let name_x = x + chip_width + 1;
     let name_width = display_width(&account.label).min(30);
     put_text(
         buffer,
         name_x,
-        y + 1,
+        y,
         name_width,
         &account.label,
         Style::default()
@@ -419,44 +415,56 @@ fn account_row(
             .add_modifier(Modifier::BOLD),
     );
     if let Some((text, fg, bg)) = row.badge {
-        brutal::chip(buffer, name_x + name_width + 1, y + 1, 12, text, fg, bg);
+        brutal::chip(buffer, name_x + name_width + 1, y, 12, text, fg, bg);
     }
-    let (label, kind) = row.action;
-    let action = button(buffer, rect.right() - 1, y + 1, label, kind, fill, t);
-    if row.clickable {
+    if let Some((label, kind)) = row.action {
+        let action = button(buffer, right + 1, y, label, kind, fill, t);
         hits.actions.push((action, index));
     }
-    let email = account
-        .email
-        .clone()
-        .or_else(|| account.error.clone())
-        .unwrap_or_default();
-    let gauges_width = account.windows.iter().take(2).count() as u16 * 22;
-    let email_width = rect.width.saturating_sub(gauges_width + 8);
+    // second line: email (or why there is no fuel), then the gauges
+    let shown = account.windows.iter().take(2).count() as u16;
+    let gauges_width = if shown == 0 { 4 } else { shown * GAUGE_COLS + (shown - 1) * 2 };
+    let note = match (&account.email, &account.error) {
+        (Some(email), _) => email.clone(),
+        (None, Some(error)) => error.clone(),
+        _ => String::new(),
+    };
+    let note_x = name_x;
+    let note_width = right.saturating_sub(note_x + gauges_width + 2);
     put_text(
         buffer,
-        x,
-        y + 2,
-        email_width,
-        &brutal::clip(&email, usize::from(email_width)),
+        note_x,
+        y + 1,
+        note_width,
+        &brutal::clip(&note, usize::from(note_width)),
         Style::default().fg(t.muted).bg(fill),
     );
-    let mut gx = rect.right().saturating_sub(gauges_width + 2);
+    if shown == 0 {
+        // signed in but no fuel numbers right now
+        put_right_text(
+            buffer,
+            Rect::new(rect.x, y + 1, right - rect.x, 1),
+            y + 1,
+            "—",
+            Style::default().fg(t.muted).bg(fill),
+        );
+    }
+    let mut gx = right.saturating_sub(gauges_width);
     for window in account.windows.iter().take(2) {
-        put_text(buffer, gx, y + 2, 5, &window.label, Style::default().fg(t.muted).bg(fill));
-        super::git_panel::draw_gauge(buffer, gx + 5, y + 2, window.left, fill, t);
+        put_text(buffer, gx, y + 1, 5, &window.label, Style::default().fg(t.muted).bg(fill));
+        super::git_panel::draw_gauge(buffer, gx + 5, y + 1, window.left, fill, t);
         put_text(
             buffer,
-            gx + 16,
-            y + 2,
+            gx + 24,
+            y + 1,
             5,
-            &format!("{:>3}%", window.left),
+            &format!("{:>4}%", window.left),
             Style::default()
                 .fg(if window.left < 20 { t.red } else { t.ink })
                 .bg(fill)
                 .add_modifier(Modifier::BOLD),
         );
-        gx += 22;
+        gx += GAUGE_COLS + 2;
     }
     hits.rows.push((rect, index));
 }
@@ -473,12 +481,10 @@ fn render_new_agent(
     hits: &mut PopupHits,
 ) -> Option<()> {
     let accounts = accounts.unwrap_or(&[]);
-    let row_height = 4;
-    let rows = accounts.len() as u16 + 1;
     let frame = popup_frame(
         buffer,
-        84,
-        rows * (row_height + 1),
+        88,
+        rows_height(accounts.len() + 1),
         "NEW AGENT",
         &format!("new tab in {project}"),
         &[("↵", "start"), ("↑↓", "choose"), ("P", "new project")],
@@ -489,17 +495,16 @@ fn render_new_agent(
     let most = accounts
         .iter()
         .enumerate()
-        .filter(|(_, account)| account.error.is_none() || !account.windows.is_empty())
+        .filter(|(_, account)| !account.signed_out())
         .max_by_key(|(_, account)| account.lowest().unwrap_or(0))
         .map(|(index, _)| index);
     let mut y = frame.body.y;
     for (index, account) in accounts.iter().enumerate() {
-        if y + row_height > frame.body.bottom() + 1 {
+        if y + ROW > frame.body.bottom() {
             break;
         }
-        let rect = Rect::new(frame.body.x, y, frame.body.width, row_height);
-        let signed_out = account.error.is_some() && account.windows.is_empty();
-        let action = if signed_out {
+        let rect = Rect::new(frame.body.x, y, frame.body.width, ROW);
+        let action = if account.signed_out() {
             ("SIGN IN", ButtonKind::Plain)
         } else if index == selected {
             ("START ↵", ButtonKind::Primary)
@@ -513,38 +518,45 @@ fn render_new_agent(
             account,
             index,
             AccountRow {
-                current: false,
+                first: index == 0,
                 cursor: index == selected,
                 badge,
-                action,
-                clickable: true,
+                action: Some(action),
             },
             config,
             t,
             hits,
         );
-        y += row_height + 1;
+        y += ROW + 1;
     }
     // a plain shell, last
     let index = accounts.len();
-    if y + 3 <= frame.body.bottom() + 1 {
-        let rect = Rect::new(frame.body.x, y, frame.body.width, 3);
-        let fill = row_box(buffer, rect, false, index == selected, t);
-        let chip_width = brutal::chip(buffer, rect.x + 3, y + 1, 4, "▶", t.chip_text, t.rail_ahead);
+    if y + ROW <= frame.body.bottom() {
+        let rect = Rect::new(frame.body.x, y, frame.body.width, ROW);
+        let fill = row_box(buffer, rect, index == 0, index == selected, t);
+        let chip_width = brutal::chip(buffer, rect.x + 2, y, 4, "▶", t.chip_text, t.rail_ahead);
         put_text(
             buffer,
-            rect.x + 4 + chip_width,
-            y + 1,
+            rect.x + 3 + chip_width,
+            y,
             20,
             "Shell",
             Style::default().fg(t.ink).bg(fill).add_modifier(Modifier::BOLD),
+        );
+        put_text(
+            buffer,
+            rect.x + 3 + chip_width,
+            y + 1,
+            30,
+            "no agent, just a terminal",
+            Style::default().fg(t.muted).bg(fill),
         );
         let kind = if index == selected {
             ButtonKind::Primary
         } else {
             ButtonKind::Plain
         };
-        let action = button(buffer, rect.right() - 1, y + 1, "OPEN", kind, fill, t);
+        let action = button(buffer, rect.right() - 1, y, "OPEN", kind, fill, t);
         hits.actions.push((action, index));
         hits.rows.push((rect, index));
     }
@@ -575,7 +587,7 @@ fn render_handoff(
     let frame = popup_frame(
         buffer,
         72,
-        HANDOFF_TARGETS.len() as u16 * 4,
+        rows_height(HANDOFF_TARGETS.len()),
         "HAND OFF",
         &context,
         &[("↵", "continue there"), ("↑↓", "choose")],
@@ -585,17 +597,17 @@ fn render_handoff(
     )?;
     let mut y = frame.body.y;
     for (index, (kind, mode, label)) in HANDOFF_TARGETS.iter().enumerate() {
-        if y + 3 > frame.body.bottom() + 1 {
+        if y + ROW > frame.body.bottom() {
             break;
         }
-        let rect = Rect::new(frame.body.x, y, frame.body.width, 3);
+        let rect = Rect::new(frame.body.x, y, frame.body.width, ROW);
         let same = *kind == from;
-        let fill = row_box(buffer, rect, false, index == selected, t);
+        let fill = row_box(buffer, rect, index == 0, index == selected, t);
         let x = rect.x + 2;
         let chip_width = brutal::chip(
             buffer,
             x,
-            y + 1,
+            y,
             4,
             brutal::agent_logo(Some(kind), config.icon_font),
             t.chip_text,
@@ -604,13 +616,25 @@ fn render_handoff(
         put_text(
             buffer,
             x + chip_width + 1,
-            y + 1,
-            rect.width.saturating_sub(chip_width + 16),
+            y,
+            rect.width.saturating_sub(chip_width + 18),
             label,
             Style::default()
                 .fg(if same { t.muted } else { t.ink })
                 .bg(fill)
                 .add_modifier(Modifier::BOLD),
+        );
+        put_text(
+            buffer,
+            x + chip_width + 1,
+            y + 1,
+            rect.width.saturating_sub(chip_width + 18),
+            if *mode == "summary" {
+                "a short summary opens the new chat"
+            } else {
+                "the whole conversation is replayed"
+            },
+            Style::default().fg(t.muted).bg(fill),
         );
         let kind_button = if index == selected {
             ButtonKind::Primary
@@ -620,15 +644,15 @@ fn render_handoff(
         let action = button(
             buffer,
             rect.right() - 1,
-            y + 1,
-            if *mode == "summary" { "SUMMARY ↵" } else { "FULL ↵" },
+            y,
+            if index == selected { "CONTINUE ↵" } else { "CONTINUE" },
             kind_button,
             fill,
             t,
         );
         hits.actions.push((action, index));
         hits.rows.push((rect, index));
-        y += 4;
+        y += ROW + 1;
     }
     Some(())
 }

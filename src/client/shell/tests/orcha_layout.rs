@@ -157,7 +157,7 @@ fn accounts_popup_lists_fuel() {
             email: Some("me@example.com".into()),
             current: true,
             error: None,
-            windows: vec![window("5H", 8), window("WEEK", 18)],
+            windows: vec![window("5H", 8), window("WEEK", 18)], signed_in: None
         },
         Account {
             id: "personal".into(),
@@ -166,7 +166,7 @@ fn accounts_popup_lists_fuel() {
             email: Some("you@example.com".into()),
             current: false,
             error: None,
-            windows: vec![window("5H", 70), window("WEEK", 64)],
+            windows: vec![window("5H", 70), window("WEEK", 64)], signed_in: None
         },
     ]));
     state.open_accounts_overlay();
@@ -385,15 +385,15 @@ fn orcha_preview() {
     state.accounts.set_for_test(Some(vec![
         Account { id: "work".into(), kind: "claude".into(), label: "Claude · company".into(),
             email: Some("me@example.com".into()), current: true, error: None,
-            windows: vec![window("5H", 60, "1h 12m"), window("WEEK", 18, "Mon")] },
+            windows: vec![window("5H", 60, "1h 12m"), window("WEEK", 18, "Mon")], signed_in: None },
         Account { id: "personal".into(), kind: "claude".into(), label: "Claude · personal".into(),
             email: Some("you@example.com".into()), current: false, error: None,
-            windows: vec![window("5H", 70, "3h 40m"), window("WEEK", 64, "Thu")] },
+            windows: vec![window("5H", 70, "3h 40m"), window("WEEK", 64, "Thu")], signed_in: None },
         Account { id: "codex".into(), kind: "codex".into(), label: "Codex".into(),
             email: Some("you@example.com".into()), current: false, error: None,
-            windows: vec![window("5H", 90, "4h 05m"), window("WEEK", 52, "Sun")] },
+            windows: vec![window("5H", 90, "4h 05m"), window("WEEK", 52, "Sun")], signed_in: None },
         Account { id: "cursor".into(), kind: "cursor".into(), label: "Cursor".into(),
-            email: None, current: false, error: Some("not signed in".into()), windows: vec![] },
+            email: None, current: false, error: Some("not signed in".into()), windows: vec![], signed_in: None },
     ]));
     if std::env::var("ORCHA_PREVIEW_POPUP").is_ok() {
         state.open_accounts_overlay();
