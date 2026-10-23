@@ -677,7 +677,11 @@ fn orcha_preview() {
     ];
     // the explain chat runs in the project's second tab
     projected.agents[1].tab_id = "tab_2".into();
-    for pane in projected.panes.iter_mut().filter(|pane| pane.pane_id == "pane_2") {
+    for pane in projected
+        .panes
+        .iter_mut()
+        .filter(|pane| pane.pane_id == "pane_2")
+    {
         pane.tab_id = "tab_2".into();
     }
     projected.tab_bar_right = vec![
@@ -763,6 +767,25 @@ fn orcha_preview() {
     ]));
     if std::env::var("ORCHA_PREVIEW_POPUP").is_ok() {
         state.open_accounts_overlay();
+    }
+    let demo_release = || crate::orcha_app::Release {
+        version: "0.1.6".into(),
+        notes: vec![
+            "Switching Claude accounts works in the running chat".into(),
+            "Choose the app for each file type".into(),
+            "The sidebar shows tabs as a tree".into(),
+        ],
+    };
+    if std::env::var("ORCHA_PREVIEW_UPDATE").is_ok() {
+        state.orcha_ui.popup = Some(crate::client::shell::orcha_popup::OrchaPopup::Update {
+            selected: 0,
+            release: demo_release(),
+        });
+    }
+    if std::env::var("ORCHA_PREVIEW_WHATS_NEW").is_ok() {
+        state.orcha_ui.popup = Some(crate::client::shell::orcha_popup::OrchaPopup::WhatsNew {
+            release: demo_release(),
+        });
     }
     if std::env::var("ORCHA_PREVIEW_OPEN_WITH").is_ok() {
         use crate::client::shell::orcha_popup::{OpenChoice, OrchaPopup};
@@ -1012,4 +1035,70 @@ fn open_with_popup_suggests_an_app_and_the_check_flips_remember() {
             ..
         })
     ));
+}
+
+#[test]
+fn update_popup_lists_highlights_and_later_keeps_the_button() {
+    use crate::client::shell::orcha_popup::OrchaPopup;
+    let mut state = orcha_state(true, true);
+    state.orcha_ui.update_available = Some("0.1.6".into());
+    state.orcha_ui.popup = Some(OrchaPopup::Update {
+        selected: 0,
+        release: crate::orcha_app::Release {
+            version: "0.1.6".into(),
+            notes: vec!["Faster sidebar".into(), "Open files your way".into()],
+        },
+    });
+    let frame = state.compose(140, 40).expect("update popup");
+    let text = frame_rows(&frame).join("\n");
+    assert!(text.contains("orcha 0.1.6 is out"));
+    assert!(text.contains("• Faster sidebar"));
+    assert!(text.contains("Skip 0.1.6"));
+    assert_eq!(state.hits.orcha.popup.actions.len(), 3);
+    let (later, index) = state.hits.orcha.popup.actions[1];
+    assert_eq!(index, 1);
+    let mut outcome = ClientShellInput::default();
+    state.handle_orcha_popup_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: later.x,
+            row: later.y,
+            modifiers: KeyModifiers::empty(),
+        },
+        &mut outcome,
+    );
+    assert!(state.orcha_ui.popup.is_none(), "later closes the popup");
+    assert_eq!(
+        state.orcha_ui.update_available.as_deref(),
+        Some("0.1.6"),
+        "the header button stays"
+    );
+}
+
+#[test]
+fn whats_new_shows_once_and_got_it_closes() {
+    use crate::client::shell::orcha_popup::OrchaPopup;
+    let mut state = orcha_state(true, true);
+    state.orcha_ui.popup = Some(OrchaPopup::WhatsNew {
+        release: crate::orcha_app::Release {
+            version: "0.1.6".into(),
+            notes: vec!["Open files your way".into()],
+        },
+    });
+    let frame = state.compose(140, 40).expect("what's new");
+    let text = frame_rows(&frame).join("\n");
+    assert!(text.contains("WHAT'S NEW"));
+    assert!(text.contains("• Open files your way"));
+    let (got_it, _) = state.hits.orcha.popup.actions[0];
+    let mut outcome = ClientShellInput::default();
+    state.handle_orcha_popup_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: got_it.x,
+            row: got_it.y,
+            modifiers: KeyModifiers::empty(),
+        },
+        &mut outcome,
+    );
+    assert!(state.orcha_ui.popup.is_none());
 }

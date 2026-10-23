@@ -47,6 +47,13 @@ pub(crate) enum OrchaPopup {
     },
     /// The first-run setup (see `orcha_welcome`).
     Welcome(super::orcha_welcome::Welcome),
+    /// A newer orcha is out: update now, later, or skip that version.
+    Update {
+        selected: usize,
+        release: crate::orcha_app::Release,
+    },
+    /// What changed in this build, shown once after an update.
+    WhatsNew { release: crate::orcha_app::Release },
     /// Ctrl+click on a file whose type has no saved app: choose one, and
     /// keep it for the extension when `remember` is on.
     OpenWith {
@@ -1216,6 +1223,152 @@ fn render_import(
     Some(())
 }
 
+/// The highlights of a release, one bullet per line, from `y`.
+fn render_notes(buffer: &mut Buffer, body: Rect, y: u16, notes: &[String], t: &Brutal) -> u16 {
+    let mut y = y;
+    for note in notes {
+        if y >= body.bottom() {
+            break;
+        }
+        let width = body.width.saturating_sub(6);
+        put_text(
+            buffer,
+            body.x + 2,
+            y,
+            2,
+            "•",
+            Style::default().fg(t.green).bg(t.bg),
+        );
+        put_text(
+            buffer,
+            body.x + 4,
+            y,
+            width,
+            &brutal::clip(note, usize::from(width)),
+            Style::default().fg(t.ink).bg(t.bg),
+        );
+        y += 1;
+    }
+    y
+}
+
+/// UPDATE: what the new version brings, then update now, later or skip it.
+fn render_update(
+    buffer: &mut Buffer,
+    selected: usize,
+    release: &crate::orcha_app::Release,
+    t: &Brutal,
+    hits: &mut PopupHits,
+) -> Option<()> {
+    let notes = u16::try_from(release.notes.len()).unwrap_or(0);
+    let gap = u16::from(notes > 0);
+    let frame = popup_frame(
+        buffer,
+        72,
+        notes + gap + rows_height(3),
+        "UPDATE",
+        &format!("orcha {} is out", release.version),
+        &[("↵", "choose"), ("↑↓", "move")],
+        "esc later",
+        t,
+        hits,
+    )?;
+    let mut y = render_notes(buffer, frame.body, frame.body.y, &release.notes, t) + gap;
+    let options = [
+        (
+            "Update now".to_owned(),
+            "installs in the background; your agents keep running".to_owned(),
+            "UPDATE",
+        ),
+        (
+            "Later".to_owned(),
+            "the green button in the header stays until you update".to_owned(),
+            "LATER",
+        ),
+        (
+            format!("Skip {}", release.version),
+            "no reminder until a newer version".to_owned(),
+            "SKIP",
+        ),
+    ];
+    for (index, (title, detail, label)) in options.iter().enumerate() {
+        if y + ROW > frame.body.bottom() {
+            break;
+        }
+        let rect = Rect::new(frame.body.x, y, frame.body.width, ROW);
+        let fill = row_box(buffer, rect, index == 0, index == selected, t);
+        put_text(
+            buffer,
+            rect.x + 2,
+            y,
+            rect.width.saturating_sub(16),
+            title,
+            Style::default()
+                .fg(t.ink)
+                .bg(fill)
+                .add_modifier(Modifier::BOLD),
+        );
+        put_text(
+            buffer,
+            rect.x + 2,
+            y + 1,
+            rect.width.saturating_sub(16),
+            detail,
+            Style::default().fg(t.muted).bg(fill),
+        );
+        let action = button(
+            buffer,
+            rect.right() - 1,
+            y,
+            label,
+            if index == selected {
+                ButtonKind::Primary
+            } else {
+                ButtonKind::Plain
+            },
+            fill,
+            t,
+        );
+        hits.actions.push((action, index));
+        hits.rows.push((rect, index));
+        y += ROW + 1;
+    }
+    Some(())
+}
+
+/// WHAT'S NEW: the highlights of the version just installed, once.
+fn render_whats_new(
+    buffer: &mut Buffer,
+    release: &crate::orcha_app::Release,
+    t: &Brutal,
+    hits: &mut PopupHits,
+) -> Option<()> {
+    let notes = u16::try_from(release.notes.len()).unwrap_or(0);
+    let frame = popup_frame(
+        buffer,
+        64,
+        notes + 2,
+        "WHAT'S NEW",
+        &format!("orcha {}", release.version),
+        &[("↵", "got it")],
+        "",
+        t,
+        hits,
+    )?;
+    render_notes(buffer, frame.body, frame.body.y, &release.notes, t);
+    let action = button(
+        buffer,
+        frame.body.right() - 1,
+        frame.body.bottom().saturating_sub(1),
+        "GOT IT ↵",
+        ButtonKind::Primary,
+        t.bg,
+        t,
+    );
+    hits.actions.push((action, 0));
+    Some(())
+}
+
 /// OPEN WITH: the suggested app first, then the other choices; a check
 /// under the list keeps the choice for the extension.
 #[allow(clippy::too_many_arguments)] // Render inputs are independent view facts.
@@ -1367,6 +1520,12 @@ pub(super) fn render_popup(
         }
         OrchaPopup::NewWorkspace { selected, project } => {
             let _ = render_new_workspace(buffer, *selected, project.as_deref(), &t, &mut hits);
+        }
+        OrchaPopup::Update { selected, release } => {
+            let _ = render_update(buffer, *selected, release, &t, &mut hits);
+        }
+        OrchaPopup::WhatsNew { release } => {
+            let _ = render_whats_new(buffer, release, &t, &mut hits);
         }
         OrchaPopup::OpenWith {
             selected,

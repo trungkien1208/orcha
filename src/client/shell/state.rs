@@ -141,7 +141,7 @@ pub(crate) struct OrchaUiState {
     pub(super) import_scan:
         Option<std::sync::mpsc::Receiver<Vec<crate::orcha_import::ImportSource>>>,
     /// A newer orcha release (being looked up, then its version).
-    pub(super) update_check: Option<std::sync::mpsc::Receiver<Option<String>>>,
+    pub(super) update_check: Option<std::sync::mpsc::Receiver<Option<crate::orcha_app::Release>>>,
     pub(super) update_available: Option<String>,
     /// `orcha update` running behind the UI; true when it worked.
     pub(super) update_run: Option<std::sync::mpsc::Receiver<bool>>,

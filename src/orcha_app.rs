@@ -17,8 +17,16 @@ const INSTALL_COMMAND_UNIX: &str =
     "curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.sh | sh";
 /// Installs or updates the Windows package (see install.ps1).
 const INSTALL_COMMAND_WINDOWS: &str = "Invoke-Expression ((Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.ps1').Content)";
-/// The newest release seen, checked at most once a day.
-const RELEASE_CACHE: &str = ".latest-release";
+/// The newest release seen and its notes, checked at most once a day.
+const RELEASE_CACHE: &str = ".latest-release.json";
+/// A release the user chose to skip: no reminder until a newer one.
+const SKIPPED_RELEASE: &str = ".skipped-release";
+/// The release the update popup already offered.
+const OFFERED_RELEASE: &str = ".offered-release";
+/// The version whose "what's new" was shown.
+const SEEN_VERSION: &str = ".seen-version";
+/// At most this many highlights from a release's notes.
+const MAX_NOTES: usize = 4;
 const IMPORT_MARKER: &str = ".imported-from-herdr";
 /// orcha-config's own commands, handed to its CLI.
 const CONFIG_TOOL_COMMANDS: [&str; 6] = ["setup", "menu", "edit", "logos", "plugin", "apply"];
@@ -108,6 +116,23 @@ pub(crate) fn maybe_run_config_tool(args: &[String]) -> Option<i32> {
     Some(status.ok().and_then(|status| status.code()).unwrap_or(1))
 }
 
+#[cfg(test)]
+mod release_tests {
+    #[test]
+    fn highlights_take_bold_leads_and_first_sentences() {
+        let body = "**Install**\n\n```sh\ncurl x | sh\n```\n\n**New**\n- **Open files your way**: Ctrl+click a folder.\n- Paths that did nothing now open. More words here.\n- See [the docs](https://example.com) for `config`\n- **Four**\n- **Five**\n";
+        assert_eq!(
+            super::release_highlights(body),
+            vec![
+                "Open files your way",
+                "Paths that did nothing now open",
+                "See the docs for config",
+                "Four",
+            ]
+        );
+    }
+}
+
 /// "orcha-0.1.3" / "0.1.3" → (0, 1, 3).
 fn version_parts(version: &str) -> Option<(u32, u32, u32)> {
     let mut parts = version
@@ -119,43 +144,187 @@ fn version_parts(version: &str) -> Option<(u32, u32, u32)> {
     Some((parts.next()??, parts.next()??, parts.next()??))
 }
 
-/// A release newer than this build, e.g. "0.1.3". Asks GitHub at most once
-/// a day (the answer is kept in the config folder). Blocking: call it off
-/// the input path.
-pub(crate) fn newer_release() -> Option<String> {
-    let cache = crate::config::config_dir().join(RELEASE_CACHE);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
-        .as_secs();
-    let cached = std::fs::read_to_string(&cache).ok().and_then(|text| {
-        let (at, tag) = text.trim().split_once(' ')?;
-        let at: u64 = at.parse().ok()?;
-        (now.saturating_sub(at) < 24 * 60 * 60).then(|| tag.to_owned())
-    });
-    let tag = match cached {
-        Some(tag) => tag,
-        None => {
-            let output = crate::noninteractive_process::curl_command()
-                .args([
-                    "-sfL",
-                    "--connect-timeout",
-                    "5",
-                    "--max-time",
-                    "10",
-                    RELEASES_API,
-                ])
-                .output()
-                .ok()
-                .filter(|output| output.status.success())?;
-            let release: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
-            let tag = release["tag_name"].as_str()?.to_owned();
-            let _ = std::fs::write(&cache, format!("{now} {tag}\n"));
-            tag
+/// An orcha release and the highlights of its notes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Release {
+    /// "0.1.3"
+    pub(crate) version: String,
+    pub(crate) notes: Vec<String>,
+}
+
+/// The highlights of release notes (markdown): the bullets, each cut to its
+/// bold lead or first sentence, links and emphasis removed.
+pub(crate) fn release_highlights(body: &str) -> Vec<String> {
+    let mut notes = Vec::new();
+    for line in body.lines() {
+        let Some(item) = line.trim().strip_prefix("- ") else {
+            continue;
+        };
+        let lead = match item
+            .strip_prefix("**")
+            .and_then(|rest| rest.split_once("**"))
+        {
+            Some((bold, _)) => bold.to_owned(),
+            None => item
+                .split_once(". ")
+                .map_or(item, |(sentence, _)| sentence)
+                .to_owned(),
+        };
+        let text = strip_markdown(&lead);
+        let text = text.trim().trim_end_matches(['.', ':']).trim();
+        if !text.is_empty() {
+            notes.push(text.to_owned());
         }
+        if notes.len() == MAX_NOTES {
+            break;
+        }
+    }
+    notes
+}
+
+/// `[text](url)` → text; `**`, `` ` `` and `_` emphasis dropped.
+fn strip_markdown(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(open) = rest.find('[') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        match after
+            .split_once("](")
+            .and_then(|(label, tail)| tail.split_once(')').map(|(_, tail)| (label, tail)))
+        {
+            Some((label, tail)) => {
+                out.push_str(label);
+                rest = tail;
+            }
+            None => {
+                out.push('[');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out.replace("**", "").replace('`', "")
+}
+
+fn now_secs() -> Option<u64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|elapsed| elapsed.as_secs())
+}
+
+/// The newest release (from the daily cache, else GitHub). Blocking.
+fn latest_release() -> Option<Release> {
+    let cache = crate::config::config_dir().join(RELEASE_CACHE);
+    let now = now_secs()?;
+    let parse = |value: &serde_json::Value| {
+        Some(Release {
+            version: value["version"].as_str()?.to_owned(),
+            notes: value["notes"]
+                .as_array()?
+                .iter()
+                .filter_map(|note| note.as_str().map(str::to_owned))
+                .collect(),
+        })
     };
-    (version_parts(&tag)? > version_parts(ORCHA_VERSION)?)
-        .then(|| tag.trim_start_matches("orcha-").to_owned())
+    let cached = std::fs::read(&cache)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    if let Some(cached) = cached.as_ref() {
+        let fresh = cached["at"]
+            .as_u64()
+            .is_some_and(|at| now.saturating_sub(at) < 24 * 60 * 60);
+        if fresh {
+            return parse(cached);
+        }
+    }
+    let output = crate::noninteractive_process::curl_command()
+        .args([
+            "-sfL",
+            "--connect-timeout",
+            "5",
+            "--max-time",
+            "10",
+            RELEASES_API,
+        ])
+        .output()
+        .ok()
+        .filter(|output| output.status.success());
+    let Some(output) = output else {
+        // offline: the last answer still holds
+        return cached.as_ref().and_then(parse);
+    };
+    let release: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let tag = release["tag_name"].as_str()?;
+    let found = Release {
+        version: tag.trim_start_matches("orcha-").to_owned(),
+        notes: release_highlights(release["body"].as_str().unwrap_or_default()),
+    };
+    let _ = std::fs::write(
+        &cache,
+        serde_json::json!({"at": now, "version": found.version, "notes": found.notes}).to_string(),
+    );
+    Some(found)
+}
+
+/// A release newer than this build that the user has not skipped. Asks
+/// GitHub at most once a day. Blocking: call it off the input path.
+pub(crate) fn newer_release() -> Option<Release> {
+    let release = latest_release()?;
+    let skipped = std::fs::read_to_string(crate::config::config_dir().join(SKIPPED_RELEASE))
+        .unwrap_or_default();
+    (version_parts(&release.version)? > version_parts(ORCHA_VERSION)?
+        && skipped.trim() != release.version)
+        .then_some(release)
+}
+
+/// True the first time a release is offered: the popup asks once per
+/// version, after that the header button is the reminder.
+pub(crate) fn first_offer(version: &str) -> bool {
+    let path = crate::config::config_dir().join(OFFERED_RELEASE);
+    let offered = std::fs::read_to_string(&path).unwrap_or_default();
+    if offered.trim() == version {
+        return false;
+    }
+    let _ = std::fs::write(&path, format!("{version}\n"));
+    true
+}
+
+/// No reminder for this release; a newer one asks again.
+pub(crate) fn skip_release(version: &str) {
+    let _ = std::fs::write(
+        crate::config::config_dir().join(SKIPPED_RELEASE),
+        format!("{version}\n"),
+    );
+}
+
+/// What changed in this build, once: after an update, the first start shows
+/// the release's highlights. A fresh install records the version silently.
+pub(crate) fn whats_new() -> Option<Release> {
+    let seen_path = crate::config::config_dir().join(SEEN_VERSION);
+    let seen = std::fs::read_to_string(&seen_path).ok();
+    if seen.as_deref().map(str::trim) == Some(ORCHA_VERSION) {
+        return None;
+    }
+    let _ = std::fs::write(&seen_path, format!("{ORCHA_VERSION}\n"));
+    // the release notes cached when the update was offered
+    let cache = crate::config::config_dir().join(RELEASE_CACHE);
+    let cached: serde_json::Value = serde_json::from_slice(&std::fs::read(cache).ok()?).ok()?;
+    (cached["version"].as_str()? == ORCHA_VERSION)
+        .then(|| Release {
+            version: ORCHA_VERSION.to_owned(),
+            notes: cached["notes"]
+                .as_array()
+                .map(|notes| {
+                    notes
+                        .iter()
+                        .filter_map(|note| note.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
+        .filter(|release| !release.notes.is_empty())
 }
 
 /// Runs the installer: the latest app and extras. `quiet` keeps its output

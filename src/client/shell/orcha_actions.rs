@@ -456,6 +456,8 @@ impl ClientShellState {
             }
             Some(super::orcha_popup::OrchaPopup::NewWorkspace { .. }) => 3,
             Some(super::orcha_popup::OrchaPopup::OpenWith { choices, .. }) => choices.len(),
+            Some(super::orcha_popup::OrchaPopup::Update { .. }) => 3,
+            Some(super::orcha_popup::OrchaPopup::WhatsNew { .. }) => 1,
             Some(super::orcha_popup::OrchaPopup::Welcome(_)) | None => 0,
         }
     }
@@ -469,8 +471,10 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::NewAgent { selected, .. }
                 | super::orcha_popup::OrchaPopup::NewWorkspace { selected, .. }
                 | super::orcha_popup::OrchaPopup::OpenWith { selected, .. }
+                | super::orcha_popup::OrchaPopup::Update { selected, .. }
                 | super::orcha_popup::OrchaPopup::Import { selected, .. },
             ) => *selected = index,
+            Some(super::orcha_popup::OrchaPopup::WhatsNew { .. }) => {}
             Some(super::orcha_popup::OrchaPopup::Welcome(welcome)) => welcome.selected = index,
             None => {}
         }
@@ -485,8 +489,10 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::NewAgent { selected, .. }
                 | super::orcha_popup::OrchaPopup::NewWorkspace { selected, .. }
                 | super::orcha_popup::OrchaPopup::OpenWith { selected, .. }
+                | super::orcha_popup::OrchaPopup::Update { selected, .. }
                 | super::orcha_popup::OrchaPopup::Import { selected, .. },
             ) => *selected,
+            Some(super::orcha_popup::OrchaPopup::WhatsNew { .. }) => 0,
             Some(super::orcha_popup::OrchaPopup::Welcome(welcome)) => welcome.selected,
             None => 0,
         }
@@ -541,6 +547,23 @@ impl ClientShellState {
         match popup {
             // the setup handles its own keys and clicks
             super::orcha_popup::OrchaPopup::Welcome(_) => return,
+            super::orcha_popup::OrchaPopup::WhatsNew { .. } => {
+                self.orcha_ui.popup = None;
+                return;
+            }
+            super::orcha_popup::OrchaPopup::Update { release, .. } => {
+                self.orcha_ui.popup = None;
+                match index {
+                    0 => self.start_update(),
+                    2 => {
+                        crate::orcha_app::skip_release(&release.version);
+                        self.orcha_ui.update_available = None;
+                        self.orcha_ui.update_note = None;
+                    }
+                    _ => {}
+                }
+                return;
+            }
             // a choice opens the file; the check past the rows flips `remember`
             super::orcha_popup::OrchaPopup::OpenWith {
                 path,
@@ -1290,12 +1313,20 @@ impl ClientShellState {
             self.push_endpoint_method(method, outcome);
             outcome.repaint = true;
         }
+        // after an update: what changed, once (a fresh install only records it)
+        let news = crate::orcha_app::whats_new();
         // the first time: the setup, which offers the projects other tools
         // know about too
         if !super::orcha_welcome::done() {
             self.open_welcome(outcome);
-        } else if !crate::orcha_import::asked() {
-            self.start_import_scan();
+        } else {
+            if let Some(release) = news.filter(|_| self.orcha_ui.popup.is_none()) {
+                self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::WhatsNew { release });
+                outcome.repaint = true;
+            }
+            if !crate::orcha_import::asked() {
+                self.start_import_scan();
+            }
         }
         self.start_update_check();
     }
@@ -1318,9 +1349,16 @@ impl ClientShellState {
         let ui = &mut self.orcha_ui;
         if let Some(Ok(newer)) = ui.update_check.as_ref().map(|rx| rx.try_recv()) {
             ui.update_check = None;
-            if let Some(version) = newer {
-                ui.update_note = Some(format!("⬆ update to {version}"));
-                ui.update_available = Some(version);
+            if let Some(release) = newer {
+                ui.update_note = Some(format!("⬆ update to {}", release.version));
+                ui.update_available = Some(release.version.clone());
+                // ask once per version, when nothing else is on screen
+                if ui.popup.is_none() && crate::orcha_app::first_offer(&release.version) {
+                    ui.popup = Some(super::orcha_popup::OrchaPopup::Update {
+                        selected: 0,
+                        release,
+                    });
+                }
                 return true;
             }
         }
