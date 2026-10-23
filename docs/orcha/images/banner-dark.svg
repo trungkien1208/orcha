@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400"><rect width="1200" height="400" fill="#1f1c19"/><defs><pattern id="d" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1.2" fill="#b3a891" opacity="0.25"/></pattern></defs><rect width="1200" height="400" fill="url(#d)"/><rect x="50" y="50" width="1108" height="308" fill="#000000"/><rect x="40" y="40" width="1108" height="308" fill="#2e2a25" stroke="#0b0a09" stroke-width="4"/><svg x="86" y="96" width="196" height="196" viewBox="0 0 128 128">
+  
+  <rect x="14" y="14" width="104" height="104" rx="9" fill="#111111"/>
+  <rect x="8" y="8" width="104" height="104" rx="9" fill="#ff7ab6" stroke="#111111" stroke-width="7"/>
+
+  <path d="M50 34c-4-5-3-10 1-15 4 5 6 9 5 14" fill="#fff4d6" stroke="#111111" stroke-linejoin="round" stroke-width="3"/>
+  <path d="M62 29c-2-7 0-12 5-17 4 6 5 11 2 17" fill="#fff4d6" stroke="#111111" stroke-linejoin="round" stroke-width="3"/>
+  <path d="M75 33c0-6 3-11 8-15 3 6 3 11 0 16" fill="#fff4d6" stroke="#111111" stroke-linejoin="round" stroke-width="3"/>
+
+  <path d="M43 63c-9-2-15-7-19-15 10 1 18 5 24 12z" fill="#111111"/>
+  <path d="M55 51 68 31l12 24z" fill="#111111"/>
+  <path d="M34 78c-2-12 1-23 9-31 9-9 22-13 36-9 12 3 20 11 27 22l-6 12-14-8c-5 12-17 19-33 19H37z" fill="#111111"/>
+  <path d="M79 53c7-4 15-2 20 5-4 7-12 9-20 5-4-2-5-7 0-10z" fill="#fff4d6"/>
+  <circle cx="94" cy="57" r="2.2" fill="#111111"/>
+
+  <path d="M20 77h88l-9 21c-5 12-65 12-70 0z" fill="#fff4d6" stroke="#111111" stroke-linejoin="round" stroke-width="6"/>
+  <path d="M21 77c12-6 27-9 43-9s31 3 43 9c-12 7-27 10-43 10s-31-3-43-10z" fill="#7be0ad" stroke="#111111" stroke-linejoin="round" stroke-width="5"/>
+</svg><rect x="333" y="95" width="169" height="27" fill="#000000"/><rect x="330" y="92" width="169" height="27" fill="#ffd23f" stroke="#0b0a09" stroke-width="2.5"/><text x="340" y="111" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="800" fill="#111111" letter-spacing="0.5">TERMINAL WORKSPACE</text><text x="330" y="200" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="84" font-weight="900" fill="#f2e8d3" letter-spacing="-2">orcha</text><text x="330" y="248" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="30" font-weight="800" fill="#f2e8d3">Every agent. Every project. In rhythm.</text><text x="330" y="284" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#b3a891">A calm terminal workspace for your coding agents.</text><rect x="333" y="307" width="69" height="27" fill="#000000"/><rect x="330" y="304" width="69" height="27" fill="#ffd23f" stroke="#0b0a09" stroke-width="2.5"/><text x="340" y="323" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="800" fill="#111111" letter-spacing="0.5">CLAUDE</text><rect x="418" y="307" width="61" height="27" fill="#000000"/><rect x="415" y="304" width="61" height="27" fill="#7be0ad" stroke="#0b0a09" stroke-width="2.5"/><text x="425" y="323" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="800" fill="#111111" letter-spacing="0.5">CODEX</text><rect x="495" y="307" width="69" height="27" fill="#000000"/><rect x="492" y="304" width="69" height="27" fill="#6c8cff" stroke="#0b0a09" stroke-width="2.5"/><text x="502" y="323" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="800" fill="#111111" letter-spacing="0.5">CURSOR</text></svg>

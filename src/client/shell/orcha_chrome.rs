@@ -48,7 +48,7 @@ pub(super) fn render_header(
         display_width(quit_text) + 4,
         1,
     );
-    let text = "⌘, settings";
+    let text = "⚙ settings";
     let button = Rect::new(
         quit.x.saturating_sub(display_width(text) + 5),
         area.y,

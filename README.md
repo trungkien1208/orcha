@@ -1,71 +1,83 @@
 <p align="center">
-  <img src="assets/orcha-mark.svg" alt="orcha: a whale in a matcha bowl" width="96" />
-</p>
-
-<h1 align="center">orcha</h1>
-
-<p align="center">
-  <b>Every agent. Every project. In rhythm.</b><br />
-  A calm terminal workspace for Claude Code, Codex and Cursor.
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/orcha/images/banner-dark.svg" />
+    <img src="docs/orcha/images/banner-light.svg" alt="orcha: every agent, every project, in rhythm. A calm terminal workspace for Claude, Codex and Cursor." width="100%" />
+  </picture>
 </p>
 
 <p align="center">
-  <a href="https://trungkien1208.github.io/orcha/">website</a> ·
-  <a href="#try-it">try it</a> ·
-  <a href="#what-you-get">what you get</a> ·
-  <a href="#feedback">feedback</a>
+  <a href="#install"><b>Install</b></a> ·
+  <a href="https://trungkien1208.github.io/orcha/">Website</a> ·
+  <a href="#everyday-use">Everyday use</a> ·
+  <a href="#update-and-uninstall">Update &amp; uninstall</a> ·
+  <a href="https://github.com/trungkien1208/orcha/issues">Feedback</a>
 </p>
 
 <p align="center">
-  <img src="docs/orcha/images/light.png" alt="orcha in the light theme: projects on the left, two agents side by side, fuel and git on the right" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/orcha/images/dark.png" />
+    <img src="docs/orcha/images/light.png" alt="orcha: projects on the left, two agents side by side, fuel and git on the right" width="100%" />
+  </picture>
 </p>
 
----
+## Install
 
-## What you get
-
-| | |
-|---|---|
-| **Projects together** | Each project is a card in the sidebar with its agents under it. Open several at once. |
-| **Live status** | See who is working, who is done, and who needs you. `PROCESS` shows each agent's stage: think → code → test → done. |
-| **Fuel & accounts** | Plan limits (5h / week) for every Claude, Codex and Cursor account. Switch accounts in one click. All Claude chats move to the new account. |
-| **Continue on…** | When the fuel runs low, orcha offers the best next place: another account, or hand the chat to another agent (whole conversation or a summary). |
-| **Git in view** | Branch, changes and PR beside the work. One click opens your IDE or Git app. Ctrl+click opens any file path in an agent's output. |
-| **Themes** | Orcha and Matcha, each in light and dark, plus the usual favorites. Font and ligatures from settings (Ghostty). |
-
-<p align="center">
-  <img src="docs/orcha/images/continue-on.png" alt="the CONTINUE ON popup: accounts with their fuel, the best one marked" width="80%" />
-</p>
-
-## Try it
-
-macOS on Apple Silicon. Best in [Ghostty](https://ghostty.org); other terminals work with plain symbols instead of the agent logos.
-
-One line, no questions:
+macOS on Apple Silicon. One line, no questions:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.sh | sh
 ```
 
-It puts the app in `~/.local/bin/orcha` and the extras (fuel and account scripts, hand-off, theme, logo font) in `~/.orcha`. Run it again to update.
-
-Then open a new terminal window where your projects live and run:
+Then open a new terminal window **inside a project** and run:
 
 ```sh
 orcha
 ```
 
-- `+ NEW` starts an agent.
-- `⌘,` opens settings: theme, font, IDE, Git app.
-- `ctrl+b q` detaches; run `orcha` again to come back. Your agents keep running.
+That project opens by itself. The first time, orcha also offers to bring in the projects it finds from **Orca, VS Code, Cursor and JetBrains**, and it finds your **Claude Code, Codex and Cursor** sign-ins on its own. Nothing to set up.
 
-Already use herdr? On first run orcha copies your herdr config and workspaces. herdr itself stays untouched.
+<sub>Best in <a href="https://ghostty.org">Ghostty</a> (agent logos, theme, font). Other terminals work too, with plain symbols. Already use herdr? Your herdr config and workspaces come along; herdr itself stays untouched.</sub>
+
+## What you get
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/orcha/images/features-dark.svg" />
+    <img src="docs/orcha/images/features-light.svg" alt="Projects together · Live status · Fuel and accounts · Continue on · Git in view · Bring your projects" width="100%" />
+  </picture>
+</p>
+
+When an account runs low, **CONTINUE ON** picks the best next place for the chat: another account of the same agent, or a hand-off to Codex, Claude or Cursor (the whole conversation or a summary).
+
+<p align="center">
+  <img src="docs/orcha/images/continue-on.png" alt="the CONTINUE ON popup: accounts with their fuel, the best one marked" width="80%" />
+</p>
+
+## Everyday use
+
+| | |
+|---|---|
+| **New agent** | `+ NEW`, pick Claude, Codex or Cursor and the account |
+| **Settings** | `⚙ settings` top right: theme, font, IDE, Git app |
+| **Open a file** | Ctrl+click any path an agent prints |
+| **IDE / Git app** | the `↗ IDE` / `↗ Git` buttons in the right panel |
+| **Import projects** | `≡ menu` → import projects |
+| **Quit** | `⏻ quit` top right, or `≡ menu` → quit to terminal. Your agents keep running; `orcha` brings you back |
+
+## Update and uninstall
+
+```sh
+orcha update      # the latest version (orcha also shows a green button when one is out)
+orcha uninstall   # removes orcha and everything it added; asks before deleting your settings
+orcha --version
+```
 
 ## Feedback
 
 This is an early build for friends to try. Something looks off or breaks? [Open an issue](https://github.com/trungkien1208/orcha/issues) with a screenshot. Ideas are welcome too.
 
-## Build from source
+<details>
+<summary><b>Build from source</b></summary>
 
 You need Rust and [Zig 0.16](https://ziglang.org/download/).
 
@@ -75,8 +87,10 @@ ZIG=/path/to/zig cargo build --release
 cp target/release/herdr ~/.local/bin/orcha   # the name "orcha" turns on the orcha app
 ```
 
+</details>
+
 ## Thanks
 
-orcha is a fork of [herdr](https://github.com/herdrdev/herdr). herdr does the hard part: the terminal runtime, sessions, and agent detection. orcha adds the look and the agent workflow on top. The original README is in [docs/orcha/herdr-README.md](docs/orcha/herdr-README.md).
+orcha is a fork of [herdr](https://github.com/herdrdev/herdr). herdr does the hard part: the terminal runtime, sessions and agent detection. orcha adds the look and the agent workflow on top. herdr's own README is in [docs/orcha/herdr-README.md](docs/orcha/herdr-README.md).
 
 Licensed under the [Apache License 2.0](LICENSE), like herdr.

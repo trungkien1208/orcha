@@ -529,8 +529,8 @@ pub(super) fn render_git_panel(
     };
     rows.push(Row::Strong(format!("⎇ {branch}")));
     rows.push(Row::Buttons(vec![
-        ("⌘E IDE", false, Slot::Ide),
-        ("⌘G Git", false, Slot::GitGui),
+        ("↗ IDE", false, Slot::Ide),
+        ("↗ Git", false, Slot::GitGui),
     ]));
 
     section(&mut rows);

@@ -274,13 +274,13 @@ pub(super) fn render_settings_overlay(
                 (
                     &settings.appearance.ides,
                     "IDE",
-                    "the ⌘E / IDE button opens the project here",
+                    "the IDE button (right panel) opens the project here",
                 )
             } else {
                 (
                     &settings.appearance.git_guis,
                     "git ui",
-                    "the ⌘G / Git button opens the repository here",
+                    "the Git button (right panel) opens the repository here",
                 )
             };
             let names: Vec<&str> = apps.iter().map(|(name, _)| name.as_str()).collect();
