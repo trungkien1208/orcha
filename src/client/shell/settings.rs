@@ -31,6 +31,57 @@ pub(super) fn integration_needs_install(info: &crate::api::schema::IntegrationIn
         || info.available && info.state == crate::api::schema::IntegrationState::NotInstalled
 }
 
+/// The terminal's fonts (Ghostty lists them) and the font and ligatures
+/// orcha-config set.
+fn load_appearance() -> OrchaAppearance {
+    if cfg!(test) {
+        return OrchaAppearance::default();
+    }
+    let fonts = std::process::Command::new("ghostty")
+        .arg("+list-fonts")
+        .output()
+        .ok()
+        .map(|out| {
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .filter(|line| !line.is_empty() && !line.starts_with(char::is_whitespace))
+                .filter(|line| *line != "Agent Icons")
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let config: serde_json::Value = std::fs::read_to_string(crate::config::config_dir().join("config.json"))
+        .ok()
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .and_then(|home| std::fs::read_to_string(format!("{home}/.config/orcha/config.json")).ok())
+        })
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default();
+    OrchaAppearance {
+        fonts,
+        font: config["font"]["family"].as_str().unwrap_or_default().to_owned(),
+        ligatures: config["font"]["ligatures"].as_bool().unwrap_or(true),
+        note: None,
+    }
+}
+
+/// Runs orcha-config with `args` in the background (it rewrites the
+/// terminal's config).
+fn run_config_tool(args: Vec<String>) -> Option<String> {
+    let tool = crate::orcha_app::config_tool()?;
+    let _ = crate::thread_spawn::spawn_named("orcha-config", move || {
+        let _ = std::process::Command::new(tool)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    });
+    Some("saved · reload the terminal's config (Ghostty: ⌘⇧,) to see it".to_owned())
+}
+
 impl ClientShellState {
     pub(super) fn open_settings_overlay(&mut self) {
         self.overlay = Some(ClientShellOverlay::Settings(ClientSettingsOverlay {
@@ -42,12 +93,26 @@ impl ClientShellState {
             integration_messages: Vec::new(),
             loading_integrations: false,
             installing_integrations: false,
+            appearance: load_appearance(),
         }));
     }
 
     fn selected_index_for_settings_section(&self, section: ClientSettingsSection) -> usize {
         match section {
             ClientSettingsSection::Theme => theme_index(&self.config.theme_name),
+            ClientSettingsSection::Font => match self.overlay.as_ref() {
+                Some(ClientShellOverlay::Settings(settings)) => settings
+                    .appearance
+                    .fonts
+                    .iter()
+                    .position(|font| settings.appearance.font.starts_with(font.as_str()))
+                    .unwrap_or(0),
+                _ => 0,
+            },
+            ClientSettingsSection::Ligatures => match self.overlay.as_ref() {
+                Some(ClientShellOverlay::Settings(settings)) => usize::from(!settings.appearance.ligatures),
+                _ => 0,
+            },
             ClientSettingsSection::Indicators => indicator_index(self.config.status_indicators),
             ClientSettingsSection::Sound => usize::from(!self.config.sound_enabled),
             ClientSettingsSection::Toast => toast_index(self.config.toast_delivery),
@@ -97,6 +162,8 @@ impl ClientShellState {
         match self.overlay.as_ref() {
             Some(ClientShellOverlay::Settings(settings)) => match settings.section {
                 ClientSettingsSection::Theme => crate::config::THEME_NAMES.len(),
+                ClientSettingsSection::Font => settings.appearance.fonts.len(),
+                ClientSettingsSection::Ligatures => 2,
                 ClientSettingsSection::Indicators | ClientSettingsSection::Sound => 2,
                 ClientSettingsSection::Toast => 4,
                 ClientSettingsSection::Integrations => settings.integrations.len(),
@@ -195,6 +262,29 @@ impl ClientShellState {
                 if self.save_settings_edit(crate::config::ConfigEdit::Theme(name), outcome) {
                     self.overlay = None;
                 }
+            }
+            ClientSettingsSection::Font => {
+                let Some(ClientShellOverlay::Settings(settings)) = self.overlay.as_mut() else {
+                    return;
+                };
+                let Some(font) = settings.appearance.fonts.get(selected).cloned() else {
+                    return;
+                };
+                settings.appearance.note = run_config_tool(vec!["font".into(), font.clone()]);
+                settings.appearance.font = font;
+                outcome.repaint = true;
+            }
+            ClientSettingsSection::Ligatures => {
+                let Some(ClientShellOverlay::Settings(settings)) = self.overlay.as_mut() else {
+                    return;
+                };
+                let on = selected == 0;
+                settings.appearance.note = run_config_tool(vec![
+                    "ligatures".into(),
+                    if on { "on" } else { "off" }.into(),
+                ]);
+                settings.appearance.ligatures = on;
+                outcome.repaint = true;
             }
             ClientSettingsSection::Indicators => {
                 let style = if selected == 0 {

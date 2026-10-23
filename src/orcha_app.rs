@@ -44,7 +44,7 @@ pub(crate) fn claim_identity() {
 }
 
 /// orcha-config's CLI: `~/.config/orcha/scripts` links into its checkout.
-fn config_tool() -> Option<PathBuf> {
+pub(crate) fn config_tool() -> Option<PathBuf> {
     let scripts = crate::config::config_dir().join("scripts");
     let checkout = std::fs::canonicalize(scripts).ok()?.parent()?.to_path_buf();
     let tool = checkout.join("bin").join("orcha");

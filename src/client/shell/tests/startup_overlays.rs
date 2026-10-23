@@ -1196,7 +1196,8 @@ fn client_settings_preview_restore_and_endpoint_integrations_are_owned_by_overla
 
     state.open_settings_overlay();
     state.compose(106, 30).expect("settings overlay");
-    for _ in 0..3 {
+    // theme, font, ligatures, indicators, sound, toasts, then integrations
+    for _ in 0..5 {
         let next = state.handle_input_bytes(b"\t");
         assert!(next.actions.is_empty());
     }

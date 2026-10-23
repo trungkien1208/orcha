@@ -441,6 +441,8 @@ pub(super) struct ClientGlobalMenuOverlay {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ClientSettingsSection {
     Theme,
+    Font,
+    Ligatures,
     Indicators,
     Sound,
     Toast,
@@ -450,6 +452,8 @@ pub(super) enum ClientSettingsSection {
 impl ClientSettingsSection {
     pub(super) const ALL: &[Self] = &[
         Self::Theme,
+        Self::Font,
+        Self::Ligatures,
         Self::Indicators,
         Self::Sound,
         Self::Toast,
@@ -459,6 +463,8 @@ impl ClientSettingsSection {
     pub(super) fn label(self) -> &'static str {
         match self {
             Self::Theme => "theme",
+            Self::Font => "font",
+            Self::Ligatures => "ligatures",
             Self::Indicators => "indicators",
             Self::Sound => "sound",
             Self::Toast => "toasts",
@@ -477,6 +483,17 @@ pub(super) struct ClientSettingsOverlay {
     pub(super) integration_messages: Vec<String>,
     pub(super) loading_integrations: bool,
     pub(super) installing_integrations: bool,
+    /// orcha: the terminal's font and ligatures (kept by orcha-config).
+    pub(super) appearance: OrchaAppearance,
+}
+
+/// orcha: font choices for the terminal, and what is set now.
+#[derive(Debug, Default, Clone)]
+pub(super) struct OrchaAppearance {
+    pub(super) fonts: Vec<String>,
+    pub(super) font: String,
+    pub(super) ligatures: bool,
+    pub(super) note: Option<String>,
 }
 
 #[derive(Debug)]

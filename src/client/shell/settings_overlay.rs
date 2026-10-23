@@ -155,7 +155,91 @@ pub(super) fn render_settings_overlay(
                         ),
                     palette,
                 );
+                // the theme's own colors: paper, card, ink, then its accents
+                if let Some(theme) = Palette::from_name(name) {
+                    let paper = match theme.sidebar_bg {
+                        ratatui::style::Color::Reset => theme.panel_bg,
+                        color => color,
+                    };
+                    let swatches = [
+                        paper,
+                        theme.panel_bg,
+                        theme.text,
+                        theme.mauve,
+                        theme.yellow,
+                        theme.green,
+                        theme.blue,
+                        theme.red,
+                    ];
+                    let width = swatches.len() as u16 * 2;
+                    let mut sx = rect.right().saturating_sub(width + 1);
+                    for color in swatches {
+                        put_text(buffer, sx, rect.y, 2, "██", Style::default().fg(color));
+                        sx += 2;
+                    }
+                }
                 choice_hits.push((rect, index));
+            }
+        }
+        ClientSettingsSection::Font => {
+            let fonts = &settings.appearance.fonts;
+            if fonts.is_empty() {
+                put_text(
+                    buffer,
+                    content.x + 1,
+                    content.y,
+                    content.width,
+                    "no font list (needs Ghostty: `ghostty +list-fonts`)",
+                    Style::default().fg(palette.overlay0).bg(palette.panel_bg),
+                );
+            }
+            let visible = usize::from(content.height.saturating_sub(2));
+            let scroll = settings.selected.saturating_sub(visible.saturating_sub(1));
+            for (visible_index, (index, name)) in
+                fonts.iter().enumerate().skip(scroll).take(visible).enumerate()
+            {
+                let rect = Rect::new(content.x, content.y + visible_index as u16, content.width, 1);
+                draw_choice(
+                    buffer,
+                    rect,
+                    name,
+                    index == settings.selected,
+                    settings.appearance.font.starts_with(name.as_str()),
+                    palette,
+                );
+                choice_hits.push((rect, index));
+            }
+            if let Some(note) = &settings.appearance.note {
+                put_text(
+                    buffer,
+                    content.x + 1,
+                    content.bottom().saturating_sub(1),
+                    content.width,
+                    note,
+                    Style::default().fg(palette.green).bg(palette.panel_bg),
+                );
+            }
+        }
+        ClientSettingsSection::Ligatures => {
+            render_choice_section(
+                buffer,
+                content,
+                "font ligatures",
+                "join -> != === >= into one glyph, or keep every character apart",
+                &["on    ->  !=  ===  >=  (joined)", "off   -> != === >= (as typed)"],
+                settings.selected,
+                palette,
+                &mut choice_hits,
+            );
+            if let Some(note) = &settings.appearance.note {
+                put_text(
+                    buffer,
+                    content.x + 1,
+                    content.bottom().saturating_sub(1),
+                    content.width,
+                    note,
+                    Style::default().fg(palette.green).bg(palette.panel_bg),
+                );
             }
         }
         ClientSettingsSection::Indicators => {
