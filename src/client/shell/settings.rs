@@ -230,6 +230,12 @@ impl ClientShellState {
             Some(ClientShellOverlay::Settings(settings)) => match settings.section {
                 ClientSettingsSection::Theme => crate::config::THEME_NAMES.len(),
                 ClientSettingsSection::Font => settings.appearance.fonts.len(),
+                // orcha sets the font in Ghostty only
+                ClientSettingsSection::Font | ClientSettingsSection::Ligatures
+                    if !super::brutal::host_is_ghostty() =>
+                {
+                    0
+                }
                 ClientSettingsSection::Ligatures => 2,
                 ClientSettingsSection::Ide => settings.appearance.ides.len(),
                 ClientSettingsSection::GitUi => settings.appearance.git_guis.len(),

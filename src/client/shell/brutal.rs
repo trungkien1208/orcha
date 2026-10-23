@@ -370,8 +370,31 @@ pub(super) fn agent_task(agent: &ClientShellAgent) -> String {
 }
 
 /// The "Agent Icons" font (U+100000.., built by orcha's setup) is installed.
+/// The terminal orcha runs in is Ghostty. Only Ghostty maps the icon
+/// font's codepoints and draws the legacy-computing glyphs itself; other
+/// terminals get plain symbols. Over SSH only `TERM` says so.
+pub(crate) fn host_is_ghostty() -> bool {
+    static GHOSTTY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *GHOSTTY.get_or_init(|| {
+        cfg!(test)
+            || std::env::var("TERM_PROGRAM").is_ok_and(|value| value.eq_ignore_ascii_case("ghostty"))
+            || std::env::var("TERM").is_ok_and(|value| value == "xterm-ghostty")
+            || std::env::var_os("GHOSTTY_RESOURCES_DIR").is_some()
+    })
+}
+
+/// The thin shared rule between stacked cards: a one-eighth block at the
+/// top of the cell in Ghostty, the common upper-eighth elsewhere.
+pub(super) fn top_rule_glyph() -> &'static str {
+    if host_is_ghostty() {
+        "\u{1FB80}"
+    } else {
+        "▔"
+    }
+}
+
 pub(super) fn icon_font_installed() -> bool {
-    if cfg!(test) {
+    if cfg!(test) || !host_is_ghostty() {
         return false;
     }
     let Some(home) = std::env::var_os("HOME") else {

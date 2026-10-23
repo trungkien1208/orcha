@@ -437,7 +437,7 @@ pub(crate) fn render_sidebar_tree(
         let rows = content(agents, *kind);
         let first = index == *state.workspace_scroll;
         // the shared row: the card above's bottom line and this one's top line
-        let glyph = if first { "▁" } else { "\u{1FB80}" };
+        let glyph = if first { "▁" } else { brutal::top_rule_glyph() };
         let color = t.line;
         put_text(
             buffer,

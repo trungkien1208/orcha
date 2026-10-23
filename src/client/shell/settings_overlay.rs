@@ -181,6 +181,20 @@ pub(super) fn render_settings_overlay(
                 choice_hits.push((rect, index));
             }
         }
+        ClientSettingsSection::Font | ClientSettingsSection::Ligatures
+            if !crate::client::shell::brutal::host_is_ghostty() =>
+        {
+            render_choice_section(
+                buffer,
+                content,
+                "font and ligatures",
+                "orcha sets these in Ghostty only; pick them in this terminal's own settings",
+                &[],
+                0,
+                palette,
+                &mut choice_hits,
+            );
+        }
         ClientSettingsSection::Font => {
             let fonts = &settings.appearance.fonts;
             if fonts.is_empty() {
