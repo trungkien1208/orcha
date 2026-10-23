@@ -70,7 +70,9 @@ fn load_appearance() -> OrchaAppearance {
 /// Runs orcha-config with `args` in the background (it rewrites the
 /// terminal's config).
 fn run_config_tool(args: Vec<String>) -> Option<String> {
-    let tool = crate::orcha_app::config_tool()?;
+    let Some(tool) = crate::orcha_app::config_tool() else {
+        return Some("orcha-config is not installed: nothing changed".to_owned());
+    };
     let _ = crate::thread_spawn::spawn_named("orcha-config", move || {
         let _ = std::process::Command::new(tool)
             .args(args)

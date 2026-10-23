@@ -44,8 +44,14 @@ pub(crate) fn claim_identity() {
 }
 
 /// orcha-config's CLI: `~/.config/orcha/scripts` links into its checkout.
+/// orcha-config lives in `~/.config/orcha` whatever this app's own config
+/// folder is (a dev build keeps its config in `orcha-dev`).
 pub(crate) fn config_tool() -> Option<PathBuf> {
-    let scripts = crate::config::config_dir().join("scripts");
+    let base = match std::env::var("XDG_CONFIG_HOME") {
+        Ok(dir) => PathBuf::from(dir),
+        Err(_) => PathBuf::from(std::env::var_os("HOME")?).join(".config"),
+    };
+    let scripts = base.join("orcha").join("scripts");
     let checkout = std::fs::canonicalize(scripts).ok()?.parent()?.to_path_buf();
     let tool = checkout.join("bin").join("orcha");
     tool.is_file().then_some(tool)
