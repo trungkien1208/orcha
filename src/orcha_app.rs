@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 
 pub(crate) const ORCHA_APP_ENV_VAR: &str = "ORCHA_APP";
 /// orcha's own version; its GitHub releases are tagged `orcha-<version>`.
-pub(crate) const ORCHA_VERSION: &str = "0.1.5";
+pub(crate) const ORCHA_VERSION: &str = "0.1.6";
 const RELEASES_API: &str = "https://api.github.com/repos/trungkien1208/orcha/releases/latest";
 /// Installs or updates the app and its extras on Unix (see install.sh).
 const INSTALL_COMMAND_UNIX: &str =
@@ -299,32 +299,62 @@ pub(crate) fn skip_release(version: &str) {
     );
 }
 
-/// What changed in this build, once: after an update, the first start shows
-/// the release's highlights. A fresh install records the version silently.
+/// This build's version is the one already introduced (or a fresh install,
+/// which needs no "what's new").
+pub(crate) fn mark_version_seen() {
+    let _ = std::fs::write(
+        crate::config::config_dir().join(SEEN_VERSION),
+        format!("{ORCHA_VERSION}\n"),
+    );
+}
+
+/// What changed in this build, once: the first start after an update shows
+/// the release's highlights. They come from the release cached when the
+/// update was offered, else from GitHub. Blocking: call it off the input
+/// path. Offline, it asks again on the next start.
 pub(crate) fn whats_new() -> Option<Release> {
     let seen_path = crate::config::config_dir().join(SEEN_VERSION);
     let seen = std::fs::read_to_string(&seen_path).ok();
     if seen.as_deref().map(str::trim) == Some(ORCHA_VERSION) {
         return None;
     }
-    let _ = std::fs::write(&seen_path, format!("{ORCHA_VERSION}\n"));
-    // the release notes cached when the update was offered
+    let notes_of = |value: &serde_json::Value| -> Vec<String> {
+        value["notes"]
+            .as_array()
+            .map(|notes| {
+                notes
+                    .iter()
+                    .filter_map(|note| note.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
     let cache = crate::config::config_dir().join(RELEASE_CACHE);
-    let cached: serde_json::Value = serde_json::from_slice(&std::fs::read(cache).ok()?).ok()?;
-    (cached["version"].as_str()? == ORCHA_VERSION)
-        .then(|| Release {
-            version: ORCHA_VERSION.to_owned(),
-            notes: cached["notes"]
-                .as_array()
-                .map(|notes| {
-                    notes
-                        .iter()
-                        .filter_map(|note| note.as_str().map(str::to_owned))
-                        .collect()
-                })
-                .unwrap_or_default(),
-        })
-        .filter(|release| !release.notes.is_empty())
+    let cached = std::fs::read(cache)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .filter(|cached| cached["version"].as_str() == Some(ORCHA_VERSION))
+        .map(|cached| notes_of(&cached));
+    let notes = match cached {
+        Some(notes) => notes,
+        None => {
+            let url = format!(
+                "https://api.github.com/repos/trungkien1208/orcha/releases/tags/orcha-{ORCHA_VERSION}"
+            );
+            let output = crate::noninteractive_process::curl_command()
+                .args(["-sfL", "--connect-timeout", "5", "--max-time", "10", &url])
+                .output()
+                .ok()
+                .filter(|output| output.status.success())?;
+            let release: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+            release_highlights(release["body"].as_str().unwrap_or_default())
+        }
+    };
+    mark_version_seen();
+    (!notes.is_empty()).then(|| Release {
+        version: ORCHA_VERSION.to_owned(),
+        notes,
+    })
 }
 
 /// Runs the installer: the latest app and extras. `quiet` keeps its output

@@ -1313,16 +1313,21 @@ impl ClientShellState {
             self.push_endpoint_method(method, outcome);
             outcome.repaint = true;
         }
-        // after an update: what changed, once (a fresh install only records it)
-        let news = crate::orcha_app::whats_new();
         // the first time: the setup, which offers the projects other tools
         // know about too
         if !super::orcha_welcome::done() {
+            // a fresh install: nothing changed for this user
+            crate::orcha_app::mark_version_seen();
             self.open_welcome(outcome);
         } else {
-            if let Some(release) = news.filter(|_| self.orcha_ui.popup.is_none()) {
-                self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::WhatsNew { release });
-                outcome.repaint = true;
+            // after an update: what changed, once (looked up off the input path)
+            let (tx, rx) = std::sync::mpsc::channel();
+            if crate::thread_spawn::spawn_named("orcha-whats-new", move || {
+                let _ = tx.send(crate::orcha_app::whats_new());
+            })
+            .is_ok()
+            {
+                self.orcha_ui.whats_new_check = Some(rx);
             }
             if !crate::orcha_import::asked() {
                 self.start_import_scan();
@@ -1347,6 +1352,17 @@ impl ClientShellState {
     /// running, then what to do next. Returns true when it changed.
     pub(super) fn poll_update(&mut self) -> bool {
         let ui = &mut self.orcha_ui;
+        if let Some(Ok(news)) = ui.whats_new_check.as_ref().map(|rx| rx.try_recv()) {
+            ui.whats_new_check = None;
+            ui.whats_new = news;
+        }
+        // shown once nothing else is on screen
+        if ui.popup.is_none() {
+            if let Some(release) = ui.whats_new.take() {
+                ui.popup = Some(super::orcha_popup::OrchaPopup::WhatsNew { release });
+                return true;
+            }
+        }
         if let Some(Ok(newer)) = ui.update_check.as_ref().map(|rx| rx.try_recv()) {
             ui.update_check = None;
             if let Some(release) = newer {

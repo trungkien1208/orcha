@@ -142,6 +142,11 @@ pub(crate) struct OrchaUiState {
         Option<std::sync::mpsc::Receiver<Vec<crate::orcha_import::ImportSource>>>,
     /// A newer orcha release (being looked up, then its version).
     pub(super) update_check: Option<std::sync::mpsc::Receiver<Option<crate::orcha_app::Release>>>,
+    /// The "what's new" of this build, looked up after an update.
+    pub(super) whats_new_check:
+        Option<std::sync::mpsc::Receiver<Option<crate::orcha_app::Release>>>,
+    /// A "what's new" waiting for the screen to be free of other popups.
+    pub(super) whats_new: Option<crate::orcha_app::Release>,
     pub(super) update_available: Option<String>,
     /// `orcha update` running behind the UI; true when it worked.
     pub(super) update_run: Option<std::sync::mpsc::Receiver<bool>>,
