@@ -191,6 +191,9 @@ jobs:
   build-windows:
     if: ${{ inputs.build_group == 'windows' || inputs.build_group == 'all' }}
     runs-on: windows-latest
+    permissions:
+      actions: write
+      contents: write
     env:
       LIBGHOSTTY_VT_OPTIMIZE: ${{ inputs.libghostty_optimize }}
       LIBGHOSTTY_VT_SIMD: ${{ inputs.libghostty_simd }}
@@ -247,3 +250,36 @@ jobs:
             herdr-windows-x86_64.zip
             BUILD_INFO.txt
           retention-days: 7
+
+      - name: Attach Windows package to the release
+        if: inputs.libghostty_optimize == 'ReleaseSafe' && inputs.libghostty_simd == 'false'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $false
+          $source = Get-Content -Raw -Path src/orcha_app.rs
+          if ($source -notmatch 'const ORCHA_VERSION: &str = "(?<version>[0-9]+\.[0-9]+\.[0-9]+)"') {
+            throw "Could not read ORCHA_VERSION from src/orcha_app.rs"
+          }
+          $tag = "orcha-$($Matches.version)"
+          Copy-Item -LiteralPath herdr-windows-x86_64.zip -Destination orcha-windows-x86_64.zip -Force
+          $attached = $false
+          for ($attempt = 1; $attempt -le 8; $attempt++) {
+            gh release view $tag --repo $env:GITHUB_REPOSITORY | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+              gh release upload $tag orcha-windows-x86_64.zip --repo $env:GITHUB_REPOSITORY --clobber
+              if ($LASTEXITCODE -ne 0) {
+                throw "Could not upload orcha-windows-x86_64.zip to $tag"
+              }
+              Write-Host "Attached orcha-windows-x86_64.zip to $tag"
+              $attached = $true
+              break
+            }
+            Write-Host "Release $tag is not published yet (attempt $attempt). Waiting."
+            Start-Sleep -Seconds 15
+          }
+          if (-not $attached) {
+            throw "Release $tag was not available, so orcha-windows-x86_64.zip was not attached."
+          }

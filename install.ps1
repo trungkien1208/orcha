@@ -7,11 +7,31 @@ $ProgressPreference = "SilentlyContinue"
 
 $repository = "trungkien1208/orcha"
 $assetName = "orcha-windows-x86_64.zip"
-$releaseApi = "https://api.github.com/repos/$repository/releases/latest"
-$release = Invoke-RestMethod -Uri $releaseApi -Headers @{ "User-Agent" = "orcha-installer" }
-$asset = $release.assets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
+$headers = @{
+    "User-Agent" = "orcha-installer"
+    "Accept"     = "application/vnd.github+json"
+}
+# A release can be "latest" before its Windows zip is uploaded. Install the
+# newest published release that already has the package.
+$release = $null
+$asset = $null
+for ($page = 1; $page -le 5 -and $null -eq $asset; $page++) {
+    $pageUri = "https://api.github.com/repos/$repository/releases?per_page=30&page=$page"
+    $candidates = @(Invoke-RestMethod -Uri $pageUri -Headers $headers)
+    if ($candidates.Count -eq 0) { break }
+    foreach ($candidate in $candidates) {
+        if ($candidate.draft) { continue }
+        $match = @($candidate.assets) | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
+        if ($null -ne $match) {
+            $release = $candidate
+            $asset = $match
+            break
+        }
+    }
+    if ($candidates.Count -lt 30) { break }
+}
 if ($null -eq $asset) {
-    throw "The latest ORCHA release does not contain $assetName yet."
+    throw "No published ORCHA release contains $assetName."
 }
 
 $tag = [string]$release.tag_name
