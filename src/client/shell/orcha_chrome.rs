@@ -113,8 +113,9 @@ pub(super) fn render_frame_and_tabs(
         .collect();
     // a tab nobody named is called after what its agent is doing
     let label = |tab: &ClientShellTab| {
-        let auto = !tab.custom_label
-            && (tab.label.trim().is_empty() || tab.label.trim() == tab.number.to_string());
+        // herdr names an unnamed tab after its folder or program; the chat
+        // title the agent set says more
+        let auto = !tab.custom_label;
         let task = auto
             .then(|| {
                 snapshot
@@ -122,7 +123,15 @@ pub(super) fn render_frame_and_tabs(
                     .iter()
                     .filter(|agent| agent.tab_id == tab.tab_id)
                     .map(brutal::agent_task)
-                    .find(|task| !task.trim().is_empty())
+                    // a bare program name is not a chat title yet
+                    .find(|task| {
+                        let task = task.trim().to_lowercase();
+                        !task.is_empty()
+                            && !matches!(
+                                task.as_str(),
+                                "claude" | "claude code" | "codex" | "cursor" | "cursor agent"
+                            )
+                    })
             })
             .flatten();
         let name = task.unwrap_or_else(|| {
