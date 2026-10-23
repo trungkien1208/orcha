@@ -15,7 +15,16 @@ command -v git >/dev/null 2>&1 || { echo "orcha needs git first: xcode-select --
 
 BIN="$HOME/.local/bin"
 EXTRAS="${ORCHA_DIR:-$HOME/.orcha}"
-URL="https://github.com/trungkien1208/orcha/releases/latest/download/orcha-macos-arm64"
+# Ask GitHub which release is newest: the "latest/download" link can point
+# at the previous release for a few minutes after a new one is published.
+TAG=$(curl -fsSL --connect-timeout 5 --max-time 15 \
+  https://api.github.com/repos/trungkien1208/orcha/releases/latest 2>/dev/null \
+  | sed -n 's/.*"tag_name": *"\(orcha-[A-Za-z0-9._-]*\)".*/\1/p' | head -n 1)
+if [ -n "$TAG" ]; then
+  URL="https://github.com/trungkien1208/orcha/releases/download/$TAG/orcha-macos-arm64"
+else
+  URL="https://github.com/trungkien1208/orcha/releases/latest/download/orcha-macos-arm64"
+fi
 
 echo "🐋🍵 orcha"
 echo "→ downloading the app"
