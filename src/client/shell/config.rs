@@ -635,7 +635,8 @@ fn orcha_layout(
     let header = Rect::new(MARGIN_X, 0, width, 1);
     let status_bar = Rect::new(0, rows - 1, cols, 1);
     let body_y = header.bottom() + 1;
-    let body_height = status_bar.y.saturating_sub(body_y + 1);
+    // the boxes' shadow rows are half empty: they are the gap to the status bar
+    let body_height = status_bar.y.saturating_sub(body_y);
     let sidebar = Rect::new(MARGIN_X, body_y, sidebar_width.min(width / 3), body_height);
     let rest = width.saturating_sub(sidebar.width + GAP_X);
     // the panel only when the panes keep room
