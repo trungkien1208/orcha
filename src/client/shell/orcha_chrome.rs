@@ -426,3 +426,24 @@ pub(super) fn dress_panes(
         }
     }
 }
+
+/// The pane's paper colors on cells that keep the terminal's defaults: the
+/// same as the full frame gets, for rows a surface patch sends straight out
+/// (scrolling), which would otherwise show the terminal's own background
+/// (see-through with background blur).
+pub(super) fn paper_cells(cells: &mut [crate::protocol::CellData], config: &ClientShellConfig) {
+    if !config.orcha.pane_paper {
+        return;
+    }
+    let t = Brutal::new(&config.palette);
+    let reset = color_to_u32(ratatui::style::Color::Reset);
+    let (pane_bg, pane_fg) = (color_to_u32(t.pane), color_to_u32(t.pane_text));
+    for cell in cells {
+        if cell.bg == reset {
+            cell.bg = pane_bg;
+        }
+        if cell.fg == reset {
+            cell.fg = pane_fg;
+        }
+    }
+}

@@ -172,18 +172,26 @@ impl ClientShellState {
         if let Some(reason) = fast_path_blocker {
             crate::render_prof::event(reason);
         }
-        let fast_path_area = fast_path_blocker.is_none().then(|| {
-            let (cols, rows) = self.last_composed_size.unwrap_or_default();
-            self.layout(cols, rows).pane_surface
-        });
+        let (cols, rows) = self.last_composed_size.unwrap_or_default();
+        let layout = self.layout(cols, rows);
+        let fast_path_area = fast_path_blocker.is_none().then_some(layout.pane_surface);
+        // orcha: the rows go straight to the terminal; give them the panes'
+        // paper like a full frame
+        let orcha = !layout.main_frame.is_empty();
         let composed_patch = fast_path_area.map(|area| ClientComposedSurfacePatch {
             rows: patch
                 .rows
                 .iter()
-                .map(|row| crate::protocol::PaneSurfacePatchRow {
-                    x: area.x.saturating_add(row.x),
-                    y: area.y.saturating_add(row.y),
-                    cells: row.cells.clone(),
+                .map(|row| {
+                    let mut cells = row.cells.clone();
+                    if orcha {
+                        super::orcha_chrome::paper_cells(&mut cells, &self.config);
+                    }
+                    crate::protocol::PaneSurfacePatchRow {
+                        x: area.x.saturating_add(row.x),
+                        y: area.y.saturating_add(row.y),
+                        cells,
+                    }
                 })
                 .collect(),
             cursor: patch
