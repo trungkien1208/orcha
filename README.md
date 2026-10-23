@@ -1,85 +1,90 @@
-# herdr
+<p align="center">
+  <img src="assets/orcha-mark.svg" alt="orcha: a whale in a matcha bowl" width="96" />
+</p>
 
+<h1 align="center">orcha</h1>
 
 <p align="center">
-  <img src="assets/logo.png" alt="herdr" width="100" />
+  <b>Every agent. Every project. In rhythm.</b><br />
+  A calm terminal workspace for Claude Code, Codex and Cursor.
 </p>
 
 <p align="center">
-  <a href="https://herdr.dev">herdr.dev</a> · <a href="#install">install</a> · <a href="https://herdr.dev/docs/quick-start/">quick start</a> · <a href="https://herdr.dev/docs/">docs</a>
+  <a href="https://trungkien1208.github.io/orcha/">website</a> ·
+  <a href="#try-it">try it</a> ·
+  <a href="#what-you-get">what you get</a> ·
+  <a href="#feedback">feedback</a>
 </p>
 
 <p align="center">
-  English · <a href="README.zh-CN.md">简体中文</a>
-</p>
-
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-666666?labelColor=333333" alt="Apache 2.0 license" /></a>
-  <a href="https://github.com/herdrdev/herdr/releases"><img src="https://img.shields.io/github/downloads/herdrdev/herdr/total?labelColor=333333&color=666666" alt="total GitHub release downloads" /></a>
-  <a href="https://github.com/herdrdev/herdr/stargazers"><img src="https://img.shields.io/github/stars/herdrdev/herdr?labelColor=333333&color=666666&logo=github" alt="GitHub stars" /></a>
-  <a href="https://github.com/herdrdev/herdr/releases/latest"><img src="https://img.shields.io/github/v/release/herdrdev/herdr?label=release&labelColor=333333&color=666666" alt="latest stable release" /></a>
-  <a href="https://formulae.brew.sh/formula/herdr"><img src="https://img.shields.io/homebrew/v/herdr?label=homebrew&labelColor=333333&color=666666" alt="Homebrew version" /></a>
-  <a href="https://x.com/herdrdev"><img src="https://img.shields.io/badge/follow-%40herdrdev-000000?logo=x&logoColor=white" alt="follow @herdrdev on X" /></a>
+  <img src="docs/orcha/images/light.png" alt="orcha in the light theme: projects on the left, two agents side by side, fuel and git on the right" />
 </p>
 
 ---
 
-https://github.com/user-attachments/assets/043ec09f-4bdd-41d5-aee0-8fda6b83e267
+## What you get
 
-**the runtime your coding agents live on.**
+| | |
+|---|---|
+| **Projects together** | Each project is a card in the sidebar with its agents under it. Open several at once. |
+| **Live status** | See who is working, who is done, and who needs you. `PROCESS` shows each agent's stage: think → code → test → done. |
+| **Fuel & accounts** | Plan limits (5h / week) for every Claude, Codex and Cursor account. Switch accounts in one click. All Claude chats move to the new account. |
+| **Continue on…** | When the fuel runs low, orcha offers the best next place: another account, or hand the chat to another agent (whole conversation or a summary). |
+| **Git in view** | Branch, changes and PR beside the work. One click opens your IDE or Git app. Ctrl+click opens any file path in an agent's output. |
+| **Themes** | Orcha and Matcha, each in light and dark, plus the usual favorites. Font and ligatures from settings (Ghostty). |
 
-- **detach without stopping work** — herdr keeps terminals running in a background server when you close the client or lose your SSH connection. after a server or machine restart, herdr restores the saved layout and can resume supported agent sessions; the original processes do not survive. [session state →](https://herdr.dev/docs/session-state/)
-- **several machines, one window** — keep local work and saved ssh machines together, with a combined agent list and independent reconnects. [remote machines →](https://herdr.dev/docs/connecting-machines/)
-- **never hunt for the stuck one** — every pane is marked working, blocked, or idle. when an agent stops and needs an answer, herdr says so.
-- **agent-native** — agents drive herdr through the cli and socket api: they can spawn panes, prompt each other, and wait until another agent is genuinely blocked. [agent skill →](https://herdr.dev/docs/agent-skill/)
-- **runs what you already run** — claude code, codex, cursor, opencode, grok and the rest. herdr doesn't wrap or replace them; it owns their terminals. building an agent? [add herdr support →](https://herdr.dev/docs/add-herdr-support/)
-- **keyboard and mouse, both first-class** — tmux-style prefix keys *and* click, drag, split. pick per moment, not per tool.
-- **plugins** — extend panes and workflows. [browse the marketplace →](https://herdr.dev/plugins/)
-- **one rust binary, no electron** — runs in whatever terminal you already use.
+<p align="center">
+  <img src="docs/orcha/images/continue-on.png" alt="the CONTINUE ON popup: accounts with their fuel, the best one marked" width="80%" />
+</p>
 
----
+## Try it
 
-## install
+macOS on Apple Silicon. Best in [Ghostty](https://ghostty.org); other terminals work with plain symbols instead of the agent logos.
 
-```bash
-curl -fsSL https://herdr.dev/install.sh | sh
+**1. The app**
+
+```sh
+mkdir -p ~/.local/bin
+curl -fsSL -o ~/.local/bin/orcha https://github.com/trungkien1208/orcha/releases/latest/download/orcha-macos-arm64
+chmod +x ~/.local/bin/orcha
 ```
 
-or `brew install herdr` · `mise use -g herdr` · windows: `powershell -ExecutionPolicy Bypass -c "irm https://herdr.dev/install.ps1 | iex"` · [endpoint-protected Windows](https://herdr.dev/docs/windows-beta/) · [binaries](https://github.com/herdrdev/herdr/releases)
+Make sure `~/.local/bin` is on your `PATH`.
 
-then start it where the work lives:
+**2. The extras** (fuel, account switch, hand-off, theme, logo font)
 
-```bash
-herdr
+```sh
+curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha-config/main/install.sh | sh
 ```
 
-run your agents, split panes, walk away. `ctrl+b q` detaches, `herdr` reattaches. [quick start →](https://herdr.dev/docs/quick-start/)
+**3. Run it** where your projects live
 
-## docs
-
-everything lives at [herdr.dev/docs](https://herdr.dev/docs/): [quick start](https://herdr.dev/docs/quick-start/) · [concepts](https://herdr.dev/docs/concepts/) · [supported agents](https://herdr.dev/docs/agents/) · [keyboard](https://herdr.dev/docs/keyboard/) · [configuration](https://herdr.dev/docs/configuration/) · [session state](https://herdr.dev/docs/session-state/) · [connecting machines](https://herdr.dev/docs/connecting-machines/) · [remote](https://herdr.dev/docs/persistence-remote/) · [integrations](https://herdr.dev/docs/integrations/) · [add herdr support to your agent](https://herdr.dev/docs/add-herdr-support/) · [plugins](https://herdr.dev/docs/plugins/) · [socket api](https://herdr.dev/docs/socket-api/)
-
-## thanks
-
-every past sponsor and backer is listed in [SPONSORS.md](./SPONSORS.md) — thank you 🐑
-
-enterprise / partnership: hey@herdr.dev
-
-## agent instructions
-
-if you are an ai agent helping with this repository, read [`AGENTS.md`](./AGENTS.md) before making changes and read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before opening issues or PRs.
-
-## development
-
-```bash
-git clone https://github.com/herdrdev/herdr
-cd herdr
-cargo build --release
-
-just test        # unit tests
-just check       # formatting, tests, and maintenance checks
+```sh
+orcha
 ```
 
-## license
+- `+ NEW` starts an agent.
+- `⌘,` opens settings: theme, font, IDE, Git app.
+- `ctrl+b q` detaches; run `orcha` again to come back. Your agents keep running.
 
-Herdr is licensed under the [Apache License 2.0](LICENSE).
+Already use herdr? On first run orcha copies your herdr config and workspaces. herdr itself stays untouched.
+
+## Feedback
+
+This is an early build for friends to try. Something looks off or breaks? [Open an issue](https://github.com/trungkien1208/orcha/issues) with a screenshot. Ideas are welcome too.
+
+## Build from source
+
+You need Rust and [Zig 0.16](https://ziglang.org/download/).
+
+```sh
+git clone https://github.com/trungkien1208/orcha && cd orcha
+ZIG=/path/to/zig cargo build --release
+cp target/release/herdr ~/.local/bin/orcha   # the name "orcha" turns on the orcha app
+```
+
+## Thanks
+
+orcha is a fork of [herdr](https://github.com/herdrdev/herdr). herdr does the hard part: the terminal runtime, sessions, and agent detection. orcha adds the look and the agent workflow on top. The original README is in [docs/orcha/herdr-README.md](docs/orcha/herdr-README.md).
+
+Licensed under the [Apache License 2.0](LICENSE), like herdr.

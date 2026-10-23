@@ -6,6 +6,9 @@
     <meta name="theme-color" content="#fff4d6" />
     <meta name="description" content="Orcha brings coding agents, projects, account fuel and Git context into one calm terminal workspace." />
     <title>Orcha — a calm workspace for coding agents</title>
+    <link rel="icon" type="image/svg+xml" href="assets/orcha-mark.svg" />
+    <link rel="icon" type="image/png" sizes="512x512" href="assets/orcha-mark.png" />
+    <link rel="apple-touch-icon" href="assets/orcha-mark.png" />
     <script>
       try {
         const savedTheme = localStorage.getItem("orcha-theme");
@@ -31,7 +34,6 @@
         --soft: #c9c2ad;
         --pane: #ffffff;
         --pane-ink: #111111;
-        --ceramic: #f4ead0;
         --yellow: #ffd23f;
         --pink: #ff7ab6;
         --green: #7be0ad;
@@ -55,7 +57,6 @@
         --soft: #4f493f;
         --pane: #262320;
         --pane-ink: #f2e8d3;
-        --ceramic: #f2e8d3;
         --yellow: #f2c53d;
         --pink: #f07aae;
         --green: #74d3a3;
@@ -88,149 +89,84 @@
       html.intro-active .intro-overlay { display: grid; }
       html.intro-active body:not(.intro-done) .page { visibility: hidden; opacity: 0; }
       .intro-overlay.leaving { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 280ms ease, visibility 280ms; }
-      .intro-scene { position: relative; width: min(380px, 86vw); height: min(350px, 58vh); min-height: 260px; display: grid; place-items: start center; }
-      .intro-mark {
+      .intro-scene {
         position: relative;
-        z-index: 2;
-        margin-top: 3px;
-        padding: 10px 13px;
+        width: min(500px, calc(100vw - 32px));
+        height: min(350px, 58vh);
+        min-height: 270px;
+        overflow: hidden;
         border: 3px solid var(--line);
-        background: var(--pink);
-        color: #111;
-        box-shadow: 5px 5px 0 var(--shadow);
-        font: 900 14px/1 var(--mono);
-        letter-spacing: .08em;
+        background: var(--frame);
+        box-shadow: 8px 8px 0 var(--shadow);
       }
-      .cup {
-        position: absolute;
-        bottom: 11px;
-        left: 50%;
-        width: 260px;
-        height: 136px;
-        transform: translateX(-50%);
-      }
-      .cup-bowl {
-        position: absolute;
-        top: 20px;
-        left: 15px;
-        width: 230px;
-        height: 108px;
-        border: 4px solid var(--line);
-        border-top: 0;
-        border-radius: 0 0 48% 48% / 0 0 55% 55%;
-        background: var(--ceramic);
-        box-shadow: inset -15px -3px 0 color-mix(in srgb, var(--pink) 24%, transparent);
-      }
-      .cup-rim {
+      .intro-console-head, .intro-console-foot {
         position: absolute;
         z-index: 2;
-        top: 5px;
+        right: 0;
         left: 0;
-        width: 260px;
-        height: 42px;
-        border: 4px solid var(--line);
-        border-radius: 50%;
-        background: var(--green);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0 11px;
+        color: var(--muted);
+        font: 800 9px/1 var(--mono);
+        letter-spacing: .08em;
+        text-transform: uppercase;
       }
-      .cup-rim::after {
-        content: "";
-        position: absolute;
-        inset: 6px 15px;
-        border-top: 2px solid color-mix(in srgb, var(--card) 65%, transparent);
-        border-radius: 50%;
-      }
-      .cup-foot {
-        position: absolute;
-        z-index: 1;
-        bottom: 0;
-        left: 50%;
-        width: 74px;
-        height: 10px;
-        transform: translateX(-50%);
-        border: 3px solid var(--line);
-        border-top: 0;
-        border-radius: 0 0 50% 50%;
-      }
-      .whale-art {
-        position: absolute;
-        z-index: 3;
-        top: 77px;
-        left: calc(50% - 68px);
-        width: 136px;
-        height: 76px;
-        opacity: 0;
-        transform-origin: 56% 55%;
-        animation: whale-dive 1.75s cubic-bezier(.2,.65,.25,1) .12s both;
-      }
-      .whale-body {
-        position: absolute;
-        top: 14px;
-        left: 14px;
-        width: 111px;
-        height: 49px;
-        border: 3px solid #111;
-        border-radius: 56% 52% 50% 57%;
-        background: #111;
-      }
-      .whale-tail {
-        position: absolute;
-        top: 32px;
-        left: 1px;
-        width: 35px;
-        height: 38px;
-        background: #111;
-        clip-path: polygon(80% 25%, 100% 0, 83% 48%, 100% 100%, 48% 69%, 0 88%, 23% 48%, 0 8%, 53% 30%);
-      }
-      .whale-dorsal {
-        position: absolute;
+      .intro-console-head {
         top: 0;
-        left: 69px;
-        width: 28px;
-        height: 26px;
-        background: #111;
-        clip-path: polygon(0 100%, 70% 0, 100% 100%);
+        height: 34px;
+        border-bottom: 2px solid var(--line);
+        background: var(--card);
       }
-      .whale-patch {
-        position: absolute;
-        top: 22px;
-        right: 17px;
-        width: 25px;
-        height: 17px;
-        border-radius: 55% 45% 60% 40%;
-        background: #fff4d6;
-        transform: rotate(-18deg);
+      .intro-console-head strong { display: inline-flex; align-items: center; gap: 5px; color: var(--ink); }
+      .intro-mark { width: 14px; height: 14px; display: block; }
+      .intro-console-foot {
+        bottom: 0;
+        height: 31px;
+        border-top: 2px solid var(--line);
+        color: var(--ink);
       }
-      :root[data-theme="dark"] .whale-patch { background: #f2e8d3; }
-      :root[data-theme="dark"] .whale-art { filter: drop-shadow(0 0 8px var(--ceramic)); }
-      .whale-eye { position: absolute; top: 20px; right: 25px; width: 5px; height: 5px; border-radius: 50%; background: #111; }
-      .whale-fin {
+      .intro-canvas { position: absolute; inset: 35px 0 32px; }
+      .ascii-whale, .ascii-bowl, .ascii-splash {
         position: absolute;
+        margin: 0;
+        font-family: var(--mono);
+        font-weight: 800;
+        white-space: pre;
+      }
+      .ascii-whale {
+        z-index: 3;
+        top: 27px;
+        left: 50%;
+        color: var(--pink);
+        font-size: clamp(10px, 1.45vw, 14px);
+        line-height: 1.02;
+        animation: whale-dive 1.75s steps(5, end) .12s both;
+      }
+      .ascii-bowl {
         z-index: 2;
-        bottom: -2px;
-        left: 64px;
-        width: 30px;
-        height: 22px;
-        background: #111;
-        clip-path: polygon(0 0, 100% 17%, 38% 100%);
-        transform: rotate(13deg);
+        bottom: 9px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: var(--ink);
+        font-size: clamp(9px, 1.25vw, 12px);
+        line-height: 1.1;
+        text-align: center;
       }
-      .splash {
-        position: absolute;
+      .ascii-matcha { color: #397a45; }
+      :root[data-theme="dark"] .ascii-matcha { color: var(--green); }
+      .ascii-splash {
         z-index: 4;
-        top: calc(100% - 162px);
-        left: calc(50% - 6px);
-        width: 12px;
-        height: 19px;
-        border: 2px solid var(--line);
-        border-radius: 70% 20% 65% 35%;
-        background: var(--blue);
+        top: calc(100% - 78px);
+        left: 50%;
+        color: var(--blue);
+        font-size: 13px;
+        line-height: 1;
+        text-align: center;
         opacity: 0;
-        animation: splash-arc 680ms ease-out 1.12s both;
+        animation: splash-arc 650ms steps(4, end) 1.58s both;
       }
-      .splash:nth-of-type(2) { --dx: -83px; --dy: -45px; --turn: -48deg; }
-      .splash:nth-of-type(3) { --dx: -43px; --dy: -70px; --turn: -8deg; animation-delay: 1.08s; }
-      .splash:nth-of-type(4) { --dx: 50px; --dy: -64px; --turn: 35deg; animation-delay: 1.12s; }
-      .splash:nth-of-type(5) { --dx: 88px; --dy: -37px; --turn: 58deg; animation-delay: 1.16s; }
       .skip-intro {
         position: fixed;
         right: max(20px, env(safe-area-inset-right));
@@ -250,6 +186,7 @@
         height: 100dvh;
         min-height: 0;
         overflow: hidden;
+        transition: opacity 360ms ease;
         display: grid;
         grid-template-rows: 42px minmax(0, 1fr) 18px;
         gap: clamp(12px, 2.2vh, 22px);
@@ -266,6 +203,9 @@
       .topbar { justify-content: space-between; min-width: 0; }
       .brand { gap: 12px; min-width: 0; }
       .brand-chip, .mini-brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
         border: 2px solid var(--line);
         background: var(--pink);
         color: #111;
@@ -275,6 +215,7 @@
         box-shadow: 3px 3px 0 var(--shadow);
       }
       .brand-chip { padding: 7px 10px; font-size: 13px; line-height: 1; }
+      .brand-mark { display: block; width: 17px; height: 17px; flex: 0 0 auto; }
       .brand-note, .footer, .micro-label, .eyebrow, .project-title, .pane-head,
       .panel-title, .stage-name, .counts, .settings, .status-row, .feature-kicker {
         font-family: var(--mono);
@@ -283,6 +224,36 @@
       }
       .brand-note { color: var(--muted); font-size: 10px; font-weight: 700; }
       .top-actions { gap: 9px; }
+      .github-link {
+        min-height: 34px;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 0 10px;
+        border: 2px solid var(--line);
+        background: var(--card);
+        color: var(--ink);
+        box-shadow: 2px 2px 0 var(--shadow);
+        text-decoration: none;
+        font: 800 10px/1 var(--mono);
+        letter-spacing: .035em;
+        text-transform: uppercase;
+      }
+      .github-icon { display: block; width: 15px; height: 15px; flex: 0 0 auto; }
+      .github-group { display: inline-flex; align-items: stretch; box-shadow: 2px 2px 0 var(--shadow); }
+      .github-group .github-link, .github-group .github-star, .github-star-count:not([hidden]) {
+        min-height: 34px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 2px solid var(--line);
+        background: var(--card);
+        color: var(--ink);
+        box-shadow: none;
+      }
+      .github-group .github-link { width: 36px; padding: 0; border-right: 0; }
+      .github-group .github-star { margin-left: -2px; }
+      .github-group .github-link:hover, .github-group .github-star:hover { position: relative; z-index: 1; transform: translate(-1px, -1px); }
       .theme-button {
         min-height: 34px;
         justify-content: center;
@@ -335,6 +306,7 @@
         background: var(--card);
       }
       .mini-brand { padding: 3px 6px; font-size: 10px; box-shadow: none; }
+      .mini-brand .brand-mark { width: 12px; height: 12px; }
       .counts { color: var(--muted); font-size: 9px; font-weight: 700; white-space: nowrap; }
       .settings { margin-left: auto; color: var(--muted); font-size: 9px; white-space: nowrap; }
       .window-body { min-height: 0; display: grid; grid-template-columns: minmax(132px, 22%) minmax(0, 1fr) minmax(142px, 22%); gap: 9px; padding: 10px; }
@@ -413,6 +385,17 @@
       .intro-cta { display: flex; align-items: center; gap: 13px; margin: clamp(14px, 2.3vh, 23px) 0 clamp(16px, 2.7vh, 28px); }
       .primary-link { display: inline-flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 14px; border: 3px solid var(--line); background: var(--green); color: #111; box-shadow: 4px 4px 0 var(--shadow); text-decoration: none; font: 900 10px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; }
       .primary-link:hover { transform: translate(-1px, -1px); box-shadow: 5px 5px 0 var(--shadow); }
+      .github-star {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 10px;
+        text-decoration: none;
+        font: 800 10px/1 var(--mono);
+        letter-spacing: .035em;
+        text-transform: uppercase;
+      }
+      .github-star-count:not([hidden]) { margin-left: -2px; padding: 0 9px; font: 800 10px/1 var(--mono); font-variant-numeric: tabular-nums; }
       .agent-list { color: var(--muted); font: 9px/1.6 var(--mono); }
       .feature-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 2px solid var(--line); border-left: 2px solid var(--line); }
       .feature { min-width: 0; min-height: 78px; padding: 10px 11px 8px; border-right: 2px solid var(--line); border-bottom: 2px solid var(--line); }
@@ -432,18 +415,19 @@
         80%, 100% { left: 77%; }
       }
       @keyframes whale-dive {
-        0% { opacity: 0; transform: translate(-180px, -110px) rotate(-28deg) scale(.7); }
-        16% { opacity: 1; transform: translate(-125px, -94px) rotate(-20deg) scale(.82); }
-        53% { opacity: 1; transform: translate(-18px, -42px) rotate(-4deg) scale(1); }
-        72% { opacity: 1; transform: translate(13px, 7px) rotate(20deg) scale(.92); }
-        86% { opacity: 1; transform: translate(9px, 42px) rotate(33deg) scale(.75); }
-        100% { opacity: 0; transform: translate(7px, 68px) rotate(36deg) scale(.55); }
+        0% { opacity: 0; transform: translate(calc(-50% - 155px), 20px); }
+        12% { opacity: 1; transform: translate(calc(-50% - 120px), 8px); }
+        38% { opacity: 1; transform: translate(calc(-50% - 62px), -5px); }
+        62% { opacity: 1; transform: translate(calc(-50% - 12px), 14px); }
+        78% { opacity: 1; transform: translate(-50%, 44px); }
+        89% { opacity: 1; transform: translate(-50%, 112px); }
+        100% { opacity: 0; transform: translate(-50%, 145px); }
       }
       @keyframes splash-arc {
-        0% { opacity: 0; transform: translate(0, 18px) scale(.25) rotate(0); }
-        16% { opacity: 1; }
-        65% { opacity: 1; transform: translate(var(--dx, 0), var(--dy, -54px)) scale(1) rotate(var(--turn, 20deg)); }
-        100% { opacity: 0; transform: translate(var(--dx, 0), 22px) scale(.7) rotate(var(--turn, 20deg)); }
+        0% { opacity: 0; transform: translateX(-50%) translateY(8px); }
+        24% { opacity: 1; transform: translateX(-50%) translateY(-18px); }
+        62% { opacity: 1; transform: translateX(-50%) translateY(-39px); }
+        100% { opacity: 0; transform: translateX(-50%) translateY(17px); }
       }
       @keyframes blink { to { visibility: hidden; } }
       @keyframes arrive { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
@@ -474,6 +458,12 @@
         .brand-chip { padding: 6px 7px; font-size: 11px; }
         .brand-note { max-width: 100px; font-size: 8px; line-height: 1.2; }
         .top-actions { gap: 6px; }
+        .github-link { min-height: 29px; padding: 0 7px; gap: 4px; font-size: 8px; }
+        .github-icon { width: 13px; height: 13px; }
+        .github-group .github-link, .github-group .github-star, .github-star-count:not([hidden]) { min-height: 29px; }
+        .github-group .github-link { width: 31px; padding: 0; }
+        .github-group .github-star { padding: 0 7px; gap: 4px; font-size: 8px; }
+        .github-star-count:not([hidden]) { padding: 0 7px; font-size: 8px; }
         .theme-button { min-height: 29px; padding: 0 7px; gap: 5px; font-size: 8px; }
         .theme-swatch { width: 8px; height: 8px; }
         .stage { grid-template-rows: minmax(0, .78fr) minmax(0, 1.22fr); gap: 10px; }
@@ -516,6 +506,9 @@
         .feature p { font-size: 8px; line-height: 1.25; }
         .footer { font-size: 6px; }
       }
+      @media (max-width: 380px) {
+        .brand-note { display: none; }
+      }
       @media (max-height: 680px) and (min-width: 561px) {
         .page { padding-top: 10px; padding-bottom: 8px; gap: 8px; grid-template-rows: 32px minmax(0, 1fr) 14px; }
         .workspace-window { grid-template-rows: 31px minmax(0, 1fr) 22px; }
@@ -535,28 +528,58 @@
         .feature p { font-size: 7px; }
         .intro-cta { margin: 6px 0 6px; }
       }
+      @media (max-width: 980px) {
+        .agent-list { display: none; }
+      }
+      @media (max-width: 380px) {
+        .brand-note { display: none; }
+      }
     </style>
   </head>
   <body>
     <div class="intro-overlay" id="intro" role="group" aria-label="Orcha intro animation">
-      <div class="intro-scene" aria-hidden="true">
-        <div class="intro-mark">◉ ORCHA</div>
-        <div class="cup"><div class="cup-bowl"></div><div class="cup-rim"></div><div class="cup-foot"></div></div>
-        <div class="whale-art"><div class="whale-tail"></div><div class="whale-body"></div><div class="whale-dorsal"></div><div class="whale-patch"></div><div class="whale-eye"></div><div class="whale-fin"></div></div>
-        <i class="splash"></i><i class="splash"></i><i class="splash"></i><i class="splash"></i>
+      <div class="intro-scene">
+        <div class="intro-console-head"><strong><img class="intro-mark" src="assets/orcha-mark.svg" alt="" />ORCHA / BOOT</strong><span>TERMINAL WORKSPACE</span></div>
+        <div class="intro-canvas" aria-hidden="true">
+          <pre class="ascii-whale">                 .  .
+                  \/
+        __..---''`-._
+    _.-'   o          `-.
+  .'                   __)
+ &lt;       .-----.     _.'
+  `-._   `-----'  _.'
+      `--..____.-'
+       /`      `\</pre>
+          <pre class="ascii-splash">  .  |  .
+   \ | /
+ -- \|/ --</pre>
+          <pre class="ascii-bowl">       .-----------------------.
+      /  <span class="ascii-matcha">~ ~ ~ MATCHA ~ ~ ~</span>  \
+     /___________________________\
+     \                           /
+      `-._____________________.-'</pre>
+        </div>
+        <div class="intro-console-foot"><span>$ orcha --start</span><span>LAUNCHING <i class="cursor" aria-hidden="true"></i></span></div>
       </div>
       <button class="skip-intro" type="button" id="skip-intro">Skip intro <span aria-hidden="true">↗</span></button>
     </div>
     <div class="page" id="page">
       <header class="topbar">
         <div class="brand">
-          <span class="brand-chip">◉ ORCHA</span>
+          <span class="brand-chip"><img class="brand-mark" src="assets/orcha-mark.svg" alt="" />ORCHA</span>
           <span class="brand-note">A workspace for coding agents</span>
         </div>
         <nav class="top-actions" aria-label="Page actions">
+          <div class="github-group" role="group" aria-label="GitHub repository actions">
+            <a class="github-link" href="https://github.com/trungkien1208/orcha" target="_blank" rel="noreferrer" aria-label="View Orcha on GitHub" title="View Orcha on GitHub">
+              <svg class="github-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .9a11.1 11.1 0 0 0-3.51 21.63c.55.1.75-.24.75-.53v-1.85c-3.06.67-3.71-1.3-3.71-1.3-.5-1.28-1.22-1.62-1.22-1.62-.99-.68.08-.67.08-.67 1.1.08 1.68 1.13 1.68 1.13.98 1.67 2.58 1.19 3.21.91.1-.71.38-1.2.7-1.48-2.45-.28-5.02-1.22-5.02-5.45 0-1.2.43-2.18 1.13-2.95-.11-.28-.49-1.4.11-2.91 0 0 .92-.3 3.02 1.13a10.5 10.5 0 0 1 5.5 0c2.1-1.42 3.01-1.13 3.01-1.13.6 1.51.23 2.63.12 2.91.71.77 1.13 1.75 1.13 2.95 0 4.24-2.58 5.16-5.04 5.43.4.35.75 1.02.75 2.06V22c0 .3.2.64.76.53A11.1 11.1 0 0 0 12 .9Z"/></svg>
+            </a>
+            <a class="github-star" href="https://github.com/trungkien1208/orcha" target="_blank" rel="noreferrer" aria-label="Star Orcha on GitHub"><span aria-hidden="true">☆</span> Star</a>
+            <span class="github-star-count" id="github-stars" hidden></span>
+          </div>
           <button class="theme-button" type="button" id="theme-toggle" aria-pressed="false">
             <span class="theme-swatch" aria-hidden="true"></span>
-            <span id="theme-label">Brutal light</span>
+            <span id="theme-label">Light</span>
           </button>
         </nav>
       </header>
@@ -564,7 +587,7 @@
       <main class="stage">
         <section class="workspace-window" aria-label="Orcha workspace preview with projects, agent panes, fuel and Git details">
           <div class="mini-head">
-            <span class="mini-brand">◉ ORCHA</span>
+            <span class="mini-brand"><img class="brand-mark" src="assets/orcha-mark.svg" alt="" />ORCHA</span>
             <span class="counts">2 projects · 3 agents</span>
             <span class="settings">⌘, settings</span>
           </div>
@@ -660,7 +683,7 @@
           <h1 id="headline">Every agent.<br />Every project.<br />In rhythm.</h1>
           <p class="lede">Orcha brings coding agents into one terminal workspace, so you can see what’s moving, what needs you, and what changed.</p>
           <div class="intro-cta">
-            <a class="primary-link" href="https://github.com/trungkien1208/orcha" target="_blank" rel="noreferrer">Explore the project <span aria-hidden="true">↗</span></a>
+            <a class="primary-link" href="https://github.com/trungkien1208/orcha" target="_blank" rel="noreferrer">Get started <span aria-hidden="true">↗</span></a>
             <span class="agent-list">CLAUDE · CODEX · CURSOR</span>
           </div>
           <div class="feature-grid" aria-label="Orcha features">
@@ -704,16 +727,16 @@
       } else {
         page.setAttribute("inert", "");
         skipIntro.focus({ preventScroll: true });
-        introTimer = window.setTimeout(finishIntro, 2050);
+        introTimer = window.setTimeout(finishIntro, 2380);
       }
 
       const themeButton = document.querySelector("#theme-toggle");
       const themeLabel = document.querySelector("#theme-label");
       const updateThemeButton = () => {
         const dark = document.documentElement.dataset.theme === "dark";
-        themeLabel.textContent = dark ? "Brutal dark" : "Brutal light";
+        themeLabel.textContent = dark ? "Dark" : "Light";
         themeButton.setAttribute("aria-pressed", String(dark));
-        themeButton.setAttribute("aria-label", `Switch to brutal ${dark ? "light" : "dark"} theme`);
+        themeButton.setAttribute("aria-label", `Switch to ${dark ? "light" : "dark"} mode`);
         document.querySelector('meta[name="theme-color"]').content = dark ? "#1f1c19" : "#fff4d6";
       };
       updateThemeButton();
@@ -723,6 +746,29 @@
         try { localStorage.setItem("orcha-theme", nextTheme); } catch (_) {}
         updateThemeButton();
       });
+
+      const githubStars = document.querySelector("#github-stars");
+      const starsCacheKey = "orcha-github-stars";
+      const renderStars = (count) => {
+        if (!Number.isFinite(count)) return;
+        githubStars.textContent = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(count);
+        githubStars.title = `${count.toLocaleString("en")} GitHub stars`;
+        githubStars.hidden = false;
+      };
+      try {
+        const cachedStars = JSON.parse(localStorage.getItem(starsCacheKey) || "null");
+        if (cachedStars && Date.now() - cachedStars.savedAt < 900000) renderStars(cachedStars.count);
+      } catch (_) {}
+      fetch("https://api.github.com/repos/trungkien1208/orcha", { headers: { Accept: "application/vnd.github+json" } })
+        .then((response) => {
+          if (!response.ok) throw new Error("GitHub stars unavailable");
+          return response.json();
+        })
+        .then((repo) => {
+          renderStars(repo.stargazers_count);
+          try { localStorage.setItem(starsCacheKey, JSON.stringify({ count: repo.stargazers_count, savedAt: Date.now() })); } catch (_) {}
+        })
+        .catch(() => {});
     </script>
   </body>
 </html>

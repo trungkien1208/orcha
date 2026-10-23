@@ -80,7 +80,7 @@ pub(crate) fn maybe_run_config_tool(args: &[String]) -> Option<i32> {
     };
     let status = std::process::Command::new(tool).args(&args[1..]).status();
     if command == "update" {
-        eprintln!("orcha app: pull and rebuild ~/Project/Taggle/orcha to update the app itself.");
+        eprintln!("orcha app: download the latest release (see the README) to update the app itself.");
     }
     Some(status.ok().and_then(|status| status.code()).unwrap_or(1))
 }
