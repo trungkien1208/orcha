@@ -175,8 +175,8 @@ fn accounts_popup_lists_fuel() {
     for row in frame_rows(&frame) {
         eprintln!("|{row}|");
     }
-    assert!(all.contains("ACCOUNTS") && all.contains("IN USE") && all.contains("MOST FUEL"));
-    assert!(all.contains("switch this chat"));
+    assert!(all.contains("CONTINUE ON") && all.contains("IN USE") && all.contains("BEST"));
+    assert!(all.contains("continue") && all.contains("8% left"), "says how low");
     assert_eq!(state.hits.orcha.popup.actions.len(), 1, "only the other account switches");
     assert!(state.update_low_fuel_hint(), "8% left offers a switch");
 

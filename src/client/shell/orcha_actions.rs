@@ -361,6 +361,26 @@ impl ClientShellState {
                     env.push(("HERDR_ACTIVE_PANE_ID", pane.clone()));
                 }
                 let signed_out = account.error.is_some() && account.windows.is_empty();
+                // another agent than the chat's: hand the chat off to it
+                let current_kind = self
+                    .accounts
+                    .data()
+                    .and_then(|data| data.iter().find(|a| a.current).map(|a| a.kind.clone()));
+                if let (false, Some(pane), Some(kind)) = (signed_out, &pane, &current_kind) {
+                    if *kind != account.kind {
+                        let command = fill(
+                            &orcha.handoff_command,
+                            &[
+                                ("pane", pane),
+                                ("agent", &account.kind),
+                                ("mode", if alternate { "summary" } else { "full" }),
+                            ],
+                        );
+                        run_detached(command, &[]);
+                        self.orcha_ui.popup = None;
+                        return;
+                    }
+                }
                 let command = if signed_out {
                     fill(&orcha.login_command, &[("id", &account.id)])
                 } else if alternate || pane.is_none() {
@@ -509,6 +529,38 @@ impl ClientShellState {
         let changed = hint != self.orcha_ui.low_fuel_hint;
         self.orcha_ui.low_fuel_hint = hint;
         changed
+    }
+
+    /// Running low: once per account, when the focused agent is between
+    /// turns, ask where to continue (the CONTINUE ON popup, best choice
+    /// picked).
+    pub(super) fn offer_continue_on_low_fuel(&mut self) -> bool {
+        if self.orcha_ui.popup.is_some() || self.overlay.is_some() {
+            return false;
+        }
+        let Some(current) = self.accounts.current().filter(|account| account.current) else {
+            return false;
+        };
+        let low = current
+            .lowest()
+            .is_some_and(|left| left < self.config.orcha.low_fuel_percent);
+        if !low || self.orcha_ui.low_fuel_offered.contains(&current.id) {
+            return false;
+        }
+        let busy = self.snapshot.as_deref().is_some_and(|snapshot| {
+            let focused = snapshot.focused_pane_id.as_deref();
+            snapshot.agents.iter().any(|agent| {
+                Some(agent.pane_id.as_str()) == focused
+                    && agent.agent_status == crate::api::schema::AgentStatus::Working
+            })
+        });
+        if busy {
+            return false;
+        }
+        let id = current.id.clone();
+        self.orcha_ui.low_fuel_offered.insert(id);
+        self.open_accounts_overlay();
+        true
     }
 
     /// Focuses the next agent that needs you, across all projects.

@@ -247,15 +247,21 @@ enum ButtonKind {
 
 /// The account a switch should go to: most fuel among the others of the
 /// current one's kind.
+/// Where to continue: another account of the same agent while it has fuel
+/// (the chat goes on as is), else whichever agent has the most.
 pub(super) fn best_account(accounts: &[Account]) -> Option<usize> {
     let current = accounts.iter().find(|account| account.current)?;
-    accounts
-        .iter()
-        .enumerate()
-        .filter(|(_, account)| {
-            !account.current && account.kind == current.kind && account.error.is_none()
-        })
-        .max_by_key(|(_, account)| account.lowest().unwrap_or(0))
+    let usable = |account: &&Account| !account.current && !account.windows.is_empty();
+    let most = |same_kind: bool| {
+        accounts
+            .iter()
+            .enumerate()
+            .filter(|(_, account)| usable(account) && (!same_kind || account.kind == current.kind))
+            .max_by_key(|(_, account)| account.lowest().unwrap_or(0))
+    };
+    most(true)
+        .filter(|(_, account)| account.lowest().unwrap_or(0) >= 20)
+        .or_else(|| most(false))
         .map(|(index, _)| index)
 }
 
@@ -288,14 +294,24 @@ fn render_accounts(
             )
         })
         .unwrap_or_else(|| "no agent in the focused pane".to_owned());
+    // running low: say how low
+    let low = accounts
+        .iter()
+        .find(|account| account.current)
+        .and_then(|account| account.lowest().map(|left| (account, left)))
+        .filter(|(_, left)| *left < config.orcha.low_fuel_percent.max(20));
+    let context = match low {
+        Some((account, left)) => format!("{context} · ⚠ {} {left}% left", account.label),
+        None => context,
+    };
     let frame = popup_frame(
         buffer,
         84,
         body_height,
-        "ACCOUNTS",
+        "CONTINUE ON",
         &context,
-        &[("↵", "switch this chat"), ("⌥↵", "open in new tab"), ("H", "hand off")],
-        "esc close",
+        &[("↵", "continue"), ("⌥↵", "summary first / new tab"), ("esc", "not now")],
+        "",
         t,
         hits,
     )?;
@@ -311,16 +327,24 @@ fn render_accounts(
         return Some(());
     }
     let best = best_account(accounts);
+    let current_kind = accounts
+        .iter()
+        .find(|account| account.current)
+        .map(|account| account.kind.clone());
     let mut y = frame.body.y;
     for (index, account) in accounts.iter().enumerate() {
         if y + row_height > frame.body.bottom() + 1 {
             break;
         }
         let rect = Rect::new(frame.body.x, y, frame.body.width, row_height);
+        // another agent: the chat is handed off; the same agent: it goes on as is
+        let hand_off = current_kind.as_deref().is_some_and(|kind| kind != account.kind);
         let badge = if account.current {
             Some(("IN USE", t.card, t.ink))
         } else if Some(index) == best {
-            Some(("MOST FUEL", t.chip_text, t.green))
+            Some(("BEST", t.chip_text, t.green))
+        } else if hand_off {
+            Some(("hand-off", t.ink, t.frame))
         } else {
             None
         };
@@ -330,9 +354,9 @@ fn render_accounts(
         } else if signed_out {
             ("SIGN IN", ButtonKind::Plain)
         } else if Some(index) == best {
-            ("SWITCH ↵", ButtonKind::Primary)
+            ("CONTINUE ↵", ButtonKind::Primary)
         } else {
-            ("SWITCH", ButtonKind::Plain)
+            ("CONTINUE", ButtonKind::Plain)
         };
         account_row(
             buffer,

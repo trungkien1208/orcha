@@ -133,6 +133,8 @@ pub(crate) struct OrchaUiState {
     pub(super) popup: Option<super::orcha_popup::OrchaPopup>,
     /// The header's low-fuel offer, when the current account runs low.
     pub(super) low_fuel_hint: Option<String>,
+    /// Accounts the CONTINUE ON popup was already offered for (once each).
+    pub(super) low_fuel_offered: HashSet<String>,
 }
 
 #[derive(Default)]

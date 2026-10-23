@@ -138,6 +138,7 @@ impl ClientShellState {
         if repaint {
             self.update_low_fuel_hint();
         }
+        repaint |= self.offer_continue_on_low_fuel();
         let running = self.snapshot.as_deref().is_some_and(|snapshot| {
             snapshot.agents.iter().any(|agent| {
                 matches!(agent.agent_status, crate::api::schema::AgentStatus::Working)
