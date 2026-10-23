@@ -2,6 +2,12 @@ use serde::Deserialize;
 use tracing::warn;
 
 pub const THEME_NAMES: &[&str] = &[
+    // orcha's own looks first
+    "orcha",
+    "orcha-dark",
+    "matcha",
+    "matcha-dark",
+    "ocean",
     "catppuccin",
     "catppuccin-latte",
     "terminal",
@@ -20,10 +26,6 @@ pub const THEME_NAMES: &[&str] = &[
     "rose-pine",
     "rose-pine-dawn",
     "vesper",
-    "brutal",
-    "brutal-dark",
-    "brutal-matcha",
-    "brutal-ocean",
 ];
 
 pub(crate) fn canonical_theme_name(name: &str) -> Option<&'static str> {
@@ -46,10 +48,12 @@ pub(crate) fn canonical_theme_name(name: &str) -> Option<&'static str> {
         "rose-pine" | "rosepine" => Some("rose-pine"),
         "rose-pine-dawn" | "rosepine-dawn" | "dawn" => Some("rose-pine-dawn"),
         "vesper" => Some("vesper"),
-        "brutal" | "brutal-light" | "orcha" => Some("brutal"),
-        "brutal-dark" | "brutal-night" | "orcha-dark" => Some("brutal-dark"),
-        "brutal-matcha" | "matcha" => Some("brutal-matcha"),
-        "brutal-ocean" | "ocean" => Some("brutal-ocean"),
+        // the old Brutal names still work
+        "orcha" | "orcha-light" | "brutal" | "brutal-light" => Some("orcha"),
+        "orcha-dark" | "brutal-dark" | "brutal-night" => Some("orcha-dark"),
+        "matcha" | "matcha-light" | "brutal-matcha" => Some("matcha"),
+        "matcha-dark" => Some("matcha-dark"),
+        "ocean" | "brutal-ocean" => Some("ocean"),
         _ => None,
     }
 }
@@ -268,9 +272,9 @@ mod tests {
     #[test]
     fn style_files_parse_a_base_and_tokens() {
         let style: StyleFile =
-            toml::from_str("base = \"brutal-dark\"\nsidebar_bg = \"#102030\"\nmauve = \"#ff00aa\"\n")
+            toml::from_str("base = \"orcha-dark\"\nsidebar_bg = \"#102030\"\nmauve = \"#ff00aa\"\n")
                 .expect("style");
-        assert_eq!(style.base.as_deref(), Some("brutal-dark"));
+        assert_eq!(style.base.as_deref(), Some("orcha-dark"));
         assert_eq!(style.colors.sidebar_bg.as_deref(), Some("#102030"));
         assert!(style_file_path("../etc/passwd").is_none());
     }

@@ -443,6 +443,8 @@ pub(super) enum ClientSettingsSection {
     Theme,
     Font,
     Ligatures,
+    Ide,
+    GitUi,
     Indicators,
     Sound,
     Toast,
@@ -454,6 +456,8 @@ impl ClientSettingsSection {
         Self::Theme,
         Self::Font,
         Self::Ligatures,
+        Self::Ide,
+        Self::GitUi,
         Self::Indicators,
         Self::Sound,
         Self::Toast,
@@ -465,6 +469,8 @@ impl ClientSettingsSection {
             Self::Theme => "theme",
             Self::Font => "font",
             Self::Ligatures => "ligatures",
+            Self::Ide => "ide",
+            Self::GitUi => "git",
             Self::Indicators => "indicators",
             Self::Sound => "sound",
             Self::Toast => "toasts",
@@ -494,6 +500,9 @@ pub(super) struct OrchaAppearance {
     pub(super) font: String,
     pub(super) ligatures: bool,
     pub(super) note: Option<String>,
+    /// (name, command) of the IDEs and Git GUIs found; "auto" first.
+    pub(super) ides: Vec<(String, String)>,
+    pub(super) git_guis: Vec<(String, String)>,
 }
 
 #[derive(Debug)]

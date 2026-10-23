@@ -1,8 +1,12 @@
 use super::*;
 use crossterm::event::{KeyCode, KeyModifiers};
 
+/// The built-in name a theme goes by (old names like "brutal" included).
 pub(super) fn normalized_theme_name(name: &str) -> String {
-    name.to_lowercase().replace([' ', '_'], "-")
+    let normalized = name.to_lowercase().replace([' ', '_'], "-");
+    crate::config::canonical_theme_name(&normalized)
+        .map(str::to_owned)
+        .unwrap_or(normalized)
 }
 
 fn theme_index(name: &str) -> usize {
@@ -60,11 +64,59 @@ fn load_appearance() -> OrchaAppearance {
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
     OrchaAppearance {
+        ides: installed_apps(IDE_APPS),
+        git_guis: installed_apps(GIT_GUI_APPS),
         fonts,
         font: config["font"]["family"].as_str().unwrap_or_default().to_owned(),
         ligatures: config["font"]["ligatures"].as_bool().unwrap_or(true),
         note: None,
     }
+}
+
+/// IDEs orcha knows how to open a folder in (macOS app names).
+const IDE_APPS: &[&str] = &[
+    "Cursor",
+    "Visual Studio Code",
+    "Zed",
+    "Windsurf",
+    "WebStorm",
+    "IntelliJ IDEA",
+    "IntelliJ IDEA CE",
+    "PyCharm",
+    "GoLand",
+    "RustRover",
+    "Sublime Text",
+    "Nova",
+    "Xcode",
+];
+/// Git GUIs orcha knows how to open a repository in.
+const GIT_GUI_APPS: &[&str] = &[
+    "Fork",
+    "GitHub Desktop",
+    "Tower",
+    "Sourcetree",
+    "GitKraken",
+    "Sublime Merge",
+    "SmartGit",
+];
+
+/// "auto" (the first one found), then each app that is installed, with
+/// the command opening a folder in it.
+fn installed_apps(names: &[&str]) -> Vec<(String, String)> {
+    let mut out = vec![("auto: the first one found".to_owned(), String::new())];
+    if cfg!(test) {
+        return out;
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    for name in names {
+        let found = [format!("/Applications/{name}.app"), format!("{home}/Applications/{name}.app")]
+            .iter()
+            .any(|path| std::path::Path::new(path).is_dir());
+        if found {
+            out.push(((*name).to_owned(), format!("open -a '{name}' {{path}}")));
+        }
+    }
+    out
 }
 
 /// Runs orcha-config with `args` in the background (it rewrites the
@@ -115,6 +167,19 @@ impl ClientShellState {
                 Some(ClientShellOverlay::Settings(settings)) => usize::from(!settings.appearance.ligatures),
                 _ => 0,
             },
+            ClientSettingsSection::Ide | ClientSettingsSection::GitUi => {
+                match self.overlay.as_ref() {
+                    Some(ClientShellOverlay::Settings(settings)) => {
+                        let (apps, now) = if section == ClientSettingsSection::Ide {
+                            (&settings.appearance.ides, &self.config.orcha.ide)
+                        } else {
+                            (&settings.appearance.git_guis, &self.config.orcha.git_gui)
+                        };
+                        apps.iter().position(|(_, command)| command == now).unwrap_or(0)
+                    }
+                    _ => 0,
+                }
+            }
             ClientSettingsSection::Indicators => indicator_index(self.config.status_indicators),
             ClientSettingsSection::Sound => usize::from(!self.config.sound_enabled),
             ClientSettingsSection::Toast => toast_index(self.config.toast_delivery),
@@ -166,6 +231,8 @@ impl ClientShellState {
                 ClientSettingsSection::Theme => crate::config::THEME_NAMES.len(),
                 ClientSettingsSection::Font => settings.appearance.fonts.len(),
                 ClientSettingsSection::Ligatures => 2,
+                ClientSettingsSection::Ide => settings.appearance.ides.len(),
+                ClientSettingsSection::GitUi => settings.appearance.git_guis.len(),
                 ClientSettingsSection::Indicators | ClientSettingsSection::Sound => 2,
                 ClientSettingsSection::Toast => 4,
                 ClientSettingsSection::Integrations => settings.integrations.len(),
@@ -286,6 +353,37 @@ impl ClientShellState {
                     if on { "on" } else { "off" }.into(),
                 ]);
                 settings.appearance.ligatures = on;
+                outcome.repaint = true;
+            }
+            ClientSettingsSection::Ide | ClientSettingsSection::GitUi => {
+                let ide = section == ClientSettingsSection::Ide;
+                let Some(ClientShellOverlay::Settings(settings)) = self.overlay.as_mut() else {
+                    return;
+                };
+                let apps = if ide {
+                    &settings.appearance.ides
+                } else {
+                    &settings.appearance.git_guis
+                };
+                let Some((name, command)) = apps.get(selected).cloned() else {
+                    return;
+                };
+                settings.appearance.note = Some(format!("opens with {name}"));
+                let key = if ide { "ide" } else { "git_gui" };
+                if ide {
+                    self.config.orcha.ide = command.clone();
+                } else {
+                    self.config.orcha.git_gui = command.clone();
+                }
+                let path = crate::config::config_path();
+                let value = format!("\"{command}\"");
+                let _ = crate::thread_spawn::spawn_named("orcha-app-pref", move || {
+                    let content = std::fs::read_to_string(&path).unwrap_or_default();
+                    let updated = crate::config::upsert_section_value(&content, "orcha", key, &value);
+                    if let Err(err) = std::fs::write(&path, updated) {
+                        tracing::warn!(err = %err, "orcha: failed to save the {key} setting");
+                    }
+                });
                 outcome.repaint = true;
             }
             ClientSettingsSection::Indicators => {

@@ -286,7 +286,7 @@ fn orcha_preview() {
     let Ok(out) = std::env::var("ORCHA_PREVIEW_OUT") else {
         return;
     };
-    let theme = std::env::var("ORCHA_PREVIEW_THEME").unwrap_or_else(|_| "brutal".into());
+    let theme = std::env::var("ORCHA_PREVIEW_THEME").unwrap_or_else(|_| "orcha".into());
     let parsed: Config =
         toml::from_str(&format!("[theme]\nname = \"{theme}\"\n")).expect("toml");
     let (cols, rows) = (180u16, 48u16);

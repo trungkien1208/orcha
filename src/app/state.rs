@@ -590,6 +590,27 @@ impl Palette {
         }
     }
 
+    /// orcha Matcha dark — deep tea-green paper, same ink and shapes.
+    pub fn matcha_dark() -> Self {
+        Self {
+            panel_bg: Color::Rgb(38, 46, 34),
+            sidebar_bg: Color::Rgb(24, 30, 22),
+            active_row_bg: Color::Rgb(32, 40, 29),
+            selection_bg: Color::Rgb(70, 88, 40),
+            surface0: Color::Rgb(34, 42, 30),
+            surface1: Color::Rgb(68, 82, 58),
+            surface_dim: Color::Rgb(50, 60, 44),
+            overlay0: Color::Rgb(160, 178, 138),
+            overlay1: Color::Rgb(192, 208, 170),
+            text: Color::Rgb(232, 240, 214),
+            subtext0: Color::Rgb(204, 216, 184),
+            mauve: Color::Rgb(255, 143, 171),
+            accent: Color::Rgb(255, 143, 171),
+            green: Color::Rgb(150, 214, 96),
+            ..Self::brutal_dark()
+        }
+    }
+
     /// orcha Brutal ocean — pale sea paper, same ink and shapes.
     pub fn brutal_ocean() -> Self {
         Self {
@@ -637,10 +658,11 @@ impl Palette {
             "rose-pine" => Some(Self::rose_pine()),
             "rose-pine-dawn" => Some(Self::rose_pine_dawn()),
             "vesper" => Some(Self::vesper()),
-            "brutal" => Some(Self::brutal()),
-            "brutal-dark" => Some(Self::brutal_dark()),
-            "brutal-matcha" => Some(Self::brutal_matcha()),
-            "brutal-ocean" => Some(Self::brutal_ocean()),
+            "orcha" => Some(Self::brutal()),
+            "orcha-dark" => Some(Self::brutal_dark()),
+            "matcha" => Some(Self::brutal_matcha()),
+            "matcha-dark" => Some(Self::matcha_dark()),
+            "ocean" => Some(Self::brutal_ocean()),
             _ => None,
         }
     }
@@ -1557,7 +1579,7 @@ mod tests {
         // orcha's brutal themes paint their own paper
         for name in crate::config::THEME_NAMES
             .iter()
-            .filter(|name| !name.starts_with("brutal"))
+            .filter(|name| !matches!(**name, "orcha" | "orcha-dark" | "matcha" | "matcha-dark" | "ocean"))
         {
             let palette = Palette::from_name(name).unwrap();
             assert_eq!(

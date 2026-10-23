@@ -47,7 +47,7 @@ pub(super) fn render_settings_overlay(
     } else {
         22
     };
-    let popup = popup(buffer.area, 76, height)?;
+    let popup = popup(buffer.area, 92, height)?;
     let inner = panel(buffer, popup, palette.accent, palette.panel_bg)?;
     if inner.width < 20 || inner.height < 8 {
         return None;
@@ -227,6 +227,43 @@ pub(super) fn render_settings_overlay(
                 "font ligatures",
                 "join -> != === >= into one glyph, or keep every character apart",
                 &["on    ->  !=  ===  >=  (joined)", "off   -> != === >= (as typed)"],
+                settings.selected,
+                palette,
+                &mut choice_hits,
+            );
+            if let Some(note) = &settings.appearance.note {
+                put_text(
+                    buffer,
+                    content.x + 1,
+                    content.bottom().saturating_sub(1),
+                    content.width,
+                    note,
+                    Style::default().fg(palette.green).bg(palette.panel_bg),
+                );
+            }
+        }
+        ClientSettingsSection::Ide | ClientSettingsSection::GitUi => {
+            let ide = settings.section == ClientSettingsSection::Ide;
+            let (apps, title, description) = if ide {
+                (
+                    &settings.appearance.ides,
+                    "IDE",
+                    "the ⌘E / IDE button opens the project here",
+                )
+            } else {
+                (
+                    &settings.appearance.git_guis,
+                    "git ui",
+                    "the ⌘G / Git button opens the repository here",
+                )
+            };
+            let names: Vec<&str> = apps.iter().map(|(name, _)| name.as_str()).collect();
+            render_choice_section(
+                buffer,
+                content,
+                title,
+                description,
+                &names,
                 settings.selected,
                 palette,
                 &mut choice_hits,

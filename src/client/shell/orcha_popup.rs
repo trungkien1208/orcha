@@ -41,11 +41,13 @@ pub(super) struct PopupHits {
 }
 
 /// (agent kind, mode, label)
-pub(super) const HANDOFF_TARGETS: [(&str, &str, &str); 4] = [
+pub(super) const HANDOFF_TARGETS: [(&str, &str, &str); 6] = [
     ("codex", "full", "Codex · whole conversation"),
     ("codex", "summary", "Codex · summarize first, then continue"),
     ("claude", "full", "Claude · whole conversation"),
     ("claude", "summary", "Claude · summarize first, then continue"),
+    ("cursor", "full", "Cursor · whole conversation"),
+    ("cursor", "summary", "Cursor · summarize first, then continue"),
 ];
 
 struct Frame {

@@ -257,15 +257,17 @@ fn sibling_theme_names(name: &str) -> (String, String) {
         "rose-pine" | "rosepine" | "rose-pine-dawn" | "rosepine-dawn" | "dawn" => {
             ("rose-pine".to_string(), "rose-pine-dawn".to_string())
         }
-        "brutal" | "brutal-light" | "orcha" | "brutal-dark" | "brutal-night" | "orcha-dark" => {
-            ("brutal-dark".to_string(), "brutal".to_string())
+        "brutal" | "brutal-light" | "orcha" | "orcha-light" | "brutal-dark" | "brutal-night"
+        | "orcha-dark" => ("orcha-dark".to_string(), "orcha".to_string()),
+        "matcha" | "matcha-light" | "brutal-matcha" | "matcha-dark" => {
+            ("matcha-dark".to_string(), "matcha".to_string())
         }
         _ => (name.to_string(), name.to_string()),
     }
 }
 
 /// orcha's look is Brutal light; upstream tests keep herdr's catppuccin.
-const DEFAULT_THEME: &str = if cfg!(test) { "catppuccin" } else { "brutal" };
+const DEFAULT_THEME: &str = if cfg!(test) { "catppuccin" } else { "orcha" };
 
 fn theme_runtime_config(
     config: &crate::config::Config,

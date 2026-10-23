@@ -144,7 +144,10 @@ pub(super) fn render_frame_and_tabs(
         brutal::clip(&name, 22)
     };
     // box width: an edge, " name ", the state mark and a space, an edge
-    let width_of = |tab: &ClientShellTab| display_width(&label(tab)) + 4 + 2;
+    // a state square only when an agent runs in the tab
+    let width_of = |tab: &ClientShellTab| {
+        display_width(&label(tab)) + 4 + if t.state(tab.agent_status).is_some() { 2 } else { 0 }
+    };
     if std::mem::take(reveal_focused_tab) {
         if let Some(focused) = tabs.iter().position(|tab| tab.focused) {
             if focused < *tab_scroll {
@@ -207,18 +210,16 @@ pub(super) fn render_frame_and_tabs(
             style = style.add_modifier(Modifier::BOLD);
         }
         put_text(buffer, x + 2, y, display_width(&name), &name, style);
-        let (mark, color) = match t.state(tab.agent_status) {
-            Some(color) => ("■", color),
-            None => ("□", t.muted),
-        };
-        put_text(
-            buffer,
-            x + 2 + display_width(&name) + 1,
-            y,
-            1,
-            mark,
-            Style::default().fg(color).bg(fill),
-        );
+        if let Some(color) = t.state(tab.agent_status) {
+            put_text(
+                buffer,
+                x + 2 + display_width(&name) + 1,
+                y,
+                1,
+                "■",
+                Style::default().fg(color).bg(fill),
+            );
+        }
         hits.tabs.push((rect, tab.tab_id.clone()));
         x += w + 1;
         shown_until = index + 1;
