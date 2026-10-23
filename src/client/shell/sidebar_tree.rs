@@ -139,9 +139,10 @@ fn render_project_card(
 ) {
     let selected = state == ProjectState::Selected;
     if selected {
-        brutal::draw_box(buffer, rect, Edge::Heavy, t.line, t.card, t.bg);
-        brutal::draw_box_shadow(buffer, rect, t.shadow, t.bg);
-        for y in rect.y + 1..rect.bottom().saturating_sub(1) {
+        let card = Rect::new(rect.x, rect.y, rect.width.saturating_sub(1), rect.height.saturating_sub(1));
+        brutal::draw_box(buffer, card, Edge::Heavy, t.line, t.card, t.bg);
+        brutal::draw_box_shadow(buffer, card, t.shadow, t.bg);
+        for y in card.y + 1..card.bottom().saturating_sub(1) {
             put_text(
                 buffer,
                 rect.x + 1,
@@ -293,17 +294,23 @@ fn render_folded_project(
     hits: &mut ShellHitMap,
 ) {
     let fill = t.card;
-    let edge = Style::default().fg(t.line).bg(t.bg);
+    let edge = Style::default().fg(t.line).bg(fill);
     let inner = rect.width.saturating_sub(2);
+    let right = rect.right().saturating_sub(1);
     let mut row_y = rect.y;
+    // the card's top and bottom edges are rows of it, its lines on their outer side
     if first {
-        put_text(buffer, rect.x + 1, row_y, inner, &"▁".repeat(usize::from(inner)), edge);
+        put_text(buffer, rect.x, row_y, 1, "\u{1FB7D}", edge);
+        put_text(buffer, rect.x + 1, row_y, inner, &"▔".repeat(usize::from(inner)), edge);
+        put_text(buffer, right, row_y, 1, "\u{1FB7E}", edge);
         row_y += 1;
     }
     let row = Rect::new(rect.x, row_y, rect.width, 1);
     brutal::pill(buffer, row, "", t.ink, fill, true, t);
     if last {
-        put_text(buffer, rect.x + 1, row_y + 1, inner, &"▔".repeat(usize::from(inner)), edge);
+        put_text(buffer, rect.x, row_y + 1, 1, "\u{1FB7C}", edge);
+        put_text(buffer, rect.x + 1, row_y + 1, inner, &"▁".repeat(usize::from(inner)), edge);
+        put_text(buffer, right, row_y + 1, 1, "\u{1FB7F}", edge);
     }
     let y = row.y;
     let x = rect.x + 2;
@@ -370,8 +377,9 @@ fn render_process(
     t: &Brutal,
     hits: &mut ShellHitMap,
 ) {
-    brutal::draw_box(buffer, rect, Edge::Heavy, t.line, t.card, t.bg);
-    brutal::draw_box_shadow(buffer, rect, t.shadow, t.bg);
+    let card = Rect::new(rect.x, rect.y, rect.width.saturating_sub(1), rect.height.saturating_sub(1));
+    brutal::draw_box(buffer, card, Edge::Heavy, t.line, t.card, t.bg);
+    brutal::draw_box_shadow(buffer, card, t.shadow, t.bg);
     let x = rect.x + 3;
     let width = rect.width.saturating_sub(6);
     let mut y = rect.y + 1;
@@ -641,7 +649,9 @@ pub(crate) fn render_sidebar_tree(
         .enumerate()
         .map(|(index, (_, agents, project_state))| match project_state {
             ProjectState::Folded => 1 + u16::from(run[index].0) + u16::from(run[index].1),
-            _ => 3 + agents.len() as u16,
+            // the raised card's shadow takes a row under it
+            ProjectState::Selected => 4 + agents.len() as u16,
+            ProjectState::Open => 3 + agents.len() as u16,
         })
         .collect();
     // folded rows stack; boxes' own edges leave their gaps

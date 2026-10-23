@@ -663,8 +663,13 @@ fn orcha_layout(
         tab_bar: Rect::new(frame.x + 1, body_y, frame.width.saturating_sub(2), 1),
         mobile_header: Rect::default(),
         // the panes are the frame: their title bars are its top (the tabs
-        // sit on them), their right and bottom edges carry its shadow
-        pane_surface: frame,
+        // sit on them); its shadow takes the last column and row
+        pane_surface: Rect::new(
+            frame.x,
+            frame.y,
+            frame.width.saturating_sub(1),
+            frame.height.saturating_sub(1),
+        ),
         status_bar,
         right_panel,
         header,

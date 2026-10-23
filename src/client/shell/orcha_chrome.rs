@@ -98,6 +98,14 @@ pub(super) fn render_frame_and_tabs(
     )
     .intersection(buffer.area);
     buffer.set_style(paper, Style::default().bg(t.bg));
+    // the frame's shadow, outside the panes
+    brutal::draw_shadow(
+        buffer,
+        Rect::new(frame.x, frame.y, frame.width.saturating_sub(1), frame.height.saturating_sub(1)),
+        t.shadow,
+        t.bg,
+    );
+
     let tabs: Vec<&ClientShellTab> = snapshot
         .tabs
         .iter()
@@ -151,7 +159,8 @@ pub(super) fn render_frame_and_tabs(
     let y = tab_area.y;
     let right = tab_area.right();
     let reserve = 12;
-    let mut x = tab_area.x + 1;
+    // the first tab starts on the frame's edge; tabs sit side by side
+    let mut x = frame.x;
     if *tab_scroll > 0 {
         let more = format!("‹{}", *tab_scroll);
         let w = display_width(&more);
@@ -202,7 +211,7 @@ pub(super) fn render_frame_and_tabs(
             Style::default().fg(color).bg(fill),
         );
         hits.tabs.push((rect, tab.tab_id.clone()));
-        x += w + 1;
+        x += w;
         shown_until = index + 1;
     }
     let hidden = tabs.len().saturating_sub(shown_until);
@@ -261,7 +270,6 @@ pub(super) fn dress_panes(
         color_to_u32(t.line),
         color_to_u32(t.frame),
     );
-    let (shadow, page) = (color_to_u32(t.shadow), color_to_u32(t.bg));
     let inside = |rect: Rect, x: u16, y: u16| {
         x >= rect.x && x < rect.right() && y >= rect.y && y < rect.bottom()
     };
@@ -286,33 +294,24 @@ pub(super) fn dress_panes(
                     }
                 }
                 Some(pane) => {
-                    // the pane's edge hugs its paper: eighth blocks on the frame;
-                    // other border cells (a scrollbar) keep their glyph on paper
+                    // the pane's lines run along the very edge of its own
+                    // cells, on its paper: square corners, no gap
                     let r = pane.rect;
-                    let on_shadow = x + 1 == surface.right() || y + 1 == surface.bottom();
-                    let glyph = if on_shadow {
-                        // the frame's shadow: a heavy half down the right, along the bottom
-                        Some(if x + 1 == surface.right() && y + 1 != surface.bottom() {
-                            "▌"
-                        } else {
-                            "▀"
-                        })
-                    } else if y + 1 == r.bottom() {
-                        Some("▔")
-                    } else if x == r.x {
-                        Some("▕")
-                    } else if x + 1 == r.right() {
-                        Some("▏")
-                    } else if y == r.y {
-                        Some("▁")
-                    } else {
-                        None
+                    let (left, right, bottom) =
+                        (x == r.x, x + 1 == r.right(), y + 1 == r.bottom());
+                    let glyph = match (left, right, bottom) {
+                        (true, _, true) => Some("\u{1FB7C}"),
+                        (_, true, true) => Some("\u{1FB7F}"),
+                        (_, _, true) => Some("▁"),
+                        (true, _, _) => Some("▏"),
+                        (_, true, _) => Some("▕"),
+                        _ if y == r.y => Some("▔"),
+                        _ => None,
                     };
                     match glyph {
                         Some(glyph) => {
-                            // black like the mockup; focus shows in the title bar
-                            cell.fg = if on_shadow { shadow } else { line };
-                            cell.bg = if on_shadow { page } else { frame_bg };
+                            cell.fg = line;
+                            cell.bg = pane_bg;
                             cell.symbol = glyph.to_owned();
                         }
                         None => {
@@ -380,6 +379,7 @@ pub(super) fn dress_panes(
         if y >= height {
             continue;
         }
+        let (first_x, last_x) = (pane.rect.x, pane.rect.right().saturating_sub(1));
         let mut chars = text.chars().peekable();
         let mut x = pane.rect.x;
         while x < pane.rect.right() {
@@ -387,11 +387,19 @@ pub(super) fn dress_panes(
             if ux >= width {
                 break;
             }
-            let symbol = chars.next().map(|c| c.to_string()).unwrap_or_else(|| " ".into());
+            // the pane's side lines run up its title bar
+            let symbol = if x == first_x {
+                "▏".to_owned()
+            } else if x == last_x {
+                "▕".to_owned()
+            } else {
+                chars.next().map(|c| c.to_string()).unwrap_or_else(|| " ".into())
+            };
             let wide = UnicodeWidthStr::width(symbol.as_str()) > 1;
+            let edge = x == first_x || x == last_x;
             if let Some(cell) = frame.cells.get_mut(y * width + ux) {
                 cell.symbol = symbol;
-                cell.fg = color_to_u32(t.chip_text);
+                cell.fg = color_to_u32(if edge { t.line } else { t.chip_text });
                 cell.bg = color_to_u32(bg);
                 cell.modifier = modifier_to_u16(modifier);
                 cell.skip = false;
