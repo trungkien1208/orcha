@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#1f1c19" />
-    <meta name="description" content="Orcha brings coding agents, projects, account fuel and Git context into one calm terminal workspace." />
+    <meta name="description" content="A little home for your very busy agents. Bring Claude, Codex and Cursor together, check their fuel, and make the workspace yours. macOS and Windows." />
     <title>Orcha — a calm workspace for coding agents</title>
     <link rel="icon" type="image/svg+xml" href="assets/orcha-mark.svg" />
     <link rel="icon" type="image/png" sizes="512x512" href="assets/orcha-mark.png" />
@@ -656,7 +656,7 @@
       <header class="topbar">
         <div class="brand">
           <span class="brand-chip"><img class="brand-mark" src="assets/orcha-mark.svg" alt="" />ORCHA</span>
-          <span class="brand-note">A workspace for coding agents</span>
+          <span class="brand-note">A little home for busy agents</span>
         </div>
         <nav class="top-actions" aria-label="Page actions">
           <a class="github-link" href="https://github.com/trungkien1208/orcha" target="_blank" rel="noreferrer" aria-label="View Orcha on GitHub">
@@ -673,10 +673,10 @@
 
       <main class="stage">
         <section class="workspace-window" aria-label="Orcha workspace preview with projects, agent panes, fuel and Git details">
-          <div class="mini-head">
+          <div class="mini-head" data-spot="commands">
             <span class="mini-brand"><img class="brand-mark" src="assets/orcha-mark.svg" alt="" />ORCHA</span>
             <span class="counts">3 projects · 3 agents</span>
-            <span class="settings">⌘, settings</span>
+            <span class="settings">⌕ commands · settings</span>
           </div>
 
           <div class="window-body">
@@ -782,35 +782,35 @@
         </section>
 
         <section class="intro" aria-labelledby="headline">
-          <p class="eyebrow">The workbench for agentic work</p>
+          <p class="eyebrow"><a href="https://github.com/trungkien1208/orcha/releases/tag/orcha-0.9.9" target="_blank" rel="noreferrer">0.9.9 beta · fresh out of the kitchen ↗</a></p>
           <h1 id="headline">Every agent.<br />Every project.<br />In rhythm.</h1>
-          <p class="lede">Orcha brings coding agents into one terminal workspace, so you can see what’s moving, what needs you, and what changed.</p>
+          <p class="lede">Claude, Codex and Cursor, all under one roof. See who’s busy and who needs a hand. Less tab hide-and-seek, more getting things done.</p>
           <div class="intro-cta">
-            <a class="primary-link" href="https://github.com/trungkien1208/orcha#install" target="_blank" rel="noreferrer">Get started <span aria-hidden="true">↗</span></a>
-            <span class="agent-list">MACOS · WINDOWS</span>
+            <a class="primary-link" href="https://github.com/trungkien1208/orcha#install" target="_blank" rel="noreferrer">Come on in <span aria-hidden="true">↗</span></a>
+            <span class="agent-list">MACOS · WINDOWS<br />YOUR TERMINAL IS WELCOME</span>
           </div>
           <div class="feature-grid" aria-label="Orcha features">
             <article class="feature" tabindex="0" data-target="projects">
               <h2 class="feature-title"><i class="feature-mark" aria-hidden="true"></i>Projects together</h2>
-              <p>Every project, its tabs and agents in one tree.</p>
+              <p>Import your projects. Give a new branch its own worktree.</p>
             </article>
-            <article class="feature" tabindex="0" data-target="status">
-              <h2 class="feature-title"><i class="feature-mark" aria-hidden="true"></i>Live status</h2>
-              <p>See who’s working, done, or waiting on you.</p>
+            <article class="feature" tabindex="0" data-target="commands">
+              <h2 class="feature-title"><i class="feature-mark" aria-hidden="true"></i>Find it. Do it.</h2>
+              <p>Search Commands, or send one prompt to every agent here.</p>
             </article>
             <article class="feature" tabindex="0" data-target="fuel">
-              <h2 class="feature-title"><i class="feature-mark" aria-hidden="true"></i>Fuel & continue on</h2>
-              <p>Low on an account? The chat moves on by itself.</p>
+              <h2 class="feature-title"><i class="feature-mark" aria-hidden="true"></i>Pick the next driver</h2>
+              <p>Check fuel. Choose CONTINUE ON to switch accounts or agents.</p>
             </article>
-            <article class="feature" tabindex="0" data-target="git">
-              <h2 class="feature-title"><i class="feature-mark" aria-hidden="true"></i>Git in view</h2>
-              <p>Branch and changes beside the work.</p>
+            <article class="feature" tabindex="0" data-target="projects git">
+              <h2 class="feature-title"><i class="feature-mark" aria-hidden="true"></i>Make yourself at home</h2>
+              <p>Move panels, pick colors, give projects their own emoji.</p>
             </article>
           </div>
         </section>
       </main>
 
-      <footer class="footer"><span>Open source · macOS &amp; Windows · Terminal native</span><span>Calm by design, built for parallel work.</span></footer>
+      <footer class="footer"><span>Open source · Mac Apple Silicon &amp; Intel · Windows x64</span><span>Found a wobble? <a href="https://github.com/trungkien1208/orcha/issues" target="_blank" rel="noreferrer">Tell us.</a></span></footer>
     </div>
     <script>
       // Pixel art for the intro: one character per pixel.
@@ -989,7 +989,7 @@
       [26, 20, 14, 9, 6].forEach((pct, i) => at(1200 + i * 700, () => setFuel(pct)));
       // Codex finishes its checks and asks for you
       at(3400, () => { setCodexAsking(true); setProject("need", "needs you"); });
-      // the account runs low: CONTINUE ON picks the best next one
+      // Demo: the user opens CONTINUE ON and chooses the suggested account.
       at(5200, () => $("live-continue").classList.add("show"));
       at(6600, () => $("live-continue-btn").classList.add("pressed"));
       at(6900, () => { $("live-continue").classList.remove("show"); setFuel(70, "CLAUDE · PERSONAL"); });
@@ -1026,7 +1026,7 @@
         const on = () => {
           preview.classList.add("spotlighting");
           preview.querySelectorAll("[data-spot]").forEach((el) =>
-            el.classList.toggle("lit", el.dataset.spot.split(" ").includes(target)));
+            el.classList.toggle("lit", target.split(" ").some((spot) => el.dataset.spot.split(" ").includes(spot))));
         };
         const off = () => {
           preview.classList.remove("spotlighting");
