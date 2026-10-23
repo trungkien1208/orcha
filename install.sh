@@ -30,7 +30,13 @@ xattr -d com.apple.quarantine "$BIN/orcha" 2>/dev/null || true
 
 echo "→ setting up the extras"
 if [ -d "$EXTRAS/.git" ]; then
-  git -C "$EXTRAS" pull --ff-only --quiet
+  # an old or diverged copy cannot be updated in place: keep it aside, start fresh
+  if ! git -C "$EXTRAS" pull --ff-only --quiet origin main 2>/dev/null; then
+    old="$EXTRAS.old-$(date +%Y%m%d%H%M%S)"
+    mv "$EXTRAS" "$old"
+    echo "  (old extras kept at $old)"
+    git clone --depth 1 --quiet https://github.com/trungkien1208/orcha-config "$EXTRAS"
+  fi
 else
   git clone --depth 1 --quiet https://github.com/trungkien1208/orcha-config "$EXTRAS"
 fi
