@@ -50,6 +50,18 @@ fn spawn_with_env(command: &str, path: &str, line: u32) {
 }
 
 impl ClientShellState {
+    /// The page color while the orcha layout is on, for the host terminal's
+    /// default background.
+    pub(crate) fn orcha_page_rgb(&self) -> Option<(u8, u8, u8)> {
+        if !(self.config.status_bar && self.config.sidebar_tree) {
+            return None;
+        }
+        match super::brutal::Brutal::new(&self.config.palette).bg {
+            ratatui::style::Color::Rgb(r, g, b) => Some((r, g, b)),
+            _ => None,
+        }
+    }
+
     /// Clicks on the orcha chrome. Returns true when one was handled.
     pub(super) fn handle_orcha_click(&mut self, point: (u16, u16), outcome: &mut ClientShellInput) -> bool {
         if self.config.sidebar_tree && super::contains(self.hits.new_workspace, point) {

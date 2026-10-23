@@ -613,17 +613,8 @@ pub(crate) fn render_sidebar_tree(
             _ => 3 + agents.len() as u16,
         })
         .collect();
-    // a blank row after a folded row; boxes' own edges leave their gaps
-    let gaps: Vec<u16> = items
-        .iter()
-        .enumerate()
-        .map(|(index, (_, _, project_state))| {
-            let next_folded = items
-                .get(index + 1)
-                .is_some_and(|(_, _, next)| *next == ProjectState::Folded);
-            u16::from(*project_state == ProjectState::Folded && next_folded)
-        })
-        .collect();
+    // folded rows stack; boxes' own edges leave their gaps
+    let gaps = vec![0; items.len()];
     let mut metrics =
         super::scroll::list_scroll_metrics(&heights, &gaps, body.height, *state.workspace_scroll);
     if !body.is_empty() && std::mem::take(state.reveal_focused_workspace) {

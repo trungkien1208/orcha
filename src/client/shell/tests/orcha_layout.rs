@@ -99,8 +99,8 @@ fn five_regions_compose() {
     }
     let layout = state.layout(140, 30);
     // one-row header and status bar at the very top and bottom, a column of margin
-    assert_eq!(layout.status_bar, Rect::new(1, 29, 138, 1));
-    assert_eq!(layout.header, Rect::new(1, 0, 138, 1));
+    assert_eq!(layout.status_bar, Rect::new(0, 29, 140, 1));
+    assert_eq!(layout.header, Rect::new(0, 0, 140, 1));
     assert_eq!(layout.sidebar.y, 2, "a blank row under the header");
     assert_eq!(layout.right_panel.width, 38);
     assert_eq!(layout.tab_bar.y + 1, layout.main_frame.y, "tabs sit on the frame");

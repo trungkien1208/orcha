@@ -80,6 +80,8 @@ pub(super) struct ClientState {
     pub(super) draw_host_cursor: bool,
     pub(super) detached_process_children: Vec<std::process::Child>,
     pub(super) shell: Option<shell::ClientShellState>,
+    /// orcha: the page color last written as the host's default background.
+    pub(super) host_background: Option<(u8, u8, u8)>,
 }
 
 impl Drop for ClientState {
@@ -140,6 +142,7 @@ impl ClientState {
             deferred_local_activation: None,
             draw_host_cursor: false,
             detached_process_children: Vec::new(),
+            host_background: None,
             shell: Some(shell::ClientShellState::new(
                 shell::ClientShellConfig::from_config(&crate::config::Config::default()),
             )),
@@ -212,6 +215,7 @@ impl ClientState {
         &mut self,
         frame_data: impl Into<frame_output::ComposedFrame>,
     ) {
+        self.sync_host_background();
         let frozen = self.presentation_frozen;
         // Chrome can repaint the frozen source, but cannot retire its staged images.
         let deferred_cleanup = frozen.then(|| std::mem::take(&mut self.pending_native_cleanup));
@@ -510,6 +514,17 @@ impl ClientState {
 
     pub(super) fn present_frame(&mut self, frame_data: impl Into<frame_output::ComposedFrame>) {
         let _ = self.try_present_frame(frame_data);
+        self.sync_host_background();
+    }
+
+    /// orcha: the host's default background follows the page, so the
+    /// terminal's window padding is page too.
+    fn sync_host_background(&mut self) {
+        let want = self.shell.as_ref().and_then(shell::ClientShellState::orcha_page_rgb);
+        if let Some(rgb) = want.filter(|rgb| Some(*rgb) != self.host_background) {
+            let _ = crate::terminal_effects::write_host_background(&mut io::stdout(), rgb);
+            self.host_background = Some(rgb);
+        }
     }
 
     fn write_composed_output(

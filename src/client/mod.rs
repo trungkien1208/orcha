@@ -490,6 +490,7 @@ async fn run_client_loop(
         deferred_local_activation: None,
         draw_host_cursor,
         detached_process_children: Vec::new(),
+        host_background: None,
         shell: config.shell_config.map(shell::ClientShellState::new),
     };
     let mut federated = endpoint_catalog.has_enabled_ssh();

@@ -622,13 +622,15 @@ fn orcha_layout(
     sidebar_width: u16,
     panel_width: Option<u16>,
 ) -> Option<ClientShellLayout> {
-    const MARGIN_X: u16 = 1;
-    const GAP_X: u16 = 2;
+    // the terminal's own window padding is the margin
+    const MARGIN_X: u16 = 0;
+    const GAP_X: u16 = 1;
     if rows < 20 || cols < 90 {
         return None;
     }
     let width = cols - 2 * MARGIN_X;
-    // one row each, at the very top and bottom
+    // one row each at the very top and bottom (orcha sets the terminal's
+    // background to its page, so the window padding is page as well)
     let header = Rect::new(MARGIN_X, 0, width, 1);
     let status_bar = Rect::new(MARGIN_X, rows - 1, width, 1);
     let body_y = header.bottom() + 1;

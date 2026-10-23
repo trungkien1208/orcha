@@ -334,12 +334,35 @@ pub(super) fn fuel_color(left: u8, t: &Brutal) -> ratatui::style::Color {
 }
 
 pub(super) fn draw_gauge(buffer: &mut Buffer, x: u16, y: u16, left: u8, bg: ratatui::style::Color, t: &Brutal) {
+    draw_gauge_wide(buffer, x, y, 10, left, bg, t);
+}
+
+/// Ten flat segments across `width` cells, a gap between them.
+pub(super) fn draw_gauge_wide(
+    buffer: &mut Buffer,
+    x: u16,
+    y: u16,
+    width: u16,
+    left: u8,
+    bg: ratatui::style::Color,
+    t: &Brutal,
+) {
     let color = fuel_color(left, t);
     let filled = (u16::from(left) + 5) / 10;
-    // ten flat segments, like the mockup's marks
+    let segment = (width / 10).max(1);
     for index in 0..10u16 {
         let fg = if index < filled { color } else { t.empty };
-        put_text(buffer, x + index, y, 1, "▬", Style::default().fg(fg).bg(bg));
+        let sx = x + index * segment;
+        // a cell of gap between segments once they are wide enough
+        let solid = if segment >= 2 { segment - 1 } else { 1 };
+        put_text(
+            buffer,
+            sx,
+            y,
+            solid,
+            &"▬".repeat(usize::from(solid)),
+            Style::default().fg(fg).bg(bg),
+        );
     }
 }
 
@@ -601,7 +624,8 @@ fn draw_rows(
             }
             Row::Gauge(window) => {
                 put_text(buffer, x, y, 6, &window.label, Style::default().fg(t.muted).bg(t.card));
-                draw_gauge(buffer, x + 7, y, window.left, t.card, t);
+                // the marks run the width of the panel, the % right of them
+                draw_gauge_wide(buffer, x + 6, y, inner_width.saturating_sub(12), window.left, t.card, t);
                 put_right_text(
                     buffer,
                     Rect::new(x, y, inner_width, 1),

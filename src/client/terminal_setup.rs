@@ -687,6 +687,7 @@ fn restore_terminal_state(
     #[cfg(windows)] restore_windows_input_mode: Option<u32>,
 ) -> io::Result<()> {
     let _ = clear_received_kitty_graphics(&mut io::stdout());
+    let _ = crate::terminal_effects::reset_host_background(&mut io::stdout());
 
     // Reset modifyOtherKeys if we enabled it.
     if reset_modify_other_keys {

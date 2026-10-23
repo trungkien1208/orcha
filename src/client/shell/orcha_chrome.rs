@@ -105,12 +105,27 @@ pub(super) fn render_frame_and_tabs(
         .iter()
         .filter(|tab| Some(tab.workspace_id.as_str()) == snapshot.focused_workspace_id.as_deref())
         .collect();
+    // a tab nobody named is called after what its agent is doing
     let label = |tab: &ClientShellTab| {
-        let name = if tab.label.trim().is_empty() {
-            tab.number.to_string()
-        } else {
-            tab.label.clone()
-        };
+        let auto = !tab.custom_label
+            && (tab.label.trim().is_empty() || tab.label.trim() == tab.number.to_string());
+        let task = auto
+            .then(|| {
+                snapshot
+                    .agents
+                    .iter()
+                    .filter(|agent| agent.tab_id == tab.tab_id)
+                    .map(brutal::agent_task)
+                    .find(|task| !task.trim().is_empty())
+            })
+            .flatten();
+        let name = task.unwrap_or_else(|| {
+            if tab.label.trim().is_empty() {
+                tab.number.to_string()
+            } else {
+                tab.label.clone()
+            }
+        });
         brutal::clip(&name, 22)
     };
     // box width: an edge, " name ", the state mark and a space, an edge
