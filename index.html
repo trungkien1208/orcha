@@ -240,20 +240,7 @@
         text-transform: uppercase;
       }
       .github-icon { display: block; width: 15px; height: 15px; flex: 0 0 auto; }
-      .github-group { display: inline-flex; align-items: stretch; box-shadow: 2px 2px 0 var(--shadow); }
-      .github-group .github-link, .github-group .github-star, .github-star-count:not([hidden]) {
-        min-height: 34px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        border: 2px solid var(--line);
-        background: var(--card);
-        color: var(--ink);
-        box-shadow: none;
-      }
-      .github-group .github-link { width: 36px; padding: 0; border-right: 0; }
-      .github-group .github-star { margin-left: -2px; }
-      .github-group .github-link:hover, .github-group .github-star:hover { position: relative; z-index: 1; transform: translate(-1px, -1px); }
+      .github-link:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--shadow); }
       .theme-button {
         min-height: 34px;
         justify-content: center;
@@ -309,7 +296,7 @@
       .mini-brand .brand-mark { width: 12px; height: 12px; }
       .counts { color: var(--muted); font-size: 9px; font-weight: 700; white-space: nowrap; }
       .settings { margin-left: auto; color: var(--muted); font-size: 9px; white-space: nowrap; }
-      .window-body { min-height: 0; display: grid; grid-template-columns: minmax(132px, 22%) minmax(0, 1fr) minmax(142px, 22%); gap: 9px; padding: 10px; }
+      .window-body { min-height: 0; display: grid; grid-template-columns: minmax(210px, 30%) minmax(0, 1fr) minmax(142px, 20%); gap: 9px; padding: 10px; }
 
       .project-rail { min-width: 0; display: flex; flex-direction: column; gap: 7px; }
       .rail-label, .project-title, .panel-title, .micro-label, .stage-name, .feature-kicker { font-size: 9px; font-weight: 800; }
@@ -324,14 +311,26 @@
       .state-dot.green { background: var(--green); }
       .state-dot.red { background: var(--red); }
       .folded-project { padding: 7px 6px; border: 2px dashed var(--soft); color: var(--muted); font: 9px/1.2 var(--mono); }
-      .process { margin-top: auto; padding: 7px; border: 3px solid var(--line); background: var(--card); box-shadow: 4px 4px 0 var(--shadow); }
-      .process-head { margin-bottom: 7px; font: 800 8px/1 var(--mono); letter-spacing: .09em; }
-      .track { position: relative; display: flex; justify-content: space-between; padding-top: 9px; }
-      .track::before { content: ""; position: absolute; left: 3px; right: 3px; top: 12px; height: 2px; background: var(--soft); }
-      .station { position: relative; z-index: 1; width: 8px; height: 8px; border: 1px solid var(--line); background: var(--bg); }
-      .station.active { background: var(--yellow); }
-      .train { position: absolute; z-index: 2; top: 0; left: 8%; width: 22px; padding: 2px 3px; border: 2px solid var(--line); background: var(--yellow); color: #111; text-align: center; font: 900 8px/1 var(--mono); animation: journey 4.8s steps(4, end) infinite; }
-      .station-labels { margin-top: 5px; display: flex; justify-content: space-between; color: var(--muted); font: 7px/1 var(--mono); }
+      .process { margin-top: auto; padding: 8px; border: 3px solid var(--line); background: var(--card); box-shadow: 4px 4px 0 var(--shadow); }
+      .process-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; font: 900 9px/1 var(--mono); letter-spacing: .08em; }
+      .process-running { padding: 4px 6px; border: 2px solid var(--line); background: var(--bg); color: var(--ink); font: 900 8px/1 var(--mono); letter-spacing: .04em; }
+      .station-labels { display: grid; grid-template-columns: repeat(4, 1fr); margin-bottom: 5px; color: var(--muted); font: 800 7px/1 var(--mono); letter-spacing: .08em; text-align: center; }
+      .process-row { padding: 6px 0 2px; border-top: 1px solid var(--soft); }
+      .process-meta { min-width: 0; display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+      .process-agent { flex: 0 0 auto; padding: 4px 6px; border: 2px solid var(--line); background: var(--yellow); color: #111; box-shadow: 2px 2px 0 var(--shadow); font: 900 8px/1 var(--mono); white-space: nowrap; }
+      .process-agent.luna { background: var(--green); }
+      .process-task { min-width: 0; overflow: hidden; color: var(--ink); font: 800 8px/1.1 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+      .track { position: relative; height: 19px; display: flex; justify-content: space-between; align-items: center; }
+      .track::before, .track::after { content: ""; position: absolute; left: 0; top: calc(50% - 2px); height: 4px; }
+      .track::before { right: 0; background: repeating-linear-gradient(90deg, var(--soft) 0 7px, transparent 7px 13px); }
+      .track::after { width: 18%; background: var(--soft); animation: rail-progress 5.2s steps(5, end) infinite; }
+      .track.luna::after { animation-delay: -2.6s; }
+      .station { position: relative; z-index: 1; width: 10px; height: 10px; border: 2px solid var(--line); background: var(--bg); }
+      .train { position: absolute; z-index: 2; top: 3px; left: 18%; width: 25px; height: 14px; border: 2px solid var(--line); background: var(--yellow); color: #111; text-align: center; font: 900 9px/10px var(--mono); transform: translateX(-50%); animation: journey 5.2s steps(5, end) infinite; }
+      .train::before { content: ""; position: absolute; left: 4px; top: -6px; width: 5px; height: 4px; border: 1px solid var(--line); border-bottom: 0; background: var(--yellow); }
+      .train::after { content: ""; position: absolute; left: 3px; bottom: -5px; width: 4px; height: 4px; border: 1px solid var(--line); border-radius: 50%; background: var(--ink); box-shadow: 11px 0 0 -1px var(--ink); }
+      .train.luna { background: var(--green); animation-delay: -2.6s; }
+      .train.luna::before { background: var(--green); }
 
       .main-frame { min-width: 0; min-height: 0; display: grid; grid-template-rows: 27px minmax(0, 1fr); border: 3px solid var(--line); background: var(--frame); box-shadow: 4px 4px 0 var(--shadow); }
       .tab-row { min-width: 0; gap: 5px; padding: 3px 5px 0; overflow: hidden; }
@@ -389,13 +388,19 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
+        min-height: 34px;
         padding: 0 10px;
+        border: 2px solid var(--line);
+        background: var(--card);
+        color: var(--ink);
+        box-shadow: 2px 2px 0 var(--shadow);
         text-decoration: none;
         font: 800 10px/1 var(--mono);
         letter-spacing: .035em;
         text-transform: uppercase;
       }
-      .github-star-count:not([hidden]) { margin-left: -2px; padding: 0 9px; font: 800 10px/1 var(--mono); font-variant-numeric: tabular-nums; }
+      .github-star:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--shadow); }
+      .github-star-count { padding-left: 7px; border-left: 1px solid var(--line); font-variant-numeric: tabular-nums; }
       .agent-list { color: var(--muted); font: 9px/1.6 var(--mono); }
       .feature-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 2px solid var(--line); border-left: 2px solid var(--line); }
       .feature { min-width: 0; min-height: 78px; padding: 10px 11px 8px; border-right: 2px solid var(--line); border-bottom: 2px solid var(--line); }
@@ -409,10 +414,16 @@
       .footer span:last-child { text-align: right; }
 
       @keyframes journey {
-        0%, 8% { left: 5%; }
-        30% { left: 29%; }
-        55% { left: 53%; }
-        80%, 100% { left: 77%; }
+        0%, 8% { left: 18%; }
+        30% { left: 38%; }
+        55% { left: 58%; }
+        80%, 100% { left: 82%; }
+      }
+      @keyframes rail-progress {
+        0%, 8% { width: 18%; }
+        30% { width: 38%; }
+        55% { width: 58%; }
+        80%, 100% { width: 82%; }
       }
       @keyframes whale-dive {
         0% { opacity: 0; transform: translate(calc(-50% - 155px), 20px); }
@@ -441,7 +452,7 @@
         .page { padding: 12px 18px 9px; grid-template-rows: 36px minmax(0, 1fr) 16px; gap: 10px; }
         .stage { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, .92fr) minmax(0, 1.08fr); gap: 12px; }
         .workspace-window { justify-self: center; width: min(100%, 760px); height: 100%; aspect-ratio: auto; grid-template-rows: 32px minmax(0, 1fr) 23px; }
-        .window-body { grid-template-columns: minmax(120px, 22%) minmax(0, 1fr) minmax(128px, 22%); gap: 7px; padding: 7px; }
+        .window-body { grid-template-columns: minmax(200px, 30%) minmax(0, 1fr) minmax(128px, 20%); gap: 7px; padding: 7px; }
         .intro { padding: 0; justify-content: flex-start; display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); grid-template-rows: auto auto minmax(0, 1fr); column-gap: 20px; align-items: start; }
         .eyebrow, h1, .lede, .intro-cta { grid-column: 1; }
         .eyebrow { margin-bottom: 8px; }
@@ -460,10 +471,8 @@
         .top-actions { gap: 6px; }
         .github-link { min-height: 29px; padding: 0 7px; gap: 4px; font-size: 8px; }
         .github-icon { width: 13px; height: 13px; }
-        .github-group .github-link, .github-group .github-star, .github-star-count:not([hidden]) { min-height: 29px; }
-        .github-group .github-link { width: 31px; padding: 0; }
-        .github-group .github-star { padding: 0 7px; gap: 4px; font-size: 8px; }
-        .github-star-count:not([hidden]) { padding: 0 7px; font-size: 8px; }
+        .github-star { min-height: 29px; padding: 0 7px; gap: 4px; font-size: 8px; }
+        .github-star-count { padding-left: 4px; }
         .theme-button { min-height: 29px; padding: 0 7px; gap: 5px; font-size: 8px; }
         .theme-swatch { width: 8px; height: 8px; }
         .stage { grid-template-rows: minmax(0, .78fr) minmax(0, 1.22fr); gap: 10px; }
@@ -570,13 +579,11 @@
           <span class="brand-note">A workspace for coding agents</span>
         </div>
         <nav class="top-actions" aria-label="Page actions">
-          <div class="github-group" role="group" aria-label="GitHub repository actions">
-            <a class="github-link" href="https://github.com/trungkien1208/orcha" target="_blank" rel="noreferrer" aria-label="View Orcha on GitHub" title="View Orcha on GitHub">
-              <svg class="github-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .9a11.1 11.1 0 0 0-3.51 21.63c.55.1.75-.24.75-.53v-1.85c-3.06.67-3.71-1.3-3.71-1.3-.5-1.28-1.22-1.62-1.22-1.62-.99-.68.08-.67.08-.67 1.1.08 1.68 1.13 1.68 1.13.98 1.67 2.58 1.19 3.21.91.1-.71.38-1.2.7-1.48-2.45-.28-5.02-1.22-5.02-5.45 0-1.2.43-2.18 1.13-2.95-.11-.28-.49-1.4.11-2.91 0 0 .92-.3 3.02 1.13a10.5 10.5 0 0 1 5.5 0c2.1-1.42 3.01-1.13 3.01-1.13.6 1.51.23 2.63.12 2.91.71.77 1.13 1.75 1.13 2.95 0 4.24-2.58 5.16-5.04 5.43.4.35.75 1.02.75 2.06V22c0 .3.2.64.76.53A11.1 11.1 0 0 0 12 .9Z"/></svg>
-            </a>
-            <a class="github-star" href="https://github.com/trungkien1208/orcha" target="_blank" rel="noreferrer" aria-label="Star Orcha on GitHub"><span aria-hidden="true">☆</span> Star</a>
-            <span class="github-star-count" id="github-stars" hidden></span>
-          </div>
+          <a class="github-link" href="https://github.com/trungkien1208/orcha" target="_blank" rel="noreferrer" aria-label="View Orcha on GitHub">
+            <svg class="github-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .9a11.1 11.1 0 0 0-3.51 21.63c.55.1.75-.24.75-.53v-1.85c-3.06.67-3.71-1.3-3.71-1.3-.5-1.28-1.22-1.62-1.22-1.62-.99-.68.08-.67.08-.67 1.1.08 1.68 1.13 1.68 1.13.98 1.67 2.58 1.19 3.21.91.1-.71.38-1.2.7-1.48-2.45-.28-5.02-1.22-5.02-5.45 0-1.2.43-2.18 1.13-2.95-.11-.28-.49-1.4.11-2.91 0 0 .92-.3 3.02 1.13a10.5 10.5 0 0 1 5.5 0c2.1-1.42 3.01-1.13 3.01-1.13.6 1.51.23 2.63.12 2.91.71.77 1.13 1.75 1.13 2.95 0 4.24-2.58 5.16-5.04 5.43.4.35.75 1.02.75 2.06V22c0 .3.2.64.76.53A11.1 11.1 0 0 0 12 .9Z"/></svg>
+            <span>GitHub</span><span aria-hidden="true">↗</span>
+          </a>
+          <a class="github-star" href="https://github.com/trungkien1208/orcha" target="_blank" rel="noreferrer" aria-label="Star Orcha on GitHub"><span aria-hidden="true">★</span> Star on GitHub <span class="github-star-count" id="github-stars" hidden></span></a>
           <button class="theme-button" type="button" id="theme-toggle" aria-pressed="false">
             <span class="theme-swatch" aria-hidden="true"></span>
             <span id="theme-label">Light</span>
@@ -605,12 +612,22 @@
               </div>
               <div class="folded-project">▸ API SERVICE&nbsp; <i class="state-dot red" aria-hidden="true"></i></div>
               <div class="process">
-                <div class="process-head">PROCESS</div>
-                <div class="track" aria-label="Thinking, coding, testing and done">
-                  <i class="station active"></i><i class="station"></i><i class="station"></i><i class="station"></i>
-                  <span class="train" aria-hidden="true">▶</span>
+                <div class="process-head"><span>PROCESS</span><span class="process-running">2 RUNNING</span></div>
+                <div class="station-labels" aria-hidden="true"><span>THINK</span><span>CODE</span><span>TEST</span><span>DONE</span></div>
+                <div class="process-row">
+                  <div class="process-meta"><span class="process-agent">OPUS 5.5</span><span class="process-task">matcha · dark mode</span></div>
+                  <div class="track" role="img" aria-label="Opus 5.5 moving through think, code, test and done">
+                    <i class="station"></i><i class="station"></i><i class="station"></i><i class="station"></i>
+                    <span class="train" aria-hidden="true">›</span>
+                  </div>
                 </div>
-                <div class="station-labels"><span>THINK</span><span>CODE</span><span>TEST</span><span>DONE</span></div>
+                <div class="process-row">
+                  <div class="process-meta"><span class="process-agent luna">GPT-6 LUNA</span><span class="process-task">orca-pay · apple pay</span></div>
+                  <div class="track luna" role="img" aria-label="GPT-6 Luna moving through think, code, test and done">
+                    <i class="station"></i><i class="station"></i><i class="station"></i><i class="station"></i>
+                    <span class="train luna" aria-hidden="true">›</span>
+                  </div>
+                </div>
               </div>
             </aside>
 
