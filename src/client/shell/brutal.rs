@@ -149,25 +149,6 @@ pub(super) enum Edge {
     Light,
 }
 
-impl Edge {
-    /// (top-left, top, top-right, left, right, bottom-left, bottom, bottom-right)
-    ///
-    /// Heavy and light edges are block elements that hug the fill: a line
-    /// drawn in the middle of a cell would leave half a cell of fill
-    /// outside it.
-    fn glyphs(self) -> [&'static str; 8] {
-        match self {
-            // ~3 px like the mockup's thick lines: half a column, a quarter row
-            // the line runs along the very edge of the box's own cells, so
-            // it hugs the fill and the corners are square (┌ ┐ └ ┘ in
-            // eighth blocks); heavy boxes get their weight from the shadow
-            Edge::Heavy | Edge::Light => [
-                "\u{1FB7D}", "▔", "\u{1FB7E}", "▏", "▕", "\u{1FB7C}", "▁", "\u{1FB7F}",
-            ],
-        }
-    }
-}
-
 pub(super) fn set(buffer: &mut Buffer, x: u16, y: u16, symbol: &str, style: Style) {
     if let Some(cell) = buffer.cell_mut((x, y)) {
         cell.set_symbol(symbol);
@@ -175,47 +156,65 @@ pub(super) fn set(buffer: &mut Buffer, x: u16, y: u16, symbol: &str, style: Styl
     }
 }
 
-/// A box: the edge in `line` on the `page` around it, the inside filled.
+/// A box. Its first and last rows are paper, carrying the top and bottom
+/// lines right against the fill (so they read as the gap around the box,
+/// not as padding inside it); the side lines run on the fill's own end
+/// cells. Corners are square.
 pub(super) fn draw_box(
     buffer: &mut Buffer,
     rect: Rect,
-    edge: Edge,
+    _edge: Edge,
     line: Color,
     fill: Color,
     page: Color,
 ) {
-    if rect.width < 2 || rect.height < 2 {
+    if rect.width < 2 || rect.height < 3 {
         return;
     }
-    // a box hides whatever was under it
     let clip = rect.intersection(buffer.area);
+    let (top, bottom, right) = (rect.y, rect.bottom() - 1, rect.right() - 1);
+    let edge = Style::reset().fg(line).bg(page);
+    let side = Style::reset().fg(line).bg(fill);
     for y in clip.y..clip.bottom() {
         for x in clip.x..clip.right() {
-            set(buffer, x, y, " ", Style::reset().bg(fill));
+            let symbol = if y == top {
+                "▁"
+            } else if y == bottom {
+                "▔"
+            } else if x == rect.x {
+                "▏"
+            } else if x == right {
+                "▕"
+            } else {
+                " "
+            };
+            let style = if y == top || y == bottom {
+                edge
+            } else if x == rect.x || x == right {
+                side
+            } else {
+                Style::reset().bg(fill)
+            };
+            set(buffer, x, y, symbol, style);
         }
     }
-    let [tl, top, tr, left, right_edge, bl, bottom_edge, br] = edge.glyphs();
-    // the lines are drawn inside the box, on its fill
-    let _ = page;
-    let style = Style::reset().fg(line).bg(fill);
-    let (right, bottom) = (rect.right() - 1, rect.bottom() - 1);
-    for x in rect.x + 1..right {
-        set(buffer, x, rect.y, top, style);
-        set(buffer, x, bottom, bottom_edge, style);
-    }
-    for y in rect.y + 1..bottom {
-        set(buffer, rect.x, y, left, style);
-        set(buffer, right, y, right_edge, style);
-    }
-    set(buffer, rect.x, rect.y, tl, style);
-    set(buffer, right, rect.y, tr, style);
-    set(buffer, rect.x, bottom, bl, style);
-    set(buffer, right, bottom, br, style);
 }
 
-/// The hard shadow of a box: outside it, half a cell right and down.
+/// The hard shadow of a box: its bottom line thickens to half a row, and
+/// half a column runs down its right side.
 pub(super) fn draw_box_shadow(buffer: &mut Buffer, rect: Rect, shadow: Color, page: Color) {
-    draw_shadow(buffer, rect, shadow, page);
+    if rect.width < 2 || rect.height < 3 {
+        return;
+    }
+    let style = Style::reset().fg(shadow).bg(page);
+    let (bottom, right) = (rect.bottom() - 1, rect.right());
+    for x in rect.x..right {
+        set(buffer, x, bottom, "▀", style);
+    }
+    for y in rect.y + 2..bottom {
+        set(buffer, right, y, "▌", style);
+    }
+    set(buffer, right, bottom, "▘", style);
 }
 
 /// The hard shadow of a block: the column right of it and the row under

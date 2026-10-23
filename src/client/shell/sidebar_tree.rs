@@ -384,16 +384,17 @@ pub(crate) fn render_sidebar_tree(
         };
         items.push((workspace, agents, kind));
     }
-    let folded = |index: usize| items.get(index).is_some_and(|(_, _, kind)| *kind == Card::Folded);
+    // a card is its top line's row, its rows, and (when nothing follows it,
+    // or it is raised) a bottom row; stacked cards share the row between
+    let content = |agents: &Vec<&ClientShellAgent>, kind: Card| {
+        1 + if kind == Card::Folded { 0 } else { agents.len() as u16 }
+    };
     let heights: Vec<u16> = items
         .iter()
         .enumerate()
-        .map(|(index, (_, agents, kind))| match kind {
-            // its edge row above, its row, and the run's bottom edge after the last
-            Card::Folded => 2 + u16::from(!folded(index + 1)),
-            // edges, name, agents, and the shadow's row
-            Card::Selected => 4 + agents.len() as u16,
-            Card::Open => 3 + agents.len() as u16,
+        .map(|(index, (_, agents, kind))| {
+            let last = index + 1 == items.len();
+            1 + content(agents, *kind) + u16::from(last || *kind == Card::Selected)
         })
         .collect();
     let gaps = vec![0; items.len()];
@@ -425,40 +426,36 @@ pub(crate) fn render_sidebar_tree(
         .saturating_sub(metrics.offset_from_bottom);
 
     let card_width = width.saturating_sub(1);
+    let line = Style::default().fg(t.line).bg(t.bg);
     let mut y = body.y;
+    let mut previous_raised = true;
     for (index, (workspace, agents, kind)) in items.iter().enumerate().skip(*state.workspace_scroll) {
         let height = heights[index];
         if y.saturating_add(height) > body.bottom() {
             break;
         }
+        let rows = content(agents, *kind);
+        // the line over it: shared with the card above unless that one is raised
+        let top = if previous_raised { "▁" } else { "\u{1FB80}" };
+        put_text(buffer, x, y, card_width, &top.repeat(usize::from(card_width)), line);
+        let body_rect = Rect::new(x, y + 1, card_width, rows);
         match kind {
-            Card::Folded => {
-                // the edge row above: the previous folded card's bottom and
-                // this one's top share it, a hair apart
-                let first = index == *state.workspace_scroll || !folded(index.wrapping_sub(1));
-                let edge = if first { "▁" } else { "\u{1FB80}" };
-                put_text(
-                    buffer,
-                    x,
-                    y,
-                    card_width,
-                    &edge.repeat(usize::from(card_width)),
-                    Style::default().fg(t.line).bg(t.bg),
-                );
-                render_folded_row(buffer, Rect::new(x, y + 1, card_width, 1), workspace, agents, &t, hits);
-                if height == 3 {
-                    put_text(
-                        buffer,
-                        x,
-                        y + 2,
-                        card_width,
-                        &"▔".repeat(usize::from(card_width)),
-                        Style::default().fg(t.line).bg(t.bg),
-                    );
-                }
-            }
-            _ => render_project_card(buffer, Rect::new(x, y, width, height), workspace, agents, *kind, &t, hits),
+            Card::Folded => render_folded_row(buffer, body_rect, workspace, agents, &t, hits),
+            _ => render_project_card(buffer, body_rect, workspace, agents, *kind, &t, hits),
         }
+        let below = y + 1 + rows;
+        if *kind == Card::Selected {
+            // raised: a thick bottom line and a shadow down the right
+            brutal::draw_box_shadow(
+                buffer,
+                Rect::new(x, y, card_width, rows + 2),
+                t.shadow,
+                t.bg,
+            );
+        } else if index + 1 == items.len() {
+            put_text(buffer, x, below, card_width, &"▔".repeat(usize::from(card_width)), line);
+        }
+        previous_raised = *kind == Card::Selected;
         y += height;
     }
     if metrics.max_offset_from_bottom > 0 {
@@ -499,24 +496,25 @@ fn render_project_card(
     t: &Brutal,
     hits: &mut ShellHitMap,
 ) {
+    // `rect` is the card's rows; its top and bottom lines are drawn by the list
     let selected = kind == Card::Selected;
-    let card = if selected {
-        Rect::new(rect.x, rect.y, rect.width.saturating_sub(1), rect.height.saturating_sub(1))
+    let fill = if selected {
+        t.card
+    } else if brutal::is_light(t.bg) {
+        t.bg
     } else {
-        Rect::new(rect.x, rect.y, rect.width.saturating_sub(1), rect.height)
+        t.frame
     };
-    let fill = if selected { t.card } else { t.bg };
-    let line = if selected { t.line } else { t.rail_ahead };
-    brutal::draw_box(buffer, card, Edge::Light, line, fill, t.bg);
-    if selected {
-        brutal::draw_box_shadow(buffer, card, t.shadow, t.bg);
-        for y in card.y + 1..card.bottom().saturating_sub(1) {
-            put_text(buffer, card.x + 1, y, 1, "▌", Style::default().fg(t.yellow).bg(fill));
+    for row in rect.y..rect.bottom() {
+        brutal::pill(buffer, Rect::new(rect.x, row, rect.width, 1), "", t.ink, fill, true, t);
+        if selected {
+            put_text(buffer, rect.x + 1, row, 1, "▌", Style::default().fg(t.yellow).bg(fill));
         }
     }
+    let card = rect;
     let x = card.x + 2;
     let right = card.right().saturating_sub(2);
-    let y = card.y + 1;
+    let y = card.y;
     put_text(buffer, x, y, 2, "▾ ", Style::default().fg(t.ink).bg(fill));
     if !selected {
         hits.orcha
@@ -558,7 +556,7 @@ fn render_project_card(
     });
     for (index, agent) in agents.iter().enumerate() {
         let y = y + 1 + index as u16;
-        if y + 1 >= card.bottom() {
+        if y >= card.bottom() {
             break;
         }
         let row = Rect::new(x + 1, y, right.saturating_sub(x + 1), 1);
@@ -611,6 +609,7 @@ fn render_folded_row(
     hits: &mut ShellHitMap,
 ) {
     let fill = if brutal::is_light(t.bg) { t.bg } else { t.card };
+    let row = Rect::new(row.x, row.y, row.width, 1);
     brutal::pill(buffer, row, "", t.ink, fill, true, t);
     let (x, y) = (row.x + 2, row.y);
     put_text(buffer, x, y, 2, "▸ ", Style::default().fg(t.ink).bg(fill));
