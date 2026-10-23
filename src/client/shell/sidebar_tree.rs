@@ -436,12 +436,9 @@ pub(crate) fn render_sidebar_tree(
         }
         let rows = content(agents, *kind);
         let first = index == *state.workspace_scroll;
-        let selected = *kind == Card::Selected;
-        let above_selected = !first && items[index - 1].2 == Card::Selected;
-        // the shared row: the card above's bottom line and this one's top line;
-        // yellow when it edges the selected card
+        // the shared row: the card above's bottom line and this one's top line
         let glyph = if first { "▁" } else { "\u{1FB80}" };
-        let color = if selected || above_selected { t.yellow } else { t.line };
+        let color = t.line;
         put_text(
             buffer,
             x,
@@ -455,12 +452,6 @@ pub(crate) fn render_sidebar_tree(
             Card::Folded => render_folded_row(buffer, body_rect, workspace, agents, &t, hits),
             _ => render_project_card(buffer, body_rect, workspace, agents, *kind, &t, hits),
         }
-        if selected {
-            // raised: a shadow down its right side, no extra row
-            for row in body_rect.y..body_rect.bottom() {
-                put_text(buffer, x + card_width, row, 1, "▌", Style::default().fg(t.shadow).bg(t.bg));
-            }
-        }
         if index + 1 == items.len() {
             put_text(
                 buffer,
@@ -468,7 +459,7 @@ pub(crate) fn render_sidebar_tree(
                 body_rect.bottom(),
                 card_width,
                 &"▔".repeat(usize::from(card_width)),
-                Style::default().fg(if selected { t.yellow } else { t.line }).bg(t.bg),
+                Style::default().fg(t.line).bg(t.bg),
             );
         }
         y += height;
@@ -523,10 +514,7 @@ fn render_project_card(
     for row in rect.y..rect.bottom() {
         brutal::pill(buffer, Rect::new(rect.x, row, rect.width, 1), "", t.ink, fill, true, t);
         if selected {
-            // highlighted: yellow lines and a yellow bar inside the left one
-            let edge = Style::default().fg(t.yellow).bg(fill);
-            put_text(buffer, rect.x, row, 1, "▏", edge);
-            put_text(buffer, rect.right().saturating_sub(1), row, 1, "▕", edge);
+            // the selected one: a yellow bar inside its left line
             put_text(buffer, rect.x + 1, row, 1, "▌", Style::default().fg(t.yellow).bg(fill));
         }
     }
