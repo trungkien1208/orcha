@@ -585,7 +585,9 @@ fn draw_rows(
     hits: &mut ShellHitMap,
 ) {
     let height = (rows.len() as u16 + 2).min(area.height);
-    let rect = Rect::new(area.x, area.y, area.width, height);
+    // a column of paper on the window's edge: the terminal stretches edge
+    // cells' colors into its padding
+    let rect = Rect::new(area.x, area.y, area.width.saturating_sub(1), height);
     brutal::draw_box(buffer, rect, Edge::Heavy, t.line, t.card, t.bg);
     let x = rect.x + 3;
     let inner_width = rect.width.saturating_sub(6);

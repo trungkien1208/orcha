@@ -147,7 +147,6 @@ impl Brutal {
 pub(super) enum Edge {
     Heavy,
     Light,
-    Dashed,
 }
 
 impl Edge {
@@ -165,7 +164,6 @@ impl Edge {
             Edge::Heavy | Edge::Light => [
                 "\u{1FB7D}", "▔", "\u{1FB7E}", "▏", "▕", "\u{1FB7C}", "▁", "\u{1FB7F}",
             ],
-            Edge::Dashed => ["┌", "┄", "┐", "┆", "┆", "└", "┄", "┘"],
         }
     }
 }
