@@ -22,10 +22,24 @@
 
 ## Install
 
-macOS on Apple Silicon. One line, no questions:
+Runs on **macOS** (Apple Silicon) and **Windows** (x64). One line, no questions.
+
+**macOS**, in Terminal:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.sh | sh
+```
+
+**Windows**, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.ps1 | iex
+```
+
+or in Command Prompt (cmd):
+
+```cmd
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.ps1 | iex"
 ```
 
 Then open a new terminal window **inside a project** and run:
@@ -36,7 +50,7 @@ orcha
 
 That project opens by itself. The first time, orcha also offers to bring in the projects it finds from **Orca, VS Code, Cursor and JetBrains**, and it finds your **Claude Code, Codex and Cursor** sign-ins on its own. Nothing to set up.
 
-<sub>Best in <a href="https://ghostty.org">Ghostty</a> (agent logos, theme, font). Other terminals work too, with plain symbols. Already use herdr? Your herdr config and workspaces come along; herdr itself stays untouched.</sub>
+<sub>On macOS, best in <a href="https://ghostty.org">Ghostty</a> (agent logos, theme, font). On Windows, use <a href="https://aka.ms/terminal">Windows Terminal</a>. Other terminals work too, with plain symbols. Already use herdr? Your herdr config and workspaces come along; herdr itself stays untouched.</sub>
 
 ## What you get
 
