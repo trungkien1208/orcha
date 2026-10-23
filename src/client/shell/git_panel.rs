@@ -147,8 +147,10 @@ impl ClientShellState {
                 .iter()
                 .any(|agent| matches!(agent.agent_status, crate::api::schema::AgentStatus::Working))
         });
+        // only a PROCESS card on screen moves: no repaints for hidden trains
+        let shown = self.hits.orcha.process.height > 0;
         let ui = &mut self.orcha_ui;
-        if running && ui.next_process_tick.is_none_or(|at| now >= at) {
+        if running && shown && ui.next_process_tick.is_none_or(|at| now >= at) {
             ui.process_frame = ui.process_frame.wrapping_add(1);
             ui.next_process_tick = Some(now + PROCESS_FRAME);
             repaint = true;

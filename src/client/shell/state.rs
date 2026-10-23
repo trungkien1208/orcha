@@ -103,6 +103,8 @@ pub(super) struct OrchaHits {
     pub(super) quit: Rect,
     /// orcha: a newer release; a click installs it.
     pub(super) update: Rect,
+    /// orcha: the PROCESS card, when it is on screen (its trains animate).
+    pub(super) process: Rect,
     pub(super) settings: Rect,
     pub(super) fuel: Rect,
     pub(super) fuel_hint: Rect,

@@ -13,6 +13,8 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 
 const REFRESH: Duration = Duration::from_secs(60);
+/// Clicking through panes refreshes once they settle, not on every click.
+const SETTLE: Duration = Duration::from_millis(800);
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub(super) struct FuelWindow {
@@ -161,11 +163,17 @@ impl AccountsPoller {
         if command.trim().is_empty() {
             return changed;
         }
-        let key = (command.to_owned(), pane.map(str::to_owned));
-        let moved = self.key.as_ref() != Some(&key);
-        let due = moved || self.next_refresh.is_none_or(|at| now >= at);
+        let same = |(c, p): &(String, Option<String>)| c == command && p.as_deref() == pane;
+        let key = || (command.to_owned(), pane.map(str::to_owned));
+        if self.key.as_ref().is_some_and(|known| !same(known)) {
+            // another pane: refresh soon, once the focus stops moving
+            self.key = Some(key());
+            self.next_refresh = Some(now + SETTLE);
+            return changed;
+        }
+        let due = self.key.is_none() || self.next_refresh.is_none_or(|at| now >= at);
         if due && self.pending.is_none() {
-            self.key = Some(key);
+            self.key = Some(key());
             let (command, pane) = (command.to_owned(), pane.map(str::to_owned));
             let (tx, rx) = mpsc::channel();
             let spawned = crate::thread_spawn::spawn_named("orcha-accounts", move || {

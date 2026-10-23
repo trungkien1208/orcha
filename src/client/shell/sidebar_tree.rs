@@ -361,6 +361,7 @@ pub(crate) fn render_sidebar_tree(
         process_height,
     );
     if process_height >= 5 {
+        hits.orcha.process = process;
         render_process(
             buffer,
             process,
