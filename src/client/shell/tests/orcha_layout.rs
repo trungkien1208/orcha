@@ -102,9 +102,9 @@ fn five_regions_compose() {
     assert_eq!(layout.status_bar, Rect::new(0, 29, 140, 1));
     assert_eq!(layout.header, Rect::new(0, 0, 140, 1));
     assert_eq!(layout.sidebar.y, 2, "a blank row under the header");
-    assert_eq!(layout.right_panel.width, 38);
+    assert_eq!(layout.right_panel.width, 34);
     assert_eq!(layout.tab_bar.y + 1, layout.main_frame.y, "tabs sit on the frame");
-    assert!(layout.pane_surface.x > layout.main_frame.x);
+    assert_eq!(layout.pane_surface.x, layout.main_frame.x, "panes fill the frame");
     assert!(layout.main_frame.right() < layout.right_panel.x);
     assert!(rows[0].contains("ORCHA") && rows[0].contains("settings"));
     let last = &rows[29];

@@ -662,11 +662,12 @@ fn orcha_layout(
         sidebar,
         tab_bar: Rect::new(frame.x + 1, body_y, frame.width.saturating_sub(2), 1),
         mobile_header: Rect::default(),
-        // the panes sit in the frame with a padding of a row and two columns
+        // the panes fill the frame: their own edges are its sides; it keeps
+        // the top edge the tabs sit on and the shadow column and row
         pane_surface: Rect::new(
-            frame.x + 2,
+            frame.x,
             frame.y + 1,
-            frame.width.saturating_sub(4),
+            frame.width.saturating_sub(1),
             frame.height.saturating_sub(2),
         ),
         status_bar,
