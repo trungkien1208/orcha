@@ -535,12 +535,14 @@ pub(crate) fn render_sidebar_tree(
     let x = area.x;
     let width = area.width;
 
-    render_buttons(buffer, x, area.y, width, snapshot, config, &t, hits);
+    // a colored cell on the window's edge would stretch into its padding;
+    // the cards' own edges start a column in too
+    render_buttons(buffer, x + 1, area.y, width.saturating_sub(1), snapshot, config, &t, hits);
 
     let label_y = area.y + 2;
     put_text(
         buffer,
-        x,
+        x + 1,
         label_y,
         width,
         &format!("PROJECTS · {}", snapshot.workspaces.len()),

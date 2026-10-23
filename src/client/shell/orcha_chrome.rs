@@ -21,7 +21,8 @@ pub(super) fn render_header(
     let t = Brutal::new(&config.palette);
     let icon = brutal::orcha_icon(config.icon_font);
     let label = format!("{icon} ORCHA");
-    let chip = Rect::new(area.x, area.y, display_width(&label) + 4, 1);
+    // a colored cell on the window's edge would stretch into its padding
+    let chip = Rect::new(area.x + 1, area.y, display_width(&label) + 4, 1);
     brutal::pill(buffer, chip, &label, t.chip_text, t.pink, false, &t);
     let projects = snapshot.workspaces.len();
     let agents = snapshot.agents.len();
@@ -41,7 +42,7 @@ pub(super) fn render_header(
     );
     let text = "⌘, settings";
     let button = Rect::new(
-        area.right().saturating_sub(display_width(text) + 4),
+        area.right().saturating_sub(display_width(text) + 5),
         area.y,
         display_width(text) + 4,
         1,
