@@ -523,7 +523,9 @@ fn main() -> io::Result<()> {
         std::process::exit(code);
     }
     if let Some(imported) = orcha_app::import_from_herdr_once() {
-        eprintln!("orcha: imported {imported} from herdr (agents start fresh; herdr keeps its own).");
+        eprintln!(
+            "orcha: imported {imported} from herdr (agents start fresh; herdr keeps its own)."
+        );
     }
     #[cfg(windows)]
     if let Some(result) = platform::maybe_activate_desktop_notification(&raw_args) {
@@ -616,7 +618,9 @@ fn main() -> io::Result<()> {
         if orcha_app::is_orcha() {
             println!("orcha — a calm terminal for your coding agents (built on herdr)");
             println!();
-            println!("       orcha setup | menu | edit | apply   orcha-config: setup, settings, apply");
+            println!(
+                "       orcha setup | menu | edit | apply   orcha-config: setup, settings, apply"
+            );
         } else {
             println!("herdr — terminal workspace manager for AI coding agents");
         }

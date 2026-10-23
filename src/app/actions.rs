@@ -1098,14 +1098,12 @@ pub(crate) fn path_byte_range(text: &str, clicked_byte: usize) -> Option<std::op
     let name = token.split(':').next().unwrap_or(token);
     let has_slash = name.contains('/');
     let anchored = name.starts_with('~') || name.starts_with("./") || name.starts_with("../");
-    let file_like = name
-        .rsplit_once('.')
-        .is_some_and(|(stem, ext)| {
-            !stem.is_empty()
-                && (1..=8).contains(&ext.len())
-                && ext.chars().all(|c| c.is_ascii_alphanumeric())
-                && ext.chars().any(|c| c.is_ascii_alphabetic())
-        });
+    let file_like = name.rsplit_once('.').is_some_and(|(stem, ext)| {
+        !stem.is_empty()
+            && (1..=8).contains(&ext.len())
+            && ext.chars().all(|c| c.is_ascii_alphanumeric())
+            && ext.chars().any(|c| c.is_ascii_alphabetic())
+    });
     if !(has_slash || anchored || file_like) || name.chars().all(|c| c == '/' || c == '.') {
         return None;
     }
@@ -2263,9 +2261,19 @@ mod tests {
             clicked_path("error at src/theme.ts:12:4.", "theme").as_deref(),
             Some("src/theme.ts:12:4")
         );
-        assert_eq!(clicked_path("see ~/notes for more", "notes").as_deref(), Some("~/notes"));
-        assert_eq!(clicked_path("Read README.md now", "README").as_deref(), Some("README.md"));
-        assert_eq!(clicked_path("version 1.2 of it", "1.2"), None, "numbers are not files");
+        assert_eq!(
+            clicked_path("see ~/notes for more", "notes").as_deref(),
+            Some("~/notes")
+        );
+        assert_eq!(
+            clicked_path("Read README.md now", "README").as_deref(),
+            Some("README.md")
+        );
+        assert_eq!(
+            clicked_path("version 1.2 of it", "1.2"),
+            None,
+            "numbers are not files"
+        );
         assert_eq!(clicked_path("just words here", "words"), None);
         assert_eq!(clicked_path("https://example.com/a", "example"), None);
     }

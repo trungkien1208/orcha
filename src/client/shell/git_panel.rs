@@ -11,7 +11,7 @@ use std::process::Command;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
-use super::brutal::{self, Brutal, Edge};
+use super::brutal::{self, Brutal};
 use super::render::{display_width, put_right_text, put_text};
 use super::*;
 
@@ -132,17 +132,18 @@ impl ClientShellState {
             .snapshot
             .as_deref()
             .and_then(|snapshot| snapshot.focused_pane_id.clone());
-        let mut repaint = self
-            .accounts
-            .tick(&self.config.orcha.accounts_command, pane.as_deref(), now);
+        let mut repaint =
+            self.accounts
+                .tick(&self.config.orcha.accounts_command, pane.as_deref(), now);
         if repaint {
             self.update_low_fuel_hint();
         }
         repaint |= self.offer_continue_on_low_fuel();
         let running = self.snapshot.as_deref().is_some_and(|snapshot| {
-            snapshot.agents.iter().any(|agent| {
-                matches!(agent.agent_status, crate::api::schema::AgentStatus::Working)
-            })
+            snapshot
+                .agents
+                .iter()
+                .any(|agent| matches!(agent.agent_status, crate::api::schema::AgentStatus::Working))
         });
         let ui = &mut self.orcha_ui;
         if running && ui.next_process_tick.is_none_or(|at| now >= at) {
@@ -268,7 +269,11 @@ fn parse_history_line(line: &str) -> HistoryLine {
         .map(|refs| {
             refs.split(", ")
                 .filter(|r| !r.is_empty())
-                .map(|r| r.trim_start_matches("HEAD -> ").trim_start_matches("tag: ").to_owned())
+                .map(|r| {
+                    r.trim_start_matches("HEAD -> ")
+                        .trim_start_matches("tag: ")
+                        .to_owned()
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -334,7 +339,14 @@ pub(super) fn fuel_color(left: u8, t: &Brutal) -> ratatui::style::Color {
     }
 }
 
-pub(super) fn draw_gauge(buffer: &mut Buffer, x: u16, y: u16, left: u8, bg: ratatui::style::Color, t: &Brutal) {
+pub(super) fn draw_gauge(
+    buffer: &mut Buffer,
+    x: u16,
+    y: u16,
+    left: u8,
+    bg: ratatui::style::Color,
+    t: &Brutal,
+) {
     draw_gauge_wide(buffer, x, y, 10, left, bg, t);
 }
 
@@ -477,7 +489,10 @@ pub(super) fn render_git_panel(
 
     if let Some(account) = fuel {
         section(&mut rows);
-        let who = account.email.clone().unwrap_or_else(|| account.label.clone());
+        let who = account
+            .email
+            .clone()
+            .unwrap_or_else(|| account.label.clone());
         rows.push(Row::Title("FUEL".into(), who, Some(Slot::Fuel)));
         for window in account.windows.iter().take(2) {
             rows.push(Row::Gauge(window));
@@ -522,15 +537,25 @@ pub(super) fn render_git_panel(
     };
     rows.push(Row::Title("CHANGES".into(), stat, None));
     // what is left of the box after the other sections decides how many files show
-    let tail = 5
-        + if ui.history_open { data.history.len().min(14) } else { 0 }
-        + if ui.worktrees_open { data.worktrees.len().min(6) + 1 } else { 0 };
-    let room = usize::from(area.height)
-        .saturating_sub(rows.len() + tail + 2 + usize::from(arrived) * 2);
+    let tail =
+        5 + if ui.history_open {
+            data.history.len().min(14)
+        } else {
+            0
+        } + if ui.worktrees_open {
+            data.worktrees.len().min(6) + 1
+        } else {
+            0
+        };
+    let room =
+        usize::from(area.height).saturating_sub(rows.len() + tail + 2 + usize::from(arrived) * 2);
     let shown = data.files.len().min(room.max(1));
     for (index, (code, path)) in data.files.iter().enumerate().take(shown) {
         if index + 1 == shown && data.files.len() > shown {
-            rows.push(Row::Note(format!("… {} more", data.files.len() - index), t.muted));
+            rows.push(Row::Note(
+                format!("… {} more", data.files.len() - index),
+                t.muted,
+            ));
         } else {
             rows.push(Row::File(code, path));
         }
@@ -552,7 +577,11 @@ pub(super) fn render_git_panel(
         .as_ref()
         .map(|(subject, age)| format!("{subject} · {age}"))
         .unwrap_or_default();
-    rows.push(Row::Title(format!("{arrow} HISTORY"), last, Some(Slot::History)));
+    rows.push(Row::Title(
+        format!("{arrow} HISTORY"),
+        last,
+        Some(Slot::History),
+    ));
     if ui.history_open {
         rows.extend(data.history.iter().take(14).map(Row::History));
     }
@@ -587,7 +616,7 @@ fn draw_rows(
     // a column of paper on the window's edge: the terminal stretches edge
     // cells' colors into its padding
     let rect = Rect::new(area.x, area.y, area.width.saturating_sub(1), height);
-    brutal::draw_box(buffer, rect, Edge::Heavy, t.line, t.card, t.bg);
+    brutal::draw_box(buffer, rect, t.line, t.card, t.bg);
     // a column of air inside each side line
     let x = rect.x + 2;
     let inner_width = rect.width.saturating_sub(4);
@@ -598,7 +627,11 @@ fn draw_rows(
     let mut open_slot: Option<(Slot, u16)> = None;
     let close = |hits: &mut ShellHitMap, open: &mut Option<(Slot, u16)>, y: u16| {
         if let Some((slot, top)) = open.take() {
-            hit_slot(hits, slot, Rect::new(rect.x, top, rect.width, y.saturating_sub(top)));
+            hit_slot(
+                hits,
+                slot,
+                Rect::new(rect.x, top, rect.width, y.saturating_sub(top)),
+            );
         }
     };
     for row in rows {
@@ -621,11 +654,22 @@ fn draw_rows(
             Row::Title(text, note, slot) => {
                 let fuel = matches!(slot, Some(Slot::Fuel));
                 // FUEL's ✕ moves it to the status bar
-                let room = if fuel { inner_width.saturating_sub(3) } else { inner_width };
+                let room = if fuel {
+                    inner_width.saturating_sub(3)
+                } else {
+                    inner_width
+                };
                 title(buffer, x, y, room, text, note, t);
                 if fuel {
                     let close = Rect::new(x + inner_width.saturating_sub(1), y, 1, 1);
-                    put_text(buffer, close.x, y, 1, "✕", Style::default().fg(t.muted).bg(t.card));
+                    put_text(
+                        buffer,
+                        close.x,
+                        y,
+                        1,
+                        "✕",
+                        Style::default().fg(t.muted).bg(t.card),
+                    );
                     hits.orcha.fuel_hide = close;
                 }
                 if let Some(slot) = slot {
@@ -633,9 +677,24 @@ fn draw_rows(
                 }
             }
             Row::Gauge(window) => {
-                put_text(buffer, x, y, 5, &window.label, Style::default().fg(t.muted).bg(t.card));
+                put_text(
+                    buffer,
+                    x,
+                    y,
+                    5,
+                    &window.label,
+                    Style::default().fg(t.muted).bg(t.card),
+                );
                 // ten marks a cell apart across the panel, the % right of them
-                draw_gauge_wide(buffer, x + 5, y, inner_width.saturating_sub(10), window.left, t.card, t);
+                draw_gauge_wide(
+                    buffer,
+                    x + 5,
+                    y,
+                    inner_width.saturating_sub(10),
+                    window.left,
+                    t.card,
+                    t,
+                );
                 put_right_text(
                     buffer,
                     Rect::new(x, y, inner_width, 1),
@@ -741,7 +800,15 @@ fn draw_rows(
                 cx += 1;
                 if let Some(name) = line.refs.first() {
                     let room = (x + inner_width).saturating_sub(cx);
-                    cx += brutal::chip(buffer, cx, y, room.min(12), &clip_right(name, 8), t.chip_text, t.green) + 1;
+                    cx += brutal::chip(
+                        buffer,
+                        cx,
+                        y,
+                        room.min(12),
+                        &clip_right(name, 8),
+                        t.chip_text,
+                        t.green,
+                    ) + 1;
                 }
                 let room = (x + inner_width).saturating_sub(cx);
                 put_text(
@@ -765,7 +832,14 @@ fn draw_rows(
                 } else {
                     ("○", Style::default().fg(t.ink).bg(t.card))
                 };
-                put_text(buffer, x, y, inner_width, &clip_right(&format!("{mark} {name}"), w), style);
+                put_text(
+                    buffer,
+                    x,
+                    y,
+                    inner_width,
+                    &clip_right(&format!("{mark} {name}"), w),
+                    style,
+                );
             }
             Row::NewWorktree => {
                 // an outlined button on the paper, like the mockup's dashed one

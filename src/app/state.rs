@@ -1577,10 +1577,12 @@ mod tests {
     #[test]
     fn built_in_themes_leave_sidebar_background_unset() {
         // orcha's brutal themes paint their own paper
-        for name in crate::config::THEME_NAMES
-            .iter()
-            .filter(|name| !matches!(**name, "orcha" | "orcha-dark" | "matcha" | "matcha-dark" | "ocean"))
-        {
+        for name in crate::config::THEME_NAMES.iter().filter(|name| {
+            !matches!(
+                **name,
+                "orcha" | "orcha-dark" | "matcha" | "matcha-dark" | "ocean"
+            )
+        }) {
             let palette = Palette::from_name(name).unwrap();
             assert_eq!(
                 palette.sidebar_bg,

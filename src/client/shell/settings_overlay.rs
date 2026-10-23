@@ -209,10 +209,19 @@ pub(super) fn render_settings_overlay(
             }
             let visible = usize::from(content.height.saturating_sub(2));
             let scroll = settings.selected.saturating_sub(visible.saturating_sub(1));
-            for (visible_index, (index, name)) in
-                fonts.iter().enumerate().skip(scroll).take(visible).enumerate()
+            for (visible_index, (index, name)) in fonts
+                .iter()
+                .enumerate()
+                .skip(scroll)
+                .take(visible)
+                .enumerate()
             {
-                let rect = Rect::new(content.x, content.y + visible_index as u16, content.width, 1);
+                let rect = Rect::new(
+                    content.x,
+                    content.y + visible_index as u16,
+                    content.width,
+                    1,
+                );
                 draw_choice(
                     buffer,
                     rect,
@@ -240,7 +249,10 @@ pub(super) fn render_settings_overlay(
                 content,
                 "font ligatures",
                 "join -> != === >= into one glyph, or keep every character apart",
-                &["on    ->  !=  ===  >=  (joined)", "off   -> != === >= (as typed)"],
+                &[
+                    "on    ->  !=  ===  >=  (joined)",
+                    "off   -> != === >= (as typed)",
+                ],
                 settings.selected,
                 palette,
                 &mut choice_hits,

@@ -252,8 +252,13 @@ pub(crate) fn render_status_bar(
     let t = super::super::brutal::Brutal::new(&config.palette);
     let bg = t.status_bg;
     // the margin around it is page
-    let page = Rect::new(0, outer.y, buffer.area.width, buffer.area.bottom() - outer.y)
-        .intersection(buffer.area);
+    let page = Rect::new(
+        0,
+        outer.y,
+        buffer.area.width,
+        buffer.area.bottom() - outer.y,
+    )
+    .intersection(buffer.area);
     buffer.set_style(page, Style::default().bg(t.bg));
     let area = Rect::new(outer.x, outer.y + outer.height / 2, outer.width, 1);
     buffer.set_style(area, Style::default().bg(bg).fg(t.status_text));
@@ -347,12 +352,23 @@ pub(crate) fn render_status_bar(
     let fuel_text = fuel
         .filter(|_| config.orcha.fuel == crate::config::FuelPlacement::StatusBar)
         .map(|account| {
-            let who = account.email.clone().unwrap_or_else(|| account.label.clone());
-            (who, account.windows.iter().take(2).cloned().collect::<Vec<_>>())
+            let who = account
+                .email
+                .clone()
+                .unwrap_or_else(|| account.label.clone());
+            (
+                who,
+                account.windows.iter().take(2).cloned().collect::<Vec<_>>(),
+            )
         });
     // "▴ FUEL email  5H ▬ ▬ … 18%  WEEK …"
     let fuel_width = fuel_text.as_ref().map_or(0, |(who, windows)| {
-        8 + display_width(who) + 2 + windows.iter().map(|w| display_width(&w.label) + 27).sum::<u16>()
+        8 + display_width(who)
+            + 2
+            + windows
+                .iter()
+                .map(|w| display_width(&w.label) + 27)
+                .sum::<u16>()
     });
     let joined = right.join("  ");
     let width = display_width(&joined) + fuel_width;

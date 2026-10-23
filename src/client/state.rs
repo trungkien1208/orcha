@@ -520,7 +520,10 @@ impl ClientState {
     /// orcha: the host's default background follows the page, so the
     /// terminal's window padding is page too.
     fn sync_host_background(&mut self) {
-        let want = self.shell.as_ref().and_then(shell::ClientShellState::orcha_page_rgb);
+        let want = self
+            .shell
+            .as_ref()
+            .and_then(shell::ClientShellState::orcha_page_rgb);
         if let Some(rgb) = want.filter(|rgb| Some(*rgb) != self.host_background) {
             let _ = crate::terminal_effects::write_host_background(&mut io::stdout(), rgb);
             self.host_background = Some(rgb);

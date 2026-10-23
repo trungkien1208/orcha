@@ -24,10 +24,9 @@ pub use self::{
     model::{
         validated_sidebar_bounds, AgentPanelSortConfig, Config, ConfigReloadReport,
         ConfigReloadStatus, FuelPlacement, HostCursorModeConfig, NewTerminalCwdConfig, OrchaConfig,
-        PaneBordersConfig,
-        ShellModeConfig, SidebarCollapsedModeConfig, StatusIndicatorStyle, TabBarPositionConfig,
-        ToastClipboardPosition, ToastConfig, ToastDelivery, ToastHerdrPosition,
-        UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
+        PaneBordersConfig, ShellModeConfig, SidebarCollapsedModeConfig, StatusIndicatorStyle,
+        TabBarPositionConfig, ToastClipboardPosition, ToastConfig, ToastDelivery,
+        ToastHerdrPosition, UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
     },
     sidebar::{
         AgentSidebarToken, AgentsSidebarConfig, SidebarConfig, SidebarTokenStyle,
@@ -36,8 +35,7 @@ pub use self::{
     sound::SoundConfig,
     tab_bar::TabBarRightEntryConfig,
     theme::{
-        load_style_file, parse_color, CustomThemeColors, ModeThemeColors, ThemeConfig,
-        THEME_NAMES,
+        load_style_file, parse_color, CustomThemeColors, ModeThemeColors, ThemeConfig, THEME_NAMES,
     },
     window_title::{WindowTitlePart, WindowTitleTemplate, WindowTitleToken},
 };

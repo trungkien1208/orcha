@@ -516,6 +516,70 @@ impl ClientShellConfig {
     }
 }
 
+/// orcha's page (docs/orcha/SPEC.md §2), in cells: the header on the top
+/// row, the sidebar, the main frame with the tabs over it and the right
+/// panel side by side a column apart, the status bar on the last row.
+fn orcha_layout(
+    cols: u16,
+    rows: u16,
+    sidebar_width: u16,
+    panel_width: Option<u16>,
+) -> Option<ClientShellLayout> {
+    // the terminal's own window padding is the margin
+    const MARGIN_X: u16 = 0;
+    const GAP_X: u16 = 1;
+    if rows < 20 || cols < 90 {
+        return None;
+    }
+    let width = cols - 2 * MARGIN_X;
+    // the terminal stretches its edge rows into the window padding: a row of
+    // paper over the header, the status bar on the last row reaching the
+    // bottom of the window
+    let header = Rect::new(MARGIN_X, 0, width, 1);
+    let status_bar = Rect::new(0, rows - 1, cols, 1);
+    let body_y = header.bottom() + 1;
+    // the boxes' shadow rows are half empty: they are the gap to the status bar
+    let body_height = status_bar.y.saturating_sub(body_y);
+    let sidebar = Rect::new(MARGIN_X, body_y, sidebar_width.min(width / 3), body_height);
+    let rest = width.saturating_sub(sidebar.width + GAP_X);
+    // the panel only when the panes keep room
+    let panel = panel_width
+        .map(|width| width.clamp(24, 60))
+        .filter(|panel| rest >= panel + GAP_X + 60)
+        .unwrap_or(0);
+    let right_panel = Rect::new(cols - MARGIN_X - panel, body_y, panel, body_height);
+    let main_x = sidebar.right() + GAP_X;
+    let main_right = if panel > 0 {
+        right_panel.x - GAP_X
+    } else {
+        cols - MARGIN_X
+    };
+    // the tabs' row, then the frame they sit on
+    let frame = Rect::new(
+        main_x,
+        body_y + 1,
+        main_right.saturating_sub(main_x),
+        body_height.saturating_sub(1),
+    );
+    Some(ClientShellLayout {
+        sidebar,
+        tab_bar: Rect::new(frame.x + 1, body_y, frame.width.saturating_sub(2), 1),
+        mobile_header: Rect::default(),
+        // the panes are the frame: their title bars are its top (the tabs
+        // sit on them); its shadow takes the last column and row
+        pane_surface: Rect::new(
+            frame.x,
+            frame.y,
+            frame.width.saturating_sub(1),
+            frame.height.saturating_sub(1),
+        ),
+        status_bar,
+        right_panel,
+        header,
+        main_frame: frame,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyCode, KeyModifiers};
@@ -610,69 +674,4 @@ mod tests {
             vec![(KeyCode::Char('x'), KeyModifiers::CONTROL)]
         );
     }
-}
-
-/// orcha's page (docs/orcha/SPEC.md §2), in cells: a margin around it, a
-/// header three rows tall, the sidebar, the main frame with the tabs over
-/// it and the right panel side by side with gaps, the status bar at the
-/// foot. One cell is about 8×17 px of the mockup.
-fn orcha_layout(
-    cols: u16,
-    rows: u16,
-    sidebar_width: u16,
-    panel_width: Option<u16>,
-) -> Option<ClientShellLayout> {
-    // the terminal's own window padding is the margin
-    const MARGIN_X: u16 = 0;
-    const GAP_X: u16 = 1;
-    if rows < 20 || cols < 90 {
-        return None;
-    }
-    let width = cols - 2 * MARGIN_X;
-    // the terminal stretches its edge rows into the window padding: a row of
-    // paper over the header, the status bar on the last row reaching the
-    // bottom of the window
-    let header = Rect::new(MARGIN_X, 0, width, 1);
-    let status_bar = Rect::new(0, rows - 1, cols, 1);
-    let body_y = header.bottom() + 1;
-    // the boxes' shadow rows are half empty: they are the gap to the status bar
-    let body_height = status_bar.y.saturating_sub(body_y);
-    let sidebar = Rect::new(MARGIN_X, body_y, sidebar_width.min(width / 3), body_height);
-    let rest = width.saturating_sub(sidebar.width + GAP_X);
-    // the panel only when the panes keep room
-    let panel = panel_width
-        .map(|width| width.clamp(24, 60))
-        .filter(|panel| rest >= panel + GAP_X + 60)
-        .unwrap_or(0);
-    let right_panel = Rect::new(cols - MARGIN_X - panel, body_y, panel, body_height);
-    let main_x = sidebar.right() + GAP_X;
-    let main_right = if panel > 0 {
-        right_panel.x - GAP_X
-    } else {
-        cols - MARGIN_X
-    };
-    // the tabs' row, then the frame they sit on
-    let frame = Rect::new(
-        main_x,
-        body_y + 1,
-        main_right.saturating_sub(main_x),
-        body_height.saturating_sub(1),
-    );
-    Some(ClientShellLayout {
-        sidebar,
-        tab_bar: Rect::new(frame.x + 1, body_y, frame.width.saturating_sub(2), 1),
-        mobile_header: Rect::default(),
-        // the panes are the frame: their title bars are its top (the tabs
-        // sit on them); its shadow takes the last column and row
-        pane_surface: Rect::new(
-            frame.x,
-            frame.y,
-            frame.width.saturating_sub(1),
-            frame.height.saturating_sub(1),
-        ),
-        status_bar,
-        right_panel,
-        header,
-        main_frame: frame,
-    })
 }

@@ -10,14 +10,17 @@
 use crate::api::schema::AgentStatus;
 
 use super::accounts::Account;
-use super::brutal::{self, Brutal, Edge};
+use super::brutal::{self, Brutal};
 use super::render::{display_width, put_right_text, put_text};
 use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum OrchaPopup {
     /// Accounts and their fuel; acts on the agent in `pane`.
-    Accounts { selected: usize, pane: Option<String> },
+    Accounts {
+        selected: usize,
+        pane: Option<String>,
+    },
     /// Continue `pane`'s conversation with another agent.
     Handoff { selected: usize, pane: String },
     /// Start an agent on an account in a new tab of `workspace`.
@@ -45,9 +48,17 @@ pub(super) const HANDOFF_TARGETS: [(&str, &str, &str); 6] = [
     ("codex", "full", "Codex · whole conversation"),
     ("codex", "summary", "Codex · summarize first, then continue"),
     ("claude", "full", "Claude · whole conversation"),
-    ("claude", "summary", "Claude · summarize first, then continue"),
+    (
+        "claude",
+        "summary",
+        "Claude · summarize first, then continue",
+    ),
     ("cursor", "full", "Cursor · whole conversation"),
-    ("cursor", "summary", "Cursor · summarize first, then continue"),
+    (
+        "cursor",
+        "summary",
+        "Cursor · summarize first, then continue",
+    ),
 ];
 
 struct Frame {
@@ -84,7 +95,7 @@ fn popup_frame(
         width,
         height,
     );
-    brutal::draw_box(buffer, area, Edge::Heavy, t.line, t.bg, t.bg);
+    brutal::draw_box(buffer, area, t.line, t.bg, t.bg);
     brutal::draw_box_shadow(buffer, area, t.shadow, t.bg);
     hits.area = area;
     let inner_x = area.x + 1;
@@ -93,7 +104,10 @@ fn popup_frame(
 
     // header on card, a heavy rule under it
     let header_y = area.y + 1;
-    buffer.set_style(Rect::new(inner_x, header_y, inner_w, 1), Style::default().bg(t.card));
+    buffer.set_style(
+        Rect::new(inner_x, header_y, inner_w, 1),
+        Style::default().bg(t.card),
+    );
     let title_width = display_width(title);
     put_text(
         buffer,
@@ -130,14 +144,24 @@ fn popup_frame(
     );
     hits.close = close;
     let rule = |buffer: &mut Buffer, y: u16| {
-        put_text(buffer, inner_x, y, inner_w, &"━".repeat(usize::from(inner_w)), line);
+        put_text(
+            buffer,
+            inner_x,
+            y,
+            inner_w,
+            &"━".repeat(usize::from(inner_w)),
+            line,
+        );
     };
     rule(buffer, header_y + 1);
 
     // footer: the keys as chips on card, a heavy rule above
     let footer_y = area.bottom() - 2;
     rule(buffer, footer_y - 1);
-    buffer.set_style(Rect::new(inner_x, footer_y, inner_w, 1), Style::default().bg(t.card));
+    buffer.set_style(
+        Rect::new(inner_x, footer_y, inner_w, 1),
+        Style::default().bg(t.card),
+    );
     let mut x = inner_x + 1;
     for (key, what) in keys {
         let key_width = display_width(key) + 2;
@@ -178,7 +202,13 @@ fn popup_frame(
 /// A body row: a flat band across the popup. The keyboard cursor's band
 /// is on card with a yellow bar on the left (like the selected project);
 /// rows after the first get a thin rule above them.
-fn row_box(buffer: &mut Buffer, rect: Rect, first: bool, cursor: bool, t: &Brutal) -> ratatui::style::Color {
+fn row_box(
+    buffer: &mut Buffer,
+    rect: Rect,
+    first: bool,
+    cursor: bool,
+    t: &Brutal,
+) -> ratatui::style::Color {
     let fill = if cursor { t.card } else { t.bg };
     buffer.set_style(rect, Style::default().bg(fill));
     if !first && rect.y > 0 {
@@ -194,7 +224,14 @@ fn row_box(buffer: &mut Buffer, rect: Rect, first: bool, cursor: bool, t: &Bruta
     }
     if cursor {
         for y in rect.y..rect.bottom() {
-            put_text(buffer, rect.x, y, 1, "▌", Style::default().fg(t.yellow).bg(fill));
+            put_text(
+                buffer,
+                rect.x,
+                y,
+                1,
+                "▌",
+                Style::default().fg(t.yellow).bg(fill),
+            );
         }
     }
     fill
@@ -226,7 +263,14 @@ fn button(
     };
     put_text(buffer, x, y, width, &text, style);
     if kind == ButtonKind::Primary {
-        put_text(buffer, x + width, y, 1, "▌", Style::default().fg(t.shadow).bg(fill));
+        put_text(
+            buffer,
+            x + width,
+            y,
+            1,
+            "▌",
+            Style::default().fg(t.shadow).bg(fill),
+        );
     }
     Rect::new(x, y, width, 1)
 }
@@ -307,7 +351,11 @@ fn render_accounts(
         rows_height(accounts.len()),
         "CONTINUE ON",
         &context,
-        &[("↵", "continue"), ("alt ↵", "summary first"), ("esc", "not now")],
+        &[
+            ("↵", "continue"),
+            ("alt ↵", "summary first"),
+            ("esc", "not now"),
+        ],
         "",
         t,
         hits,
@@ -335,7 +383,9 @@ fn render_accounts(
         }
         let rect = Rect::new(frame.body.x, y, frame.body.width, ROW);
         // another agent: the chat is handed off; the same agent: it goes on as is
-        let hand_off = current_kind.as_deref().is_some_and(|kind| kind != account.kind);
+        let hand_off = current_kind
+            .as_deref()
+            .is_some_and(|kind| kind != account.kind);
         let badge = if account.current {
             Some(("IN USE", t.ink, t.frame))
         } else if Some(index) == best {
@@ -402,7 +452,15 @@ fn account_row(
     let x = rect.x + 2;
     let right = rect.right().saturating_sub(2);
     let logo = brutal::agent_logo(Some(&account.kind), config.icon_font);
-    let chip_width = brutal::chip(buffer, x, y, 4, logo, t.chip_text, t.agent(Some(&account.kind)));
+    let chip_width = brutal::chip(
+        buffer,
+        x,
+        y,
+        4,
+        logo,
+        t.chip_text,
+        t.agent(Some(&account.kind)),
+    );
     let name_x = x + chip_width + 1;
     let name_width = display_width(&account.label).min(30);
     put_text(
@@ -425,7 +483,11 @@ fn account_row(
     }
     // second line: email (or why there is no fuel), then the gauges
     let shown = account.windows.iter().take(2).count() as u16;
-    let gauges_width = if shown == 0 { 4 } else { shown * GAUGE_COLS + (shown - 1) * 2 };
+    let gauges_width = if shown == 0 {
+        4
+    } else {
+        shown * GAUGE_COLS + (shown - 1) * 2
+    };
     let note = match (&account.email, &account.error) {
         (Some(email), _) => email.clone(),
         (None, Some(error)) => error.clone(),
@@ -453,7 +515,14 @@ fn account_row(
     }
     let mut gx = right.saturating_sub(gauges_width);
     for window in account.windows.iter().take(2) {
-        put_text(buffer, gx, y + 1, 5, &window.label, Style::default().fg(t.muted).bg(fill));
+        put_text(
+            buffer,
+            gx,
+            y + 1,
+            5,
+            &window.label,
+            Style::default().fg(t.muted).bg(fill),
+        );
         super::git_panel::draw_gauge(buffer, gx + 5, y + 1, window.left, fill, t);
         put_text(
             buffer,
@@ -543,7 +612,10 @@ fn render_new_agent(
             y,
             20,
             "Shell",
-            Style::default().fg(t.ink).bg(fill).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(t.ink)
+                .bg(fill)
+                .add_modifier(Modifier::BOLD),
         );
         put_text(
             buffer,
@@ -575,7 +647,9 @@ fn render_handoff(
     hits: &mut PopupHits,
 ) -> Option<()> {
     let agent = snapshot.agents.iter().find(|agent| agent.pane_id == pane);
-    let from = agent.and_then(|agent| agent.agent.clone()).unwrap_or_default();
+    let from = agent
+        .and_then(|agent| agent.agent.clone())
+        .unwrap_or_default();
     let context = agent
         .map(|agent| {
             format!(
@@ -647,7 +721,11 @@ fn render_handoff(
             buffer,
             rect.right() - 1,
             y,
-            if index == selected { "CONTINUE ↵" } else { "CONTINUE" },
+            if index == selected {
+                "CONTINUE ↵"
+            } else {
+                "CONTINUE"
+            },
             kind_button,
             fill,
             t,

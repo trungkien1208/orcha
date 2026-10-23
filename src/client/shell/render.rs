@@ -375,7 +375,14 @@ pub(super) fn render_shell(
         );
     }
     if layout.status_bar.height > 0 {
-        render_status_bar(buffer, layout.status_bar, snapshot, config, state.fuel, &mut hits);
+        render_status_bar(
+            buffer,
+            layout.status_bar,
+            snapshot,
+            config,
+            state.fuel,
+            &mut hits,
+        );
     }
     if !config.mouse_capture {
         hits.sidebar_divider = Rect::default();
@@ -403,7 +410,8 @@ fn focused_agent_arrived(snapshot: &ClientShellSnapshot) -> bool {
         return false;
     };
     snapshot.agents.iter().any(|agent| {
-        agent.pane_id == focused && matches!(agent.agent_status, AgentStatus::Done | AgentStatus::Idle)
+        agent.pane_id == focused
+            && matches!(agent.agent_status, AgentStatus::Done | AgentStatus::Idle)
     })
 }
 

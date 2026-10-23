@@ -103,8 +103,15 @@ fn five_regions_compose() {
     assert_eq!(layout.header, Rect::new(0, 0, 140, 1));
     assert_eq!(layout.sidebar.y, 2, "a blank row under the header");
     assert_eq!(layout.right_panel.width, 34);
-    assert_eq!(layout.tab_bar.y + 1, layout.main_frame.y, "tabs sit on the frame");
-    assert_eq!(layout.pane_surface.x, layout.main_frame.x, "panes fill the frame");
+    assert_eq!(
+        layout.tab_bar.y + 1,
+        layout.main_frame.y,
+        "tabs sit on the frame"
+    );
+    assert_eq!(
+        layout.pane_surface.x, layout.main_frame.x,
+        "panes fill the frame"
+    );
     assert!(layout.main_frame.right() < layout.right_panel.x);
     assert!(rows[0].contains("ORCHA") && rows[0].contains("settings"));
     let last = &rows[29];
@@ -157,7 +164,8 @@ fn accounts_popup_lists_fuel() {
             email: Some("me@example.com".into()),
             current: true,
             error: None,
-            windows: vec![window("5H", 8), window("WEEK", 18)], signed_in: None
+            windows: vec![window("5H", 8), window("WEEK", 18)],
+            signed_in: None,
         },
         Account {
             id: "personal".into(),
@@ -166,7 +174,8 @@ fn accounts_popup_lists_fuel() {
             email: Some("you@example.com".into()),
             current: false,
             error: None,
-            windows: vec![window("5H", 70), window("WEEK", 64)], signed_in: None
+            windows: vec![window("5H", 70), window("WEEK", 64)],
+            signed_in: None,
         },
     ]));
     state.open_accounts_overlay();
@@ -176,8 +185,15 @@ fn accounts_popup_lists_fuel() {
         eprintln!("|{row}|");
     }
     assert!(all.contains("CONTINUE ON") && all.contains("IN USE") && all.contains("BEST"));
-    assert!(all.contains("continue") && all.contains("8% left"), "says how low");
-    assert_eq!(state.hits.orcha.popup.actions.len(), 1, "only the other account switches");
+    assert!(
+        all.contains("continue") && all.contains("8% left"),
+        "says how low"
+    );
+    assert_eq!(
+        state.hits.orcha.popup.actions.len(),
+        1,
+        "only the other account switches"
+    );
     assert!(state.update_low_fuel_hint(), "8% left offers a switch");
 
     // NEW: the accounts plus a plain shell, the one with most fuel picked
@@ -234,7 +250,12 @@ fn preview_surface(size: Rect) -> PaneSurfaceFrame {
         ),
         (
             "pane_2",
-            Rect::new(half + 1, 0, size.width.saturating_sub(half + 1), size.height),
+            Rect::new(
+                half + 1,
+                0,
+                size.width.saturating_sub(half + 1),
+                size.height,
+            ),
             vec![
                 "› Explain src/theme.ts in two sentences.",
                 "",
@@ -251,15 +272,31 @@ fn preview_surface(size: Rect) -> PaneSurfaceFrame {
         for (row, line) in lines.iter().enumerate() {
             let y = rect.y + 1 + row as u16;
             if y + 1 < rect.bottom() {
-                buffer.set_stringn(rect.x + 2, y, line, usize::from(rect.width - 3), Style::default());
+                buffer.set_stringn(
+                    rect.x + 2,
+                    y,
+                    line,
+                    usize::from(rect.width - 3),
+                    Style::default(),
+                );
             }
         }
         let inner = Rect::new(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
         surface_panes.push(PaneSurfacePane {
             pane_id: (*id).into(),
             content_revision: 0,
-            rect: SurfaceRect { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-            inner_rect: SurfaceRect { x: inner.x, y: inner.y, width: inner.width, height: inner.height },
+            rect: SurfaceRect {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+            },
+            inner_rect: SurfaceRect {
+                x: inner.x,
+                y: inner.y,
+                width: inner.width,
+                height: inner.height,
+            },
             scrollbar_rect: None,
             scroll: None,
             focused: *id == "pane_1",
@@ -287,8 +324,7 @@ fn orcha_preview() {
         return;
     };
     let theme = std::env::var("ORCHA_PREVIEW_THEME").unwrap_or_else(|_| "orcha".into());
-    let parsed: Config =
-        toml::from_str(&format!("[theme]\nname = \"{theme}\"\n")).expect("toml");
+    let parsed: Config = toml::from_str(&format!("[theme]\nname = \"{theme}\"\n")).expect("toml");
     let (cols, rows) = (180u16, 48u16);
     let mut projected = snapshot();
     let first = projected.workspaces[0].clone();
@@ -326,8 +362,14 @@ fn orcha_preview() {
     projected.tabs[0].agent_status = AgentStatus::Working;
     projected.tabs.push(second_tab);
     projected.tabs.push(third_tab);
-    let mk = |pane: &str, ws: &str, kind: &str, model: &str, task: &str, stage: &str,
-              status: AgentStatus, focused: bool| ClientShellAgent {
+    let mk = |pane: &str,
+              ws: &str,
+              kind: &str,
+              model: &str,
+              task: &str,
+              stage: &str,
+              status: AgentStatus,
+              focused: bool| ClientShellAgent {
         pane_id: pane.into(),
         workspace_id: ws.into(),
         tab_id: tab.clone(),
@@ -348,18 +390,84 @@ fn orcha_preview() {
         focused,
     };
     projected.agents = vec![
-        mk("pane_1", &ws1, "claude", "claude-opus-5-5", "dark mode", "testing", AgentStatus::Working, true),
-        mk("pane_2", &ws1, "codex", "gpt-6-luna", "explain theme", "done", AgentStatus::Done, false),
-        mk("pane_3", "ws_2", "codex", "gpt-6-luna", "apple pay", "coding", AgentStatus::Working, false),
-        mk("pane_4", "ws_2", "cursor", "cursor", "amex", "coding", AgentStatus::Blocked, false),
-        mk("pane_5", "ws_3", "claude", "claude-opus-5-5", "search", "done", AgentStatus::Done, false),
-        mk("pane_6", "ws_5", "claude", "claude-sonnet-5-5", "flags", "thinking", AgentStatus::Working, false),
+        mk(
+            "pane_1",
+            &ws1,
+            "claude",
+            "claude-opus-5-5",
+            "dark mode",
+            "testing",
+            AgentStatus::Working,
+            true,
+        ),
+        mk(
+            "pane_2",
+            &ws1,
+            "codex",
+            "gpt-6-luna",
+            "explain theme",
+            "done",
+            AgentStatus::Done,
+            false,
+        ),
+        mk(
+            "pane_3",
+            "ws_2",
+            "codex",
+            "gpt-6-luna",
+            "apple pay",
+            "coding",
+            AgentStatus::Working,
+            false,
+        ),
+        mk(
+            "pane_4",
+            "ws_2",
+            "cursor",
+            "cursor",
+            "amex",
+            "coding",
+            AgentStatus::Blocked,
+            false,
+        ),
+        mk(
+            "pane_5",
+            "ws_3",
+            "claude",
+            "claude-opus-5-5",
+            "search",
+            "done",
+            AgentStatus::Done,
+            false,
+        ),
+        mk(
+            "pane_6",
+            "ws_5",
+            "claude",
+            "claude-sonnet-5-5",
+            "flags",
+            "thinking",
+            AgentStatus::Working,
+            false,
+        ),
     ];
     projected.tab_bar_right = vec![
-        ClientShellTabStatusSegment { text: "#42 Dark mode for the menu ● Open".into(), accent: false },
-        ClientShellTabStatusSegment { text: "✎ 3 files +26 −4".into(), accent: false },
-        ClientShellTabStatusSegment { text: "◷ 18m".into(), accent: false },
-        ClientShellTabStatusSegment { text: "17:50".into(), accent: false },
+        ClientShellTabStatusSegment {
+            text: "#42 Dark mode for the menu ● Open".into(),
+            accent: false,
+        },
+        ClientShellTabStatusSegment {
+            text: "✎ 3 files +26 −4".into(),
+            accent: false,
+        },
+        ClientShellTabStatusSegment {
+            text: "◷ 18m".into(),
+            accent: false,
+        },
+        ClientShellTabStatusSegment {
+            text: "17:50".into(),
+            accent: false,
+        },
     ];
     let mut config = ClientShellConfig::from_config(&parsed);
     config.status_bar = true;
@@ -383,17 +491,46 @@ fn orcha_preview() {
         reset: Some(reset.into()),
     };
     state.accounts.set_for_test(Some(vec![
-        Account { id: "work".into(), kind: "claude".into(), label: "Claude · company".into(),
-            email: Some("me@example.com".into()), current: true, error: None,
-            windows: vec![window("5H", 60, "1h 12m"), window("WEEK", 18, "Mon")], signed_in: None },
-        Account { id: "personal".into(), kind: "claude".into(), label: "Claude · personal".into(),
-            email: Some("you@example.com".into()), current: false, error: None,
-            windows: vec![window("5H", 70, "3h 40m"), window("WEEK", 64, "Thu")], signed_in: None },
-        Account { id: "codex".into(), kind: "codex".into(), label: "Codex".into(),
-            email: Some("you@example.com".into()), current: false, error: None,
-            windows: vec![window("5H", 90, "4h 05m"), window("WEEK", 52, "Sun")], signed_in: None },
-        Account { id: "cursor".into(), kind: "cursor".into(), label: "Cursor".into(),
-            email: None, current: false, error: Some("not signed in".into()), windows: vec![], signed_in: None },
+        Account {
+            id: "work".into(),
+            kind: "claude".into(),
+            label: "Claude · company".into(),
+            email: Some("me@example.com".into()),
+            current: true,
+            error: None,
+            windows: vec![window("5H", 60, "1h 12m"), window("WEEK", 18, "Mon")],
+            signed_in: None,
+        },
+        Account {
+            id: "personal".into(),
+            kind: "claude".into(),
+            label: "Claude · personal".into(),
+            email: Some("you@example.com".into()),
+            current: false,
+            error: None,
+            windows: vec![window("5H", 70, "3h 40m"), window("WEEK", 64, "Thu")],
+            signed_in: None,
+        },
+        Account {
+            id: "codex".into(),
+            kind: "codex".into(),
+            label: "Codex".into(),
+            email: Some("you@example.com".into()),
+            current: false,
+            error: None,
+            windows: vec![window("5H", 90, "4h 05m"), window("WEEK", 52, "Sun")],
+            signed_in: None,
+        },
+        Account {
+            id: "cursor".into(),
+            kind: "cursor".into(),
+            label: "Cursor".into(),
+            email: None,
+            current: false,
+            error: Some("not signed in".into()),
+            windows: vec![],
+            signed_in: None,
+        },
     ]));
     if std::env::var("ORCHA_PREVIEW_POPUP").is_ok() {
         state.open_accounts_overlay();

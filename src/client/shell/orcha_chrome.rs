@@ -101,7 +101,12 @@ pub(super) fn render_frame_and_tabs(
     // the frame's shadow, outside the panes
     brutal::draw_shadow(
         buffer,
-        Rect::new(frame.x, frame.y, frame.width.saturating_sub(1), frame.height.saturating_sub(1)),
+        Rect::new(
+            frame.x,
+            frame.y,
+            frame.width.saturating_sub(1),
+            frame.height.saturating_sub(1),
+        ),
         t.shadow,
         t.bg,
     );
@@ -146,7 +151,13 @@ pub(super) fn render_frame_and_tabs(
     // box width: an edge, " name ", the state mark and a space, an edge
     // a state square only when an agent runs in the tab
     let width_of = |tab: &ClientShellTab| {
-        display_width(&label(tab)) + 4 + if t.state(tab.agent_status).is_some() { 2 } else { 0 }
+        display_width(&label(tab))
+            + 4
+            + if t.state(tab.agent_status).is_some() {
+                2
+            } else {
+                0
+            }
     };
     if std::mem::take(reveal_focused_tab) {
         if let Some(focused) = tabs.iter().position(|tab| tab.focused) {
@@ -176,7 +187,14 @@ pub(super) fn render_frame_and_tabs(
     if *tab_scroll > 0 {
         let more = format!("‹{}", *tab_scroll);
         let w = display_width(&more);
-        put_text(buffer, x, y, w, &more, Style::default().fg(t.muted).bg(t.bg));
+        put_text(
+            buffer,
+            x,
+            y,
+            w,
+            &more,
+            Style::default().fg(t.muted).bg(t.bg),
+        );
         hits.tab_scroll_left = Rect::new(x, y, w, 1);
         x += w + 1;
     }
@@ -184,7 +202,11 @@ pub(super) fn render_frame_and_tabs(
     for (index, tab) in tabs.iter().enumerate().skip(*tab_scroll) {
         let w = width_of(tab);
         let last = index + 1 == tabs.len();
-        let limit = if last { right.saturating_sub(4) } else { right.saturating_sub(reserve) };
+        let limit = if last {
+            right.saturating_sub(4)
+        } else {
+            right.saturating_sub(reserve)
+        };
         if x + w > limit {
             break;
         }
@@ -197,8 +219,14 @@ pub(super) fn render_frame_and_tabs(
         let edge = Style::default().fg(t.line).bg(t.bg);
         let above = y.saturating_sub(1);
         if open {
-            put_text(buffer, x, above, w, &"▂".repeat(usize::from(w)), Style::default().fg(t.yellow).bg(t.bg));
-
+            put_text(
+                buffer,
+                x,
+                above,
+                w,
+                &"▂".repeat(usize::from(w)),
+                Style::default().fg(t.yellow).bg(t.bg),
+            );
         } else {
             put_text(buffer, x, above, w, &"▁".repeat(usize::from(w)), edge);
         }
@@ -228,7 +256,14 @@ pub(super) fn render_frame_and_tabs(
     if hidden > 0 {
         let more = format!(" +{hidden} ▾ ");
         let w = display_width(&more);
-        put_text(buffer, x, y, w, &more, Style::default().fg(t.muted).bg(t.bg));
+        put_text(
+            buffer,
+            x,
+            y,
+            w,
+            &more,
+            Style::default().fg(t.muted).bg(t.bg),
+        );
         hits.tab_scroll_right = Rect::new(x, y, w, 1);
         x += w + 1;
     }
@@ -307,8 +342,7 @@ pub(super) fn dress_panes(
                     // the pane's lines run along the very edge of its own
                     // cells, on its paper: square corners, no gap
                     let r = pane.rect;
-                    let (left, right, bottom) =
-                        (x == r.x, x + 1 == r.right(), y + 1 == r.bottom());
+                    let (left, right, bottom) = (x == r.x, x + 1 == r.right(), y + 1 == r.bottom());
                     let glyph = match (left, right, bottom) {
                         (true, _, true) => Some("\u{1FB7C}"),
                         (_, true, true) => Some("\u{1FB7F}"),
@@ -344,7 +378,10 @@ pub(super) fn dress_panes(
         if pane.inner_rect.y <= pane.rect.y || pane.rect.width < 6 {
             continue;
         }
-        let agent = snapshot.agents.iter().find(|agent| agent.pane_id == pane.pane_id);
+        let agent = snapshot
+            .agents
+            .iter()
+            .find(|agent| agent.pane_id == pane.pane_id);
         let focused = snapshot.focused_pane_id.as_deref() == Some(pane.pane_id.as_str());
         let (title, bg) = match agent {
             Some(agent) => {
@@ -403,7 +440,10 @@ pub(super) fn dress_panes(
             } else if x == last_x {
                 "▕".to_owned()
             } else {
-                chars.next().map(|c| c.to_string()).unwrap_or_else(|| " ".into())
+                chars
+                    .next()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| " ".into())
             };
             let wide = UnicodeWidthStr::width(symbol.as_str()) > 1;
             let edge = x == first_x || x == last_x;

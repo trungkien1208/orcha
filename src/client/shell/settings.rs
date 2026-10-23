@@ -54,20 +54,24 @@ fn load_appearance() -> OrchaAppearance {
                 .collect()
         })
         .unwrap_or_default();
-    let config: serde_json::Value = std::fs::read_to_string(crate::config::config_dir().join("config.json"))
-        .ok()
-        .or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .and_then(|home| std::fs::read_to_string(format!("{home}/.config/orcha/config.json")).ok())
-        })
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default();
+    let config: serde_json::Value =
+        std::fs::read_to_string(crate::config::config_dir().join("config.json"))
+            .ok()
+            .or_else(|| {
+                std::env::var("HOME").ok().and_then(|home| {
+                    std::fs::read_to_string(format!("{home}/.config/orcha/config.json")).ok()
+                })
+            })
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
     OrchaAppearance {
         ides: installed_apps(IDE_APPS),
         git_guis: installed_apps(GIT_GUI_APPS),
         fonts,
-        font: config["font"]["family"].as_str().unwrap_or_default().to_owned(),
+        font: config["font"]["family"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
         ligatures: config["font"]["ligatures"].as_bool().unwrap_or(true),
         note: None,
     }
@@ -109,9 +113,12 @@ fn installed_apps(names: &[&str]) -> Vec<(String, String)> {
     }
     let home = std::env::var("HOME").unwrap_or_default();
     for name in names {
-        let found = [format!("/Applications/{name}.app"), format!("{home}/Applications/{name}.app")]
-            .iter()
-            .any(|path| std::path::Path::new(path).is_dir());
+        let found = [
+            format!("/Applications/{name}.app"),
+            format!("{home}/Applications/{name}.app"),
+        ]
+        .iter()
+        .any(|path| std::path::Path::new(path).is_dir());
         if found {
             out.push(((*name).to_owned(), format!("open -a '{name}' {{path}}")));
         }
@@ -164,7 +171,9 @@ impl ClientShellState {
                 _ => 0,
             },
             ClientSettingsSection::Ligatures => match self.overlay.as_ref() {
-                Some(ClientShellOverlay::Settings(settings)) => usize::from(!settings.appearance.ligatures),
+                Some(ClientShellOverlay::Settings(settings)) => {
+                    usize::from(!settings.appearance.ligatures)
+                }
                 _ => 0,
             },
             ClientSettingsSection::Ide | ClientSettingsSection::GitUi => {
@@ -175,7 +184,9 @@ impl ClientShellState {
                         } else {
                             (&settings.appearance.git_guis, &self.config.orcha.git_gui)
                         };
-                        apps.iter().position(|(_, command)| command == now).unwrap_or(0)
+                        apps.iter()
+                            .position(|(_, command)| command == now)
+                            .unwrap_or(0)
                     }
                     _ => 0,
                 }
@@ -229,13 +240,13 @@ impl ClientShellState {
         match self.overlay.as_ref() {
             Some(ClientShellOverlay::Settings(settings)) => match settings.section {
                 ClientSettingsSection::Theme => crate::config::THEME_NAMES.len(),
-                ClientSettingsSection::Font => settings.appearance.fonts.len(),
                 // orcha sets the font in Ghostty only
                 ClientSettingsSection::Font | ClientSettingsSection::Ligatures
                     if !super::brutal::host_is_ghostty() =>
                 {
                     0
                 }
+                ClientSettingsSection::Font => settings.appearance.fonts.len(),
                 ClientSettingsSection::Ligatures => 2,
                 ClientSettingsSection::Ide => settings.appearance.ides.len(),
                 ClientSettingsSection::GitUi => settings.appearance.git_guis.len(),
@@ -385,7 +396,8 @@ impl ClientShellState {
                 let value = format!("\"{command}\"");
                 let _ = crate::thread_spawn::spawn_named("orcha-app-pref", move || {
                     let content = std::fs::read_to_string(&path).unwrap_or_default();
-                    let updated = crate::config::upsert_section_value(&content, "orcha", key, &value);
+                    let updated =
+                        crate::config::upsert_section_value(&content, "orcha", key, &value);
                     if let Err(err) = std::fs::write(&path, updated) {
                         tracing::warn!(err = %err, "orcha: failed to save the {key} setting");
                     }

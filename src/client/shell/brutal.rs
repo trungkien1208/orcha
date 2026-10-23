@@ -36,7 +36,7 @@ pub(super) fn popup_panel(buffer: &mut Buffer, rect: Rect, fill: Color) {
         .cell((rect.right(), rect.bottom()))
         .and_then(|cell| cell.style().bg)
         .unwrap_or(Color::Reset);
-    draw_box(buffer, rect, Edge::Heavy, line, fill, page);
+    draw_box(buffer, rect, line, fill, page);
     draw_box_shadow(buffer, rect, line, page);
 }
 
@@ -113,7 +113,11 @@ impl Brutal {
             green: palette.green,
             blue: palette.blue,
             red: palette.red,
-            rail: if light { palette.text } else { palette.overlay1 },
+            rail: if light {
+                palette.text
+            } else {
+                palette.overlay1
+            },
             rail_ahead: palette.surface1,
             empty: palette.surface_dim,
             chip_text: Color::Rgb(17, 17, 17),
@@ -143,13 +147,6 @@ impl Brutal {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum Edge {
-    Heavy,
-    #[allow(dead_code)] // herdr's own boxes still name it
-    Light,
-}
-
 pub(super) fn set(buffer: &mut Buffer, x: u16, y: u16, symbol: &str, style: Style) {
     if let Some(cell) = buffer.cell_mut((x, y)) {
         cell.set_symbol(symbol);
@@ -164,7 +161,6 @@ pub(super) fn set(buffer: &mut Buffer, x: u16, y: u16, symbol: &str, style: Styl
 pub(super) fn draw_box(
     buffer: &mut Buffer,
     rect: Rect,
-    _edge: Edge,
     line: Color,
     fill: Color,
     page: Color,
@@ -253,8 +249,20 @@ pub(super) fn pill(
     }
     if edges {
         // on the block's own end cells, so the lines hug its fill
-        set(buffer, rect.x, rect.y, "▏", Style::reset().fg(t.line).bg(fill));
-        set(buffer, rect.right() - 1, rect.y, "▕", Style::reset().fg(t.line).bg(fill));
+        set(
+            buffer,
+            rect.x,
+            rect.y,
+            "▏",
+            Style::reset().fg(t.line).bg(fill),
+        );
+        set(
+            buffer,
+            rect.right() - 1,
+            rect.y,
+            "▕",
+            Style::reset().fg(t.line).bg(fill),
+        );
     }
     if text.is_empty() {
         return;
@@ -267,7 +275,10 @@ pub(super) fn pill(
         rect.y,
         width,
         text,
-        Style::default().fg(fg).bg(fill).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(fg)
+            .bg(fill)
+            .add_modifier(Modifier::BOLD),
     );
 }
 
@@ -377,7 +388,8 @@ pub(crate) fn host_is_ghostty() -> bool {
     static GHOSTTY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *GHOSTTY.get_or_init(|| {
         cfg!(test)
-            || std::env::var("TERM_PROGRAM").is_ok_and(|value| value.eq_ignore_ascii_case("ghostty"))
+            || std::env::var("TERM_PROGRAM")
+                .is_ok_and(|value| value.eq_ignore_ascii_case("ghostty"))
             || std::env::var("TERM").is_ok_and(|value| value == "xterm-ghostty")
             || std::env::var_os("GHOSTTY_RESOURCES_DIR").is_some()
     })
@@ -401,9 +413,12 @@ pub(super) fn icon_font_installed() -> bool {
         return false;
     };
     let home = std::path::Path::new(&home);
-    ["Library/Fonts/AgentIcons.ttf", ".local/share/fonts/AgentIcons.ttf"]
-        .iter()
-        .any(|path| home.join(path).exists())
+    [
+        "Library/Fonts/AgentIcons.ttf",
+        ".local/share/fonts/AgentIcons.ttf",
+    ]
+    .iter()
+    .any(|path| home.join(path).exists())
 }
 
 /// The orcha icon (a whale in a matcha bowl) from the icon font, else a symbol.

@@ -121,10 +121,18 @@ pub struct StyleFile {
 
 pub fn style_file_path(name: &str) -> Option<std::path::PathBuf> {
     // a plain name only: no path tricks
-    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
         return None;
     }
-    Some(super::config_dir().join("styles").join(format!("{name}.toml")))
+    Some(
+        super::config_dir()
+            .join("styles")
+            .join(format!("{name}.toml")),
+    )
 }
 
 pub(crate) fn style_file_exists(name: &str) -> bool {
@@ -271,9 +279,10 @@ mod tests {
 
     #[test]
     fn style_files_parse_a_base_and_tokens() {
-        let style: StyleFile =
-            toml::from_str("base = \"orcha-dark\"\nsidebar_bg = \"#102030\"\nmauve = \"#ff00aa\"\n")
-                .expect("style");
+        let style: StyleFile = toml::from_str(
+            "base = \"orcha-dark\"\nsidebar_bg = \"#102030\"\nmauve = \"#ff00aa\"\n",
+        )
+        .expect("style");
         assert_eq!(style.base.as_deref(), Some("orcha-dark"));
         assert_eq!(style.colors.sidebar_bg.as_deref(), Some("#102030"));
         assert!(style_file_path("../etc/passwd").is_none());

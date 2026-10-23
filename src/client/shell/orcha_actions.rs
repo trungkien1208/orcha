@@ -81,7 +81,11 @@ impl ClientShellState {
     }
 
     /// Clicks on the orcha chrome. Returns true when one was handled.
-    pub(super) fn handle_orcha_click(&mut self, point: (u16, u16), outcome: &mut ClientShellInput) -> bool {
+    pub(super) fn handle_orcha_click(
+        &mut self,
+        point: (u16, u16),
+        outcome: &mut ClientShellInput,
+    ) -> bool {
         if self.config.sidebar_tree && super::contains(self.hits.new_workspace, point) {
             self.open_new_agent_popup();
             outcome.repaint = true;
@@ -149,7 +153,11 @@ impl ClientShellState {
         };
         if let Some(prompt) = ask {
             // the agent that made the changes does the commit / PR
-            if let Some(pane) = self.snapshot.as_deref().and_then(|s| s.focused_pane_id.clone()) {
+            if let Some(pane) = self
+                .snapshot
+                .as_deref()
+                .and_then(|s| s.focused_pane_id.clone())
+            {
                 let quoted = |text: &str| format!("'{}'", text.replace('\'', "'\\''"));
                 run_detached(
                     format!(
@@ -300,7 +308,11 @@ impl ClientShellState {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return;
         };
-        let Some(workspace) = snapshot.workspaces.iter().find(|workspace| workspace.focused) else {
+        let Some(workspace) = snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.focused)
+        else {
             return;
         };
         let cwd = snapshot
@@ -339,7 +351,11 @@ impl ClientShellState {
         let orcha = self.config.orcha.clone();
         match popup {
             super::orcha_popup::OrchaPopup::Accounts { pane, .. } => {
-                let Some(account) = self.accounts.data().and_then(|data| data.get(index)).cloned()
+                let Some(account) = self
+                    .accounts
+                    .data()
+                    .and_then(|data| data.get(index))
+                    .cloned()
                 else {
                     return;
                 };
@@ -350,9 +366,11 @@ impl ClientShellState {
                     .as_deref()
                     .and_then(|pane| {
                         self.snapshot.as_deref().and_then(|snapshot| {
-                            snapshot.panes.iter().find(|p| p.pane_id == pane).and_then(|p| {
-                                p.foreground_cwd.clone().or_else(|| p.cwd.clone())
-                            })
+                            snapshot
+                                .panes
+                                .iter()
+                                .find(|p| p.pane_id == pane)
+                                .and_then(|p| p.foreground_cwd.clone().or_else(|| p.cwd.clone()))
                         })
                     })
                     .unwrap_or_default();
@@ -396,12 +414,17 @@ impl ClientShellState {
                     self.accounts.refresh_soon();
                 } else {
                     // the switch shows at once; the data catches up
-                    self.accounts.mark_current(&account.id, std::time::Instant::now());
+                    self.accounts
+                        .mark_current(&account.id, std::time::Instant::now());
                     self.update_low_fuel_hint();
                 }
             }
             super::orcha_popup::OrchaPopup::NewAgent { workspace, cwd, .. } => {
-                let account = self.accounts.data().and_then(|data| data.get(index)).cloned();
+                let account = self
+                    .accounts
+                    .data()
+                    .and_then(|data| data.get(index))
+                    .cloned();
                 self.orcha_ui.popup = None;
                 match account {
                     Some(account) if account.signed_out() => {
@@ -410,7 +433,11 @@ impl ClientShellState {
                     Some(account) => run_detached(
                         fill(
                             &orcha.new_agent_command,
-                            &[("id", &account.id), ("workspace", &workspace), ("cwd", &cwd)],
+                            &[
+                                ("id", &account.id),
+                                ("workspace", &workspace),
+                                ("cwd", &cwd),
+                            ],
                         ),
                         &[],
                     ),
@@ -501,11 +528,19 @@ impl ClientShellState {
             self.orcha_ui.popup = None;
             return;
         }
-        if let Some((_, index)) = hits.actions.iter().find(|(rect, _)| super::contains(*rect, point)) {
+        if let Some((_, index)) = hits
+            .actions
+            .iter()
+            .find(|(rect, _)| super::contains(*rect, point))
+        {
             self.popup_activate(*index, false, outcome);
             return;
         }
-        if let Some((_, index)) = hits.rows.iter().find(|(rect, _)| super::contains(*rect, point)) {
+        if let Some((_, index)) = hits
+            .rows
+            .iter()
+            .find(|(rect, _)| super::contains(*rect, point))
+        {
             self.popup_select(*index);
         }
     }

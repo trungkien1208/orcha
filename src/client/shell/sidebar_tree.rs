@@ -19,7 +19,7 @@ use crate::api::schema::AgentStatus;
 use crate::protocol::ClientShellAgent;
 use ratatui::style::Color;
 
-use super::brutal::{self, Brutal, Edge};
+use super::brutal::{self, Brutal};
 use super::render::{display_width, put_right_text, put_text, ShellRenderState};
 use super::*;
 
@@ -70,7 +70,10 @@ fn row_name(label: &str) -> String {
 }
 
 fn running(agent: &ClientShellAgent) -> bool {
-    matches!(agent.agent_status, AgentStatus::Working | AgentStatus::Blocked)
+    matches!(
+        agent.agent_status,
+        AgentStatus::Working | AgentStatus::Blocked
+    )
 }
 
 fn state_dot(status: AgentStatus, t: &Brutal) -> (&'static str, Color) {
@@ -126,7 +129,11 @@ fn chug(frame: u64, span: u16) -> u16 {
     }
     let period = u64::from(span) * 2;
     let pos = frame % period;
-    (if pos > u64::from(span) { period - pos } else { pos }) as u16
+    (if pos > u64::from(span) {
+        period - pos
+    } else {
+        pos
+    }) as u16
 }
 
 /// The PROCESS card: running agents only, each a train on four stations.
@@ -143,7 +150,7 @@ fn render_process(
 ) {
     // its bottom row is its line and shadow, right on the bottom
     let card = Rect::new(rect.x, rect.y, rect.width.saturating_sub(1), rect.height);
-    brutal::draw_box(buffer, card, Edge::Heavy, t.line, t.card, t.bg);
+    brutal::draw_box(buffer, card, t.line, t.card, t.bg);
     brutal::draw_box_shadow(buffer, card, t.shadow, t.bg);
     let x = rect.x + 2;
     let width = rect.width.saturating_sub(5);
@@ -183,7 +190,10 @@ fn render_process(
     };
     for (index, name) in names.iter().enumerate() {
         let lx = x + leg * index as u16;
-        let style = Style::default().fg(t.muted).bg(t.card).add_modifier(Modifier::BOLD);
+        let style = Style::default()
+            .fg(t.muted)
+            .bg(t.card)
+            .add_modifier(Modifier::BOLD);
         if index == STATIONS.len() - 1 {
             put_right_text(buffer, Rect::new(x, y, width, 1), y, name, style);
         } else {
@@ -225,7 +235,8 @@ fn render_process(
             &brutal::clip(&detail, usize::from(detail_width)),
             Style::default().fg(t.ink).bg(t.card),
         );
-        hits.agents.push((Rect::new(x, y, width, TRAIN_ROWS), agent.pane_id.clone()));
+        hits.agents
+            .push((Rect::new(x, y, width, TRAIN_ROWS), agent.pane_id.clone()));
         y += 1;
 
         // the rail: done legs solid, the rest dashed, a stop at each leg's end
@@ -238,7 +249,11 @@ fn render_process(
                 leg
             };
             let done = index < at;
-            let (glyph, rail) = if done { ("━", t.rail) } else { ("┄", t.rail_ahead) };
+            let (glyph, rail) = if done {
+                ("━", t.rail)
+            } else {
+                ("┄", t.rail_ahead)
+            };
             put_text(
                 buffer,
                 lx,
@@ -322,8 +337,11 @@ pub(crate) fn render_sidebar_tree(
             .map(|workspace| workspace.label.clone())
             .unwrap_or_default()
     };
-    let running_agents: Vec<&ClientShellAgent> =
-        snapshot.agents.iter().filter(|agent| running(agent)).collect();
+    let running_agents: Vec<&ClientShellAgent> = snapshot
+        .agents
+        .iter()
+        .filter(|agent| running(agent))
+        .collect();
     let trains: Vec<(&ClientShellAgent, String)> = running_agents
         .iter()
         .take(MAX_TRAINS)
@@ -336,7 +354,12 @@ pub(crate) fn render_sidebar_tree(
     };
     // line row, title, stations, the trains, bottom line row
     let process_height = (4 + rows_for_trains).min(area.height.saturating_sub(10));
-    let process = Rect::new(x, area.bottom().saturating_sub(process_height), width, process_height);
+    let process = Rect::new(
+        x,
+        area.bottom().saturating_sub(process_height),
+        width,
+        process_height,
+    );
     if process_height >= 5 {
         render_process(
             buffer,
@@ -365,7 +388,14 @@ pub(crate) fn render_sidebar_tree(
             .add_modifier(Modifier::BOLD),
     );
     hits.sidebar_toggle = Rect::new(x + width.saturating_sub(2), label_y, 1, 1);
-    put_text(buffer, hits.sidebar_toggle.x, label_y, 1, "«", Style::default().fg(t.muted).bg(t.bg));
+    put_text(
+        buffer,
+        hits.sidebar_toggle.x,
+        label_y,
+        1,
+        "«",
+        Style::default().fg(t.muted).bg(t.bg),
+    );
 
     let entries = super::sidebar::workspace_entries(snapshot, state.collapsed_groups);
     let mut items = Vec::new();
@@ -380,7 +410,11 @@ pub(crate) fn render_sidebar_tree(
             .collect();
         let kind = if workspace.focused {
             Card::Selected
-        } else if state.orcha_ui.open_projects.contains(&workspace.workspace_id) {
+        } else if state
+            .orcha_ui
+            .open_projects
+            .contains(&workspace.workspace_id)
+        {
             Card::Open
         } else {
             Card::Folded
@@ -390,14 +424,20 @@ pub(crate) fn render_sidebar_tree(
     // a card is its top line's row, its rows, and (when nothing follows it,
     // or it is raised) a bottom row; stacked cards share the row between
     let content = |agents: &Vec<&ClientShellAgent>, kind: Card| {
-        1 + if kind == Card::Folded { 0 } else { agents.len() as u16 }
+        1 + if kind == Card::Folded {
+            0
+        } else {
+            agents.len() as u16
+        }
     };
     // every card: the line row over it (shared with the card above), its
     // rows, and a bottom line row after the last; the same gap everywhere
     let heights: Vec<u16> = items
         .iter()
         .enumerate()
-        .map(|(index, (_, agents, kind))| 1 + content(agents, *kind) + u16::from(index + 1 == items.len()))
+        .map(|(index, (_, agents, kind))| {
+            1 + content(agents, *kind) + u16::from(index + 1 == items.len())
+        })
         .collect();
     let gaps = vec![0; items.len()];
     let body = Rect::new(x, label_y + 1, width, process.y.saturating_sub(label_y + 1));
@@ -405,7 +445,10 @@ pub(crate) fn render_sidebar_tree(
     let mut metrics =
         super::scroll::list_scroll_metrics(&heights, &gaps, body.height, *state.workspace_scroll);
     if !body.is_empty() && std::mem::take(state.reveal_focused_workspace) {
-        if let Some(target) = items.iter().position(|(_, _, kind)| *kind == Card::Selected) {
+        if let Some(target) = items
+            .iter()
+            .position(|(_, _, kind)| *kind == Card::Selected)
+        {
             *state.workspace_scroll = super::scroll::list_scroll_start_to_reveal(
                 &heights,
                 &gaps,
@@ -429,7 +472,8 @@ pub(crate) fn render_sidebar_tree(
 
     let card_width = width.saturating_sub(1);
     let mut y = body.y;
-    for (index, (workspace, agents, kind)) in items.iter().enumerate().skip(*state.workspace_scroll) {
+    for (index, (workspace, agents, kind)) in items.iter().enumerate().skip(*state.workspace_scroll)
+    {
         let height = heights[index];
         if y.saturating_add(height) > body.bottom() {
             break;
@@ -437,7 +481,11 @@ pub(crate) fn render_sidebar_tree(
         let rows = content(agents, *kind);
         let first = index == *state.workspace_scroll;
         // the shared row: the card above's bottom line and this one's top line
-        let glyph = if first { "▁" } else { brutal::top_rule_glyph() };
+        let glyph = if first {
+            "▁"
+        } else {
+            brutal::top_rule_glyph()
+        };
         let color = t.line;
         put_text(
             buffer,
@@ -512,10 +560,25 @@ fn render_project_card(
         t.frame
     };
     for row in rect.y..rect.bottom() {
-        brutal::pill(buffer, Rect::new(rect.x, row, rect.width, 1), "", t.ink, fill, true, t);
+        brutal::pill(
+            buffer,
+            Rect::new(rect.x, row, rect.width, 1),
+            "",
+            t.ink,
+            fill,
+            true,
+            t,
+        );
         if selected {
             // the selected one: a yellow bar inside its left line
-            put_text(buffer, rect.x + 1, row, 1, "▌", Style::default().fg(t.yellow).bg(fill));
+            put_text(
+                buffer,
+                rect.x + 1,
+                row,
+                1,
+                "▌",
+                Style::default().fg(t.yellow).bg(fill),
+            );
         }
     }
     let card = rect;
@@ -531,7 +594,12 @@ fn render_project_card(
     let branch = workspace
         .branch
         .as_deref()
-        .map(|branch| format!("⎇ {}", brutal::clip(branch.rsplit('/').next().unwrap_or(branch), 12)))
+        .map(|branch| {
+            format!(
+                "⎇ {}",
+                brutal::clip(branch.rsplit('/').next().unwrap_or(branch), 12)
+            )
+        })
         .unwrap_or_default();
     let branch_width = display_width(&branch);
     let name_width = right.saturating_sub(x + 2 + branch_width + 1);
@@ -570,7 +638,14 @@ fn render_project_card(
         let row_bg = if agent.focused { t.frame } else { fill };
         buffer.set_style(row, Style::default().bg(row_bg));
         let (dot, color) = state_dot(agent.agent_status, t);
-        put_text(buffer, x + 2, y, 1, dot, Style::default().fg(color).bg(row_bg));
+        put_text(
+            buffer,
+            x + 2,
+            y,
+            1,
+            dot,
+            Style::default().fg(color).bg(row_bg),
+        );
         let name = row_name(&brutal::agent_label(agent));
         let name_width = display_width(&name).min(row.width.saturating_sub(3));
         put_text(
@@ -579,7 +654,10 @@ fn render_project_card(
             y,
             name_width,
             &name,
-            Style::default().fg(t.ink).bg(row_bg).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(t.ink)
+                .bg(row_bg)
+                .add_modifier(Modifier::BOLD),
         );
         let blocked = agent.agent_status == AgentStatus::Blocked;
         let note = if blocked { "needs you" } else { "" };
@@ -599,7 +677,10 @@ fn render_project_card(
                 Rect::new(row.x, y, right.saturating_sub(row.x), 1),
                 y,
                 note,
-                Style::default().fg(t.red).bg(row_bg).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(t.red)
+                    .bg(row_bg)
+                    .add_modifier(Modifier::BOLD),
             );
         }
         hits.agents.push((row, agent.pane_id.clone()));
@@ -636,11 +717,21 @@ fn render_folded_row(
         y,
         name_width,
         &brutal::clip(&workspace.label.to_uppercase(), usize::from(name_width)),
-        Style::default().fg(t.ink).bg(fill).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(t.ink)
+            .bg(fill)
+            .add_modifier(Modifier::BOLD),
     );
     let mut mx = right.saturating_sub(marks_width);
     if agents.is_empty() {
-        put_text(buffer, mx, y, 4, "idle", Style::default().fg(t.muted).bg(fill));
+        put_text(
+            buffer,
+            mx,
+            y,
+            4,
+            "idle",
+            Style::default().fg(t.muted).bg(fill),
+        );
     }
     for agent in agents.iter().take(6) {
         let (dot, color) = state_dot(agent.agent_status, t);

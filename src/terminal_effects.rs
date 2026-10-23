@@ -14,7 +14,8 @@ pub(crate) fn write_terminal_bells<W: Write>(writer: &mut W, count: u16) -> io::
 
 /// orcha painted the host terminal's default background (OSC 11), so the
 /// window padding matches its page; reset it (OSC 111) on the way out.
-static HOST_BACKGROUND_SET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static HOST_BACKGROUND_SET: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 pub(crate) fn write_host_background<W: Write>(writer: &mut W, rgb: (u8, u8, u8)) -> io::Result<()> {
     let (r, g, b) = rgb;
