@@ -247,6 +247,7 @@ pub(crate) fn render_status_bar(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     fuel: Option<&super::super::accounts::Account>,
+    hits: &mut ShellHitMap,
 ) {
     let t = super::super::brutal::Brutal::new(&config.palette);
     let bg = t.status_bg;
@@ -257,10 +258,20 @@ pub(crate) fn render_status_bar(
     let area = Rect::new(outer.x, outer.y + outer.height / 2, outer.width, 1);
     buffer.set_style(area, Style::default().bg(bg).fg(t.status_text));
     let mut parts: Vec<&str> = Vec::new();
+    // plan usage printed by a status script (an account, "5h ███ 40%"): orcha
+    // draws FUEL itself, in the panel or here
+    let usage = |part: &str| {
+        let lower = part.to_lowercase();
+        part.contains('@')
+            || part.contains('█')
+            || part.contains('░')
+            || lower.starts_with("5h")
+            || lower.starts_with("week")
+    };
     for segment in &snapshot.tab_bar_right {
         for part in segment.text.split(" · ") {
             let part = part.trim();
-            if !part.is_empty() {
+            if !part.is_empty() && !usage(part) {
                 parts.push(part);
             }
         }
@@ -339,8 +350,9 @@ pub(crate) fn render_status_bar(
             let who = account.email.clone().unwrap_or_else(|| account.label.clone());
             (who, account.windows.iter().take(2).cloned().collect::<Vec<_>>())
         });
+    // "▴ FUEL email  5H ▬ ▬ … 18%  WEEK …"
     let fuel_width = fuel_text.as_ref().map_or(0, |(who, windows)| {
-        display_width(who) + 2 + windows.iter().map(|w| display_width(&w.label) + 17).sum::<u16>()
+        8 + display_width(who) + 2 + windows.iter().map(|w| display_width(&w.label) + 27).sum::<u16>()
     });
     let joined = right.join("  ");
     let width = display_width(&joined) + fuel_width;
@@ -350,13 +362,28 @@ pub(crate) fn render_status_bar(
         .max(x.saturating_add(2));
     let mut cx = start;
     if let Some((who, windows)) = fuel_text {
+        // ▴ puts FUEL back in the panel
+        let show = Rect::new(cx, area.y, 6, 1);
+        cx = put_segment(
+            buffer,
+            cx,
+            area.y,
+            area.right(),
+            "▴ FUEL",
+            Style::default()
+                .fg(t.status_text)
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        );
+        hits.orcha.fuel_show = show;
+        cx += 2;
         cx = put_segment(buffer, cx, area.y, area.right(), &who, muted);
         cx += 2;
         for window in windows {
-            cx = put_segment(buffer, cx, area.y, area.right(), &window.label, text);
+            cx = put_segment(buffer, cx, area.y, area.right(), &window.label, muted);
             cx += 1;
             super::super::git_panel::draw_gauge(buffer, cx, area.y, window.left, bg, &t);
-            cx += 11;
+            cx += 20;
             let pct = format!("{:>3}%", window.left);
             cx = put_segment(
                 buffer,

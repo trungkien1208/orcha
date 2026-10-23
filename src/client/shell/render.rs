@@ -375,7 +375,7 @@ pub(super) fn render_shell(
         );
     }
     if layout.status_bar.height > 0 {
-        render_status_bar(buffer, layout.status_bar, snapshot, config, state.fuel);
+        render_status_bar(buffer, layout.status_bar, snapshot, config, state.fuel, &mut hits);
     }
     if !config.mouse_capture {
         hits.sidebar_divider = Rect::default();

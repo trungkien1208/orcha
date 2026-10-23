@@ -62,6 +62,24 @@ impl ClientShellState {
         }
     }
 
+    /// FUEL moves between the panel and the status bar; the choice is kept
+    /// in the config (`[orcha] fuel`).
+    fn move_fuel(&mut self, to: crate::config::FuelPlacement) {
+        self.config.orcha.fuel = to;
+        let value = match to {
+            crate::config::FuelPlacement::Panel => "\"panel\"",
+            crate::config::FuelPlacement::StatusBar => "\"status_bar\"",
+        };
+        let path = crate::config::config_path();
+        let _ = crate::thread_spawn::spawn_named("orcha-fuel-pref", move || {
+            let content = std::fs::read_to_string(&path).unwrap_or_default();
+            let updated = crate::config::upsert_section_value(&content, "orcha", "fuel", value);
+            if let Err(err) = std::fs::write(&path, updated) {
+                tracing::warn!(err = %err, "orcha: failed to save the fuel placement");
+            }
+        });
+    }
+
     /// Clicks on the orcha chrome. Returns true when one was handled.
     pub(super) fn handle_orcha_click(&mut self, point: (u16, u16), outcome: &mut ClientShellInput) -> bool {
         if self.config.sidebar_tree && super::contains(self.hits.new_workspace, point) {
@@ -75,6 +93,16 @@ impl ClientShellState {
                 crate::input::KeybindMatch::Action(crate::input::KeybindAction::Settings),
                 outcome,
             );
+            return true;
+        }
+        let hide = super::contains(hits.fuel_hide, point);
+        if hide || super::contains(hits.fuel_show, point) {
+            self.move_fuel(if hide {
+                crate::config::FuelPlacement::StatusBar
+            } else {
+                crate::config::FuelPlacement::Panel
+            });
+            outcome.repaint = true;
             return true;
         }
         if super::contains(hits.fuel, point) || super::contains(hits.fuel_hint, point) {

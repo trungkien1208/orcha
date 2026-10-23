@@ -102,6 +102,9 @@ pub(super) struct OrchaHits {
     pub(super) settings: Rect,
     pub(super) fuel: Rect,
     pub(super) fuel_hint: Rect,
+    /// FUEL's ✕ (move it to the status bar) and the status bar's ▴ FUEL (back).
+    pub(super) fuel_hide: Rect,
+    pub(super) fuel_show: Rect,
     /// ▸/▾ of a project: open or fold it without selecting it.
     pub(super) project_toggles: Vec<(Rect, String)>,
     pub(super) history_toggle: Rect,

@@ -618,7 +618,15 @@ fn draw_rows(
                 );
             }
             Row::Title(text, note, slot) => {
-                title(buffer, x, y, inner_width, text, note, t);
+                let fuel = matches!(slot, Some(Slot::Fuel));
+                // FUEL's ✕ moves it to the status bar
+                let room = if fuel { inner_width.saturating_sub(3) } else { inner_width };
+                title(buffer, x, y, room, text, note, t);
+                if fuel {
+                    let close = Rect::new(x + inner_width.saturating_sub(1), y, 1, 1);
+                    put_text(buffer, close.x, y, 1, "✕", Style::default().fg(t.muted).bg(t.card));
+                    hits.orcha.fuel_hide = close;
+                }
                 if let Some(slot) = slot {
                     open_slot = Some((*slot, y.saturating_sub(1)));
                 }
