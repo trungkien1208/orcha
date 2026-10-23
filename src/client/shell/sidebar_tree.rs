@@ -162,8 +162,8 @@ fn render_project_card(
 ) {
     let selected = state == ProjectState::Selected;
     if selected {
-        brutal::draw_box(buffer, rect, Edge::Heavy, t.line, t.card);
-        brutal::draw_shadow(buffer, rect, t.shadow, t.bg);
+        brutal::draw_box(buffer, rect, Edge::Heavy, t.line, t.card, t.bg);
+        brutal::draw_box_shadow(buffer, rect, t.shadow, t.bg);
         for y in rect.y + 1..rect.bottom().saturating_sub(1) {
             put_text(
                 buffer,
@@ -175,7 +175,7 @@ fn render_project_card(
             );
         }
     } else {
-        brutal::draw_box(buffer, rect, Edge::Dashed, t.line, t.bg);
+        brutal::draw_box(buffer, rect, Edge::Dashed, t.line, t.bg, t.bg);
     }
     let fill = if selected { t.card } else { t.bg };
     let x = rect.x + 2;
@@ -373,8 +373,8 @@ fn render_process(
     t: &Brutal,
     hits: &mut ShellHitMap,
 ) {
-    brutal::draw_box(buffer, rect, Edge::Heavy, t.line, t.card);
-    brutal::draw_shadow(buffer, rect, t.shadow, t.bg);
+    brutal::draw_box(buffer, rect, Edge::Heavy, t.line, t.card, t.bg);
+    brutal::draw_box_shadow(buffer, rect, t.shadow, t.bg);
     let x = rect.x + 2;
     let width = rect.width.saturating_sub(4);
     let mut y = rect.y + 1;

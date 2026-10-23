@@ -122,12 +122,16 @@ pub(super) enum Edge {
 }
 
 impl Edge {
-    /// (top-left, horizontal, top-right, vertical, bottom-left, bottom-right)
-    fn glyphs(self) -> [&'static str; 6] {
+    /// (top-left, top, top-right, left, right, bottom-left, bottom, bottom-right)
+    ///
+    /// Heavy and light edges are block elements that hug the fill: a line
+    /// drawn in the middle of a cell would leave half a cell of fill
+    /// outside it.
+    fn glyphs(self) -> [&'static str; 8] {
         match self {
-            Edge::Heavy => ["┏", "━", "┓", "┃", "┗", "┛"],
-            Edge::Light => ["┌", "─", "┐", "│", "└", "┘"],
-            Edge::Dashed => ["┌", "┄", "┐", "┆", "└", "┘"],
+            Edge::Heavy => ["▗", "▄", "▖", "▐", "▌", "▝", "▀", "▘"],
+            Edge::Light => [" ", "▁", " ", "▕", "▏", " ", "▔", " "],
+            Edge::Dashed => ["┌", "┄", "┐", "┆", "┆", "└", "┄", "┘"],
         }
     }
 }
@@ -139,8 +143,15 @@ pub(super) fn set(buffer: &mut Buffer, x: u16, y: u16, symbol: &str, style: Styl
     }
 }
 
-/// A box: border in `line`, inside filled with `fill`.
-pub(super) fn draw_box(buffer: &mut Buffer, rect: Rect, edge: Edge, line: Color, fill: Color) {
+/// A box: the edge in `line` on the `page` around it, the inside filled.
+pub(super) fn draw_box(
+    buffer: &mut Buffer,
+    rect: Rect,
+    edge: Edge,
+    line: Color,
+    fill: Color,
+    page: Color,
+) {
     if rect.width < 2 || rect.height < 2 {
         return;
     }
@@ -151,16 +162,17 @@ pub(super) fn draw_box(buffer: &mut Buffer, rect: Rect, edge: Edge, line: Color,
             set(buffer, x, y, " ", Style::reset().bg(fill));
         }
     }
-    let [tl, h, tr, v, bl, br] = edge.glyphs();
-    let style = Style::default().fg(line).bg(fill);
+    let [tl, top, tr, left, right_edge, bl, bottom_edge, br] = edge.glyphs();
+    // dashed lines sit on the fill (it is the page there)
+    let style = Style::reset().fg(line).bg(if edge == Edge::Dashed { fill } else { page });
     let (right, bottom) = (rect.right() - 1, rect.bottom() - 1);
     for x in rect.x + 1..right {
-        set(buffer, x, rect.y, h, style);
-        set(buffer, x, bottom, h, style);
+        set(buffer, x, rect.y, top, style);
+        set(buffer, x, bottom, bottom_edge, style);
     }
     for y in rect.y + 1..bottom {
-        set(buffer, rect.x, y, v, style);
-        set(buffer, right, y, v, style);
+        set(buffer, rect.x, y, left, style);
+        set(buffer, right, y, right_edge, style);
     }
     set(buffer, rect.x, rect.y, tl, style);
     set(buffer, right, rect.y, tr, style);
@@ -168,13 +180,33 @@ pub(super) fn draw_box(buffer: &mut Buffer, rect: Rect, edge: Edge, line: Color,
     set(buffer, right, bottom, br, style);
 }
 
-/// A hard shadow one cell right and down of `rect`, on the page color.
+/// The hard shadow of a heavy box: half a cell right and down, merged into
+/// its right and bottom edges.
+pub(super) fn draw_box_shadow(buffer: &mut Buffer, rect: Rect, shadow: Color, page: Color) {
+    if rect.width < 2 || rect.height < 2 {
+        return;
+    }
+    let style = Style::reset().fg(shadow).bg(page);
+    let (right, bottom) = (rect.right() - 1, rect.bottom() - 1);
+    set(buffer, right, rect.y, "▄", style);
+    for y in rect.y + 1..=bottom {
+        set(buffer, right, y, "█", style);
+    }
+    set(buffer, rect.x, bottom, "▐", style);
+    for x in rect.x + 1..right {
+        set(buffer, x, bottom, "█", style);
+    }
+}
+
+/// The hard shadow of a filled block (a button): half a cell right and down.
 pub(super) fn draw_shadow(buffer: &mut Buffer, rect: Rect, shadow: Color, page: Color) {
-    let style = Style::default().fg(shadow).bg(page);
+    let style = Style::reset().fg(shadow).bg(page);
     let (x, y) = (rect.right(), rect.bottom());
+    set(buffer, x, rect.y, "▖", style);
     for row in rect.y + 1..y {
         set(buffer, x, row, "▌", style);
     }
+    set(buffer, rect.x, y, "▝", style);
     for col in rect.x + 1..x {
         set(buffer, col, y, "▀", style);
     }

@@ -82,8 +82,8 @@ fn popup_frame(
         width,
         height,
     );
-    brutal::draw_box(buffer, area, Edge::Heavy, t.line, t.bg);
-    brutal::draw_shadow(buffer, area, t.shadow, t.bg);
+    brutal::draw_box(buffer, area, Edge::Heavy, t.line, t.bg, t.bg);
+    brutal::draw_box_shadow(buffer, area, t.shadow, t.bg);
     hits.area = area;
     let inner_x = area.x + 1;
     let inner_w = area.width.saturating_sub(2);
@@ -128,9 +128,7 @@ fn popup_frame(
     );
     hits.close = close;
     let rule = |buffer: &mut Buffer, y: u16| {
-        put_text(buffer, area.x, y, 1, "┣", line);
         put_text(buffer, inner_x, y, inner_w, &"━".repeat(usize::from(inner_w)), line);
-        put_text(buffer, area.right() - 1, y, 1, "┫", line);
     };
     rule(buffer, header_y + 1);
 
@@ -190,7 +188,7 @@ fn popup_frame(
 fn row_box(buffer: &mut Buffer, rect: Rect, current: bool, cursor: bool, t: &Brutal) -> ratatui::style::Color {
     let line = if cursor { t.pink } else { t.line };
     if current {
-        brutal::draw_box(buffer, rect, Edge::Heavy, line, t.card);
+        brutal::draw_box(buffer, rect, Edge::Heavy, line, t.card, t.bg);
         for y in rect.y + 1..rect.bottom().saturating_sub(1) {
             put_text(buffer, rect.x + 1, y, 1, "▌", Style::default().fg(t.yellow).bg(t.card));
         }
@@ -201,6 +199,7 @@ fn row_box(buffer: &mut Buffer, rect: Rect, current: bool, cursor: bool, t: &Bru
             rect,
             if cursor { Edge::Heavy } else { Edge::Light },
             line,
+            t.bg,
             t.bg,
         );
         t.bg

@@ -345,16 +345,14 @@ pub(super) fn draw_gauge(buffer: &mut Buffer, x: u16, y: u16, left: u8, bg: rata
 /// Splits the panel with a light rule that meets its border.
 fn rule(buffer: &mut Buffer, rect: Rect, y: u16, t: &Brutal) {
     let style = Style::default().fg(t.line).bg(t.card);
-    put_text(buffer, rect.x, y, 1, "├", style);
     put_text(
         buffer,
         rect.x + 1,
         y,
         rect.width.saturating_sub(2),
-        &"─".repeat(usize::from(rect.width.saturating_sub(2))),
+        &"━".repeat(usize::from(rect.width.saturating_sub(2))),
         style,
     );
-    put_text(buffer, rect.right().saturating_sub(1), y, 1, "┤", style);
 }
 
 fn title(buffer: &mut Buffer, x: u16, y: u16, width: u16, text: &str, note: &str, t: &Brutal) {
@@ -450,7 +448,7 @@ pub(super) fn render_git_panel(
     }
     .min(area.height.saturating_sub(1));
     let rect = Rect::new(area.x + 1, area.y, area.width.saturating_sub(2), height);
-    brutal::draw_box(buffer, rect, Edge::Light, t.line, t.card);
+    brutal::draw_box(buffer, rect, Edge::Heavy, t.line, t.card, t.bg);
     let x = rect.x + 2;
     let mut y = rect.y + 1;
     let bottom = rect.bottom().saturating_sub(1);

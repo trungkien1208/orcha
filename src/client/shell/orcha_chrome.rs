@@ -112,8 +112,8 @@ pub(super) fn render_frame_and_tabs(
     )
     .intersection(buffer.area);
     buffer.set_style(paper, Style::default().bg(t.bg));
-    brutal::draw_box(buffer, frame, Edge::Heavy, t.line, t.frame);
-    brutal::draw_shadow(buffer, frame, t.shadow, t.bg);
+    brutal::draw_box(buffer, frame, Edge::Heavy, t.line, t.frame, t.bg);
+    brutal::draw_box_shadow(buffer, frame, t.shadow, t.bg);
 
     let tabs: Vec<&ClientShellTab> = snapshot
         .tabs
@@ -285,11 +285,33 @@ pub(super) fn dress_panes(
                     }
                 }
                 Some(pane) => {
-                    if focused_pane != Some(pane.pane_id.as_str()) {
-                        cell.fg = line;
-                    }
-                    if cell.bg == reset {
-                        cell.bg = pane_bg;
+                    // the pane's edge hugs its paper: eighth blocks on the frame;
+                    // other border cells (a scrollbar) keep their glyph on paper
+                    let r = pane.rect;
+                    let glyph = if y + 1 == r.bottom() {
+                        Some("▔")
+                    } else if x == r.x {
+                        Some("▕")
+                    } else if x + 1 == r.right() {
+                        Some("▏")
+                    } else if y == r.y {
+                        Some("▁")
+                    } else {
+                        None
+                    };
+                    match glyph {
+                        Some(glyph) => {
+                            if focused_pane != Some(pane.pane_id.as_str()) {
+                                cell.fg = line;
+                            }
+                            cell.bg = frame_bg;
+                            cell.symbol = glyph.to_owned();
+                        }
+                        None => {
+                            if cell.bg == reset {
+                                cell.bg = pane_bg;
+                            }
+                        }
                     }
                 }
                 None => {
