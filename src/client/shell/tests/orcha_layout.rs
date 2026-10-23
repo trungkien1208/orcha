@@ -439,17 +439,26 @@ fn preview_surface(size: Rect) -> PaneSurfaceFrame {
             "pane_1",
             Rect::new(0, 0, half.saturating_sub(1), size.height),
             vec![
-                "› add a dark mode toggle to src/Menu.tsx",
+                "› add a dark mode toggle to the menu",
                 "",
                 "● I'll read the theme tokens first.",
-                "  └ Read src/theme.ts (3 lines)",
+                "  └ Read src/theme.ts (24 lines)",
                 "",
                 "● Update(src/Menu.tsx)",
-                "   + const [dark, setDark] = useState(theme === \"dark\")",
-                "   - return <Toggle label=\"Dark mode\" />",
+                "  └ Added 3 lines, removed 1 line",
+                "     12 + const [dark, setDark] = useTheme()",
+                "     13 + const label = dark ? \"Light\" : \"Dark\"",
+                "     14 - return <Toggle label=\"Dark mode\" />",
+                "     14 + return <Toggle label={label} />",
+                "",
+                "● Update(src/theme.ts)",
+                "  └ Added 1 line",
+                "     31 + export const dark = { bg: \"#1a1916\" }",
                 "",
                 "● Bash(npm test -- Menu)",
-                "✻ Running tests… 8s",
+                "  └ PASS  src/Menu.test.tsx (4 tests)",
+                "",
+                "✻ Checking contrast in both themes… 8s",
             ],
         ),
         (
@@ -463,9 +472,18 @@ fn preview_surface(size: Rect) -> PaneSurfaceFrame {
             vec![
                 "› Explain src/theme.ts in two sentences.",
                 "",
-                "src/theme.ts exports three theme settings:",
-                "a dark theme, a pink accent color and a",
-                "corner radius of 12.",
+                "• src/theme.ts exports the design tokens: two",
+                "  palettes (light and dark), a pink accent and",
+                "  a corner radius of 12.",
+                "",
+                "• Components read them through useTheme(), so",
+                "  switching palettes repaints the whole app",
+                "  without a reload.",
+                "",
+                "  Worth knowing: the dark palette reuses the",
+                "  light accent, so check pink-on-dark contrast.",
+                "",
+                "─ Worked for 14s ─────────────────────",
             ],
         ),
     ];
@@ -556,11 +574,13 @@ fn orcha_preview() {
     let mut second_tab = projected.tabs[0].clone();
     second_tab.tab_id = "tab_2".into();
     second_tab.label = "explain theme".into();
+    second_tab.number = 2;
     second_tab.focused = false;
     second_tab.agent_status = AgentStatus::Done;
     let mut third_tab = second_tab.clone();
     third_tab.tab_id = "tab_3".into();
     third_tab.label = "amex fix".into();
+    third_tab.number = 3;
     third_tab.agent_status = AgentStatus::Blocked;
     projected.tabs[0].label = "dark mode".into();
     projected.tabs[0].agent_status = AgentStatus::Working;
@@ -655,6 +675,11 @@ fn orcha_preview() {
             false,
         ),
     ];
+    // the explain chat runs in the project's second tab
+    projected.agents[1].tab_id = "tab_2".into();
+    for pane in projected.panes.iter_mut().filter(|pane| pane.pane_id == "pane_2") {
+        pane.tab_id = "tab_2".into();
+    }
     projected.tab_bar_right = vec![
         ClientShellTabStatusSegment {
             text: "#42 Dark mode for the menu ● Open".into(),
@@ -738,6 +763,26 @@ fn orcha_preview() {
     ]));
     if std::env::var("ORCHA_PREVIEW_POPUP").is_ok() {
         state.open_accounts_overlay();
+    }
+    if std::env::var("ORCHA_PREVIEW_OPEN_WITH").is_ok() {
+        use crate::client::shell::orcha_popup::{OpenChoice, OrchaPopup};
+        let editor = |name: &str| OpenChoice::Editor {
+            name: name.into(),
+            command: format!("open -a '{name}' {{path}}"),
+        };
+        state.orcha_ui.popup = Some(OrchaPopup::OpenWith {
+            selected: 0,
+            path: "/tmp/matcha-house/docs/dark-menu.png".into(),
+            line: 1,
+            extension: "png".into(),
+            choices: vec![
+                OpenChoice::System,
+                editor("Cursor"),
+                editor("Zed"),
+                OpenChoice::Reveal,
+            ],
+            remember: true,
+        });
     }
     state.git_panel.set_for_test(Some(GitPanelData {
         root: "/tmp/matcha-house".into(),

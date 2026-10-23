@@ -62,9 +62,16 @@ Then run `orcha` inside a project. Your agent sign-ins are picked up automatical
 - **Git beside the work.** Branch, changes and history in the side panel, one click to your IDE or Git app.
 - **Agents outlive the window.** Quit orcha and they keep running; `orcha` brings you straight back.
 
-<p align="center">
-  <img src="docs/orcha/images/continue-on.png" alt="the CONTINUE ON popup: accounts with their fuel, the best one marked" width="80%" />
-</p>
+<table>
+  <tr>
+    <td width="50%"><img src="docs/orcha/images/continue-on.png" alt="CONTINUE ON: accounts with their fuel, the best next one marked" /></td>
+    <td width="50%"><img src="docs/orcha/images/open-with.png" alt="OPEN WITH: pick the app for a file type once" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>CONTINUE ON</b> · the chat moves on when an account runs low</sub></td>
+    <td align="center"><sub><b>OPEN WITH</b> · choose an app per file type, once</sub></td>
+  </tr>
+</table>
 
 ## Commands
 
