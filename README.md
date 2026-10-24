@@ -20,26 +20,26 @@
   </picture>
 </p>
 
-<p align="center"><b>All your agents. One terminal. Zero tab chaos.</b><br/>Claude Code, Codex and Cursor work side by side, and you can see who's cooking and who's stuck.<br/>We loved how Orca runs a whole crew of agents at once, so we moved the good parts into the terminal.</p>
+<p align="center"><b>All your agents. One terminal. Zero tab chaos.</b><br/>Run Claude Code, Codex and Cursor side by side and see at a glance who's working and who needs you.<br/>The best ideas from Orca, brought to the terminal.</p>
 
-<p align="center"><a href="https://github.com/trungkien1208/orcha/releases/tag/orcha-0.9.9"><b>0.9.9 beta · what's new</b></a><br/>New settings, emoji for your projects, and one search box for every command.</p>
+<p align="center"><a href="https://github.com/trungkien1208/orcha/releases/tag/orcha-0.9.9"><b>0.9.9 beta · what's new</b></a></p>
 
 ## Install
 
-**macOS** (Apple Silicon or Intel)
+**macOS** (Apple Silicon or Intel). Paste this into Terminal:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.sh | sh
 ```
 
-**Windows** (x64, PowerShell). Use [WezTerm](https://wezfurlong.org/wezterm/).
+**Windows** (x64). Paste this into PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.ps1 | iex
 ```
 
 <details>
-<summary>From cmd instead</summary>
+<summary>Using cmd instead of PowerShell?</summary>
 
 ```cmd
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.ps1 | iex"
@@ -47,13 +47,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 
 </details>
 
-Then run `orcha` inside a project. It finds your agent sign-ins on its own, and the first run offers to bring your projects over from Orca, VS Code, Cursor and JetBrains.
+## Get started
 
-You don't need Ghostty. orcha ships its own terminal engine, so your usual terminal is fine. Fuel, accounts and hand-off work inside the app on both macOS and Windows. The macOS installer still uses Python 3 for a few extras, like hooks and the icon font.
+1. Open your terminal in a project folder.
+2. Type `orcha` and press Enter.
+3. That's it. orcha finds the agents you're already signed in to, and the first time it offers to bring in your projects from Orca, VS Code, Cursor or JetBrains.
 
-## Why orcha
+Any terminal works. For the nicest look, use [Ghostty](https://ghostty.org) on macOS or [WezTerm](https://wezfurlong.org/wezterm/) on Windows.
 
-Orca showed how nice it is to run a pile of coding agents in parallel. Most of those agents live in a terminal anyway, so orcha brings that workflow to them instead of the other way round: projects, worktrees, live status and hand-offs, all in one window you can quit without stopping anything.
+## What you get
 
 <p align="center">
   <picture>
@@ -62,17 +64,13 @@ Orca showed how nice it is to run a pile of coding agents in parallel. Most of t
   </picture>
 </p>
 
-- See every agent at a glance. Each project lists its tabs and agents, and a folded project still shows `running` or `needs you` along with who's involved. Nobody waits in silence.
-- Running low on fuel? Check usage per account, then pick **CONTINUE ON** to switch accounts or hand the job to another agent. The hand-off brings notes on the goal, the recent conversation and the changed files, and nothing is sent until you say so.
-- Click the paths. Ctrl+click anything an agent prints: folders open in Finder or Explorer, and files open at the right line in the app you picked for that file type.
-- Git sits beside the work. Branch, changes and history live in the side panel, one click away from your IDE or Git app.
-- Close the window and let them cook. Quit orcha and your agents keep working in the background. Type `orcha` to pop back in. (A reboot still stops them. We're good, not magic.)
-- One search box for everything. `⌕ commands` in the header, or the prefix key and then `:`, finds any action: new agent, worktree, hand off, ask every agent, open in IDE.
-- Move the furniture around. In Settings → `look` you can put projects on either side, move or hide PROCESS, choose where FUEL sits, and tune colors and sidebar width. A little layout sketch shows what goes where. Right-click a project to give it its own emoji.
-- Give an agent its own branch and folder with a fresh worktree from **NEW**, or use **Ask every agent here** to send one prompt to every agent in the project.
-- Too many accounts? Open accounts and press `r` to refresh fuel or `d` to drop one from orcha. Its sign-in and chat history stay put.
-
-Light and dark themes come in the box. Want your own palette? Add a style to `~/.config/orcha/styles/<name>.toml` on macOS.
+- **Everything in one place.** Your projects and their agents sit in one sidebar. Each agent shows `running`, `needs you` or `done`, so nobody waits in silence.
+- **Never run out mid-task.** The fuel gauge shows how much of each account's plan is left. When it gets low, **CONTINUE ON** moves the chat to another account or another agent, with a short summary so it can pick up where it left off.
+- **Close it, they keep going.** Quit orcha and your agents keep working. Type `orcha` again to come back. (A restart of your computer does stop them.)
+- **Click to open.** Ctrl+click a file or folder an agent mentions and it opens in your editor or file manager.
+- **Git at a glance.** See your branch and changed files on the side, and open them in your editor or Git app with one click.
+- **Find any action.** Click `⌕ commands` at the top and type what you want: new agent, new branch, ask every agent, open in editor.
+- **Make it yours.** Light and dark themes, colors, layout and an emoji for each project. Open Settings, then `look`.
 
 <table>
   <tr>
@@ -80,34 +78,50 @@ Light and dark themes come in the box. Want your own palette? Add a style to `~/
     <td width="50%"><img src="docs/orcha/images/open-with.png" alt="OPEN WITH: pick the app for a file type once" /></td>
   </tr>
   <tr>
-    <td align="center"><sub><b>CONTINUE ON</b> · the chat moves on when an account runs low</sub></td>
-    <td align="center"><sub><b>OPEN WITH</b> · choose an app per file type, once</sub></td>
+    <td align="center"><sub><b>CONTINUE ON</b> · switch account or agent when one runs low</sub></td>
+    <td align="center"><sub><b>OPEN WITH</b> · pick which app opens each file type</sub></td>
   </tr>
 </table>
 
 ## Commands
 
 ```sh
-orcha             # open (or come back to) your workspace
-orcha update      # latest version; a green button also tells you when one is out
-orcha uninstall   # remove orcha and what it added; asks before touching your settings
+orcha             # open orcha (or come back to it)
+orcha update      # get the latest version
+orcha uninstall   # remove orcha (asks before touching your settings)
 ```
 
-### Coming from an older version?
+orcha also shows a green button when an update is ready.
 
-Run `orcha update`, then quit the interface and open it again. 0.9.9 is a public beta and comes through the regular installer and updater.
+## Good to know
 
-On macOS, if you see `config.toml has unknown keys` after upgrading, the background server may still be running the old version. Move it to the newly installed binary with:
+- Already use herdr? Your settings and workspaces come along, and herdr stays as it is.
+- Agent logos show up in Ghostty, WezTerm and iTerm2. Other terminals show simple symbols instead.
+- Something looks wrong? [Open an issue](https://github.com/trungkien1208/orcha/issues) with your OS, terminal, orcha version and a screenshot. Beta feedback shapes 1.0.
+
+<details>
+<summary><b>Updating from an older version</b></summary>
+
+Run `orcha update`, then quit orcha and open it again.
+
+On macOS, if you see `config.toml has unknown keys` after updating, the old version is still running in the background. Switch it to the new one with:
 
 ```sh
 orcha server live-handoff --import-exe ~/.local/bin/orcha
 ```
 
-Once it succeeds, reopen the interface. Live handoff moves your running panes to the new server. Avoid `orcha server stop` while agents are busy, because that stops them too.
+Then open orcha again. Your running agents move over without stopping. Avoid `orcha server stop` while agents are busy, because that stops them too.
 
-orcha looks best in [Ghostty](https://ghostty.org) on macOS and [WezTerm](https://wezfurlong.org/wezterm/) on Windows, but any terminal works. Agent logos come from the icon font in Ghostty, WezTerm and iTerm2 when it's installed, and plain symbols show up elsewhere (change it in Settings → `look` → agent logos). Font, size and ligature settings only apply in Ghostty. Everywhere else you get your terminal's font. Already using herdr? Your config and workspaces come along, and herdr stays untouched.
+</details>
 
-Something looking wonky? [Send a bug report](https://github.com/trungkien1208/orcha/issues) with your OS, terminal, orcha version and a screenshot. Beta feedback shapes 1.0.
+<details>
+<summary><b>For tinkerers</b></summary>
+
+- Your own color palette: add a style file at `~/.config/orcha/styles/<name>.toml` (macOS).
+- Font, size and ligature settings apply in Ghostty only.
+- The macOS installer uses Python 3 for a few extras, such as hooks and the icon font.
+
+</details>
 
 <details>
 <summary><b>Build from source</b></summary>
@@ -124,6 +138,6 @@ cp target/release/herdr ~/.local/bin/orcha   # the name "orcha" turns on the orc
 
 ## Thanks
 
-orcha is a fork of [herdr](https://github.com/herdrdev/herdr), which does the heavy lifting: the terminal runtime, sessions and agent detection. orcha adds the look and the agent workflow on top, with plenty of ideas borrowed from Orca. herdr's own README is in [docs/orcha/herdr-README.md](docs/orcha/herdr-README.md).
+orcha is built on [herdr](https://github.com/herdrdev/herdr), which does the heavy lifting: running the terminals, keeping sessions alive and spotting which agent is which. orcha adds the look and the agent workflow on top, with plenty of ideas borrowed from Orca. herdr's own README is in [docs/orcha/herdr-README.md](docs/orcha/herdr-README.md).
 
 Licensed under the [Apache License 2.0](LICENSE), like herdr.
