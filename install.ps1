@@ -17,10 +17,14 @@ $release = $null
 $asset = $null
 for ($page = 1; $page -le 5 -and $null -eq $asset; $page++) {
     $pageUri = "https://api.github.com/repos/$repository/releases?per_page=30&page=$page"
-    $candidates = @(Invoke-RestMethod -Uri $pageUri -Headers $headers)
+    # Windows PowerShell 5.1 emits a JSON array as one object, so wrapping the
+    # call in @() would give a one-item list holding every release. Assign it
+    # first: @() on a variable that already holds an array keeps it as is.
+    $response = Invoke-RestMethod -Uri $pageUri -Headers $headers
+    $candidates = @($response)
     if ($candidates.Count -eq 0) { break }
     foreach ($candidate in $candidates) {
-        if ($candidate.draft) { continue }
+        if ($candidate.draft -eq $true) { continue }
         $match = @($candidate.assets) | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
         if ($null -ne $match) {
             $release = $candidate
