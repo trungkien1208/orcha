@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#1f1c19" />
-    <meta name="description" content="A little home for your very busy agents. Bring Claude, Codex and Cursor together, check their fuel, and make the workspace yours. macOS and Windows." />
-    <title>Orcha — a calm workspace for coding agents</title>
+    <meta name="description" content="The best parts of Orca, moved into your terminal. Run Claude Code, Codex and Cursor side by side, see who needs you, and swap accounts before anyone runs dry. macOS and Windows." />
+    <title>Orcha: all your agents, one terminal</title>
     <link rel="icon" type="image/svg+xml" href="assets/orcha-mark.svg" />
     <link rel="icon" type="image/png" sizes="512x512" href="assets/orcha-mark.png" />
     <link rel="apple-touch-icon" href="assets/orcha-mark.png" />
@@ -91,9 +91,9 @@
       .intro-overlay.leaving { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 280ms ease, visibility 280ms; }
       .intro-scene {
         position: relative;
-        width: min(620px, calc(100vw - 32px));
-        height: min(460px, 66vh);
-        min-height: 320px;
+        width: min(1000px, calc(100vw - 40px));
+        height: min(640px, calc(100dvh - 120px));
+        min-height: 340px;
         overflow: hidden;
         border: 3px solid var(--line);
         background: var(--frame);
@@ -107,27 +107,54 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 0 11px;
+        padding: 0 16px;
         color: var(--muted);
-        font: 800 9px/1 var(--mono);
+        font: 800 11px/1 var(--mono);
         letter-spacing: .08em;
         text-transform: uppercase;
       }
       .intro-console-head {
         top: 0;
-        height: 34px;
+        height: 42px;
         border-bottom: 2px solid var(--line);
         background: var(--card);
       }
-      .intro-console-head strong { display: inline-flex; align-items: center; gap: 5px; color: var(--ink); }
-      .intro-mark { width: 14px; height: 14px; display: block; }
+      .intro-console-head strong { display: inline-flex; align-items: center; gap: 7px; color: var(--ink); }
+      .intro-mark { width: 18px; height: 18px; display: block; }
+      .intro-dots { display: inline-flex; gap: 6px; }
+      .intro-dots i { width: 11px; height: 11px; border: 2px solid var(--line); background: var(--pink); }
+      .intro-dots i:nth-child(2) { background: var(--yellow); }
+      .intro-dots i:nth-child(3) { background: var(--green); }
       .intro-console-foot {
         bottom: 0;
-        height: 31px;
+        height: 38px;
         border-top: 2px solid var(--line);
         color: var(--ink);
       }
-      .intro-canvas { --bowl-w: 230px; position: absolute; inset: 35px 0 32px; overflow: hidden; }
+      /* --cx: where the whale and bowl sit; the boot log takes the left side */
+      .intro-canvas { --bowl-w: clamp(220px, 30vw, 310px); --cx: 70%; position: absolute; inset: 43px 0 39px; overflow: hidden; }
+      .boot-log {
+        position: absolute;
+        z-index: 7;
+        top: 26px;
+        left: 28px;
+        width: min(46%, 430px);
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        font: 600 clamp(12px, 1.35vw, 15px)/1.85 var(--mono);
+        color: var(--ink);
+      }
+      .boot-log li { display: flex; gap: 8px; white-space: nowrap; opacity: 0; transform: translateY(4px); animation: boot-line 220ms ease-out both; }
+      .boot-log .cmd { color: var(--blue); font-weight: 900; }
+      .boot-log .dots { flex: 1; overflow: hidden; color: var(--soft); }
+      .boot-log .ok { color: #227246; font-weight: 900; }
+      [data-theme="dark"] .boot-log .ok { color: var(--green); }
+      .boot-log .warm { color: #b0577f; font-weight: 900; }
+      [data-theme="dark"] .boot-log .warm { color: var(--pink); }
+      .boot-log .final { margin-top: 10px; padding: 6px 10px; border: 2px solid var(--line); background: var(--green); color: #111; font-weight: 900; box-shadow: 3px 3px 0 var(--shadow); width: max-content; }
+      .boot-bar { position: absolute; z-index: 7; left: 28px; bottom: 22px; width: min(40%, 360px); height: 12px; border: 2px solid var(--line); background: var(--card); }
+      .boot-bar i { display: block; height: 100%; width: 0; background: repeating-linear-gradient(90deg, var(--pink) 0 10px, var(--yellow) 10px 20px); animation: boot-fill 2.6s steps(13, end) .1s both; }
       /* everything under the bowl's rim is inside the bowl */
       .whale-lane { position: absolute; z-index: 3; inset: 0; clip-path: inset(0 0 calc(6% + var(--bowl-w) * .3) 0); }
       .pixel { display: block; width: 100%; height: auto; shape-rendering: crispEdges; overflow: visible; }
@@ -135,8 +162,8 @@
         position: absolute;
         z-index: 3;
         top: 16%;
-        left: 50%;
-        width: clamp(120px, 30%, 168px);
+        left: var(--cx);
+        width: clamp(130px, 22%, 210px);
         opacity: 0;
         transform-origin: 50% 60%;
         animation: whale-leap 1.7s .15s both;
@@ -145,7 +172,7 @@
         position: absolute;
         z-index: 4;
         bottom: 6%;
-        left: 50%;
+        left: var(--cx);
         width: var(--bowl-w);
         transform: translateX(-50%);
       }
@@ -157,9 +184,9 @@
         position: absolute;
         z-index: 5;
         bottom: calc(6% + var(--bowl-w) * .3);
-        left: 50%;
-        width: 9px;
-        height: 9px;
+        left: var(--cx);
+        width: 11px;
+        height: 11px;
         background: var(--blue);
         opacity: 0;
         animation: drop 720ms cubic-bezier(.2,.7,.4,1) 1.5s both;
@@ -169,11 +196,11 @@
       .intro-word {
         position: absolute;
         z-index: 6;
-        top: 12%;
-        left: 50%;
+        top: 9%;
+        left: var(--cx);
         transform: translateX(-50%);
         color: var(--ink);
-        font: 900 clamp(22px, 5vw, 34px)/1 var(--mono);
+        font: 900 clamp(26px, 5vw, 52px)/1 var(--mono);
         letter-spacing: .14em;
         opacity: 0;
         animation: word-in 500ms cubic-bezier(.2,.75,.25,1) 1.85s both;
@@ -182,13 +209,22 @@
         position: fixed;
         right: max(20px, env(safe-area-inset-right));
         bottom: max(18px, env(safe-area-inset-bottom));
-        padding: 9px 12px;
+        padding: 11px 14px;
         border: 2px solid var(--line);
         background: var(--card);
         color: var(--ink);
-        font: 800 10px/1 var(--mono);
+        box-shadow: 3px 3px 0 var(--shadow);
+        font: 800 12px/1 var(--mono);
         text-transform: uppercase;
         cursor: pointer;
+      }
+      @media (max-width: 700px) {
+        .intro-canvas { --cx: 50%; }
+        .boot-log { top: 14px; left: 14px; width: calc(100% - 28px); font-size: 11px; line-height: 1.6; }
+        .boot-log li:nth-child(n+5):not(.final) { display: none; }
+        .boot-bar { display: none; }
+        .whale { top: 30%; }
+        .intro-word { top: auto; bottom: 4%; z-index: 8; }
       }
 
       .page {
@@ -199,7 +235,7 @@
         overflow: hidden;
         transition: opacity 360ms ease;
         display: grid;
-        grid-template-rows: 42px minmax(0, 1fr) 18px;
+        grid-template-rows: 42px minmax(0, 1fr) 20px;
         gap: clamp(12px, 2.2vh, 22px);
         padding: clamp(14px, 2.3vw, 32px) clamp(16px, 3vw, 44px) clamp(10px, 1.7vh, 18px);
       }
@@ -233,7 +269,7 @@
         text-transform: uppercase;
         letter-spacing: .075em;
       }
-      .brand-note { color: var(--muted); font-size: 10px; font-weight: 700; }
+      .brand-note { color: var(--muted); font-size: 12px; font-weight: 700; }
       .top-actions { gap: 9px; }
       .github-link {
         min-height: 34px;
@@ -246,7 +282,7 @@
         color: var(--ink);
         box-shadow: 2px 2px 0 var(--shadow);
         text-decoration: none;
-        font: 800 10px/1 var(--mono);
+        font: 800 11px/1 var(--mono);
         letter-spacing: .035em;
         text-transform: uppercase;
       }
@@ -261,7 +297,7 @@
         background: var(--card);
         color: var(--ink);
         text-decoration: none;
-        font: 800 10px/1 var(--mono);
+        font: 800 11px/1 var(--mono);
         letter-spacing: .035em;
         text-transform: uppercase;
         cursor: pointer;
@@ -296,6 +332,16 @@
         box-shadow: 9px 9px 0 var(--shadow);
         animation: arrive 450ms cubic-bezier(.2,.75,.25,1) both;
       }
+      .workspace-window { position: relative; }
+      /* the whale sits on the window and narrates the demo */
+      .mascot { position: absolute; z-index: 6; top: -31px; left: 40%; display: flex; align-items: flex-end; gap: 8px; pointer-events: none; }
+      .mascot-whale { width: 62px; animation: whale-bob 2.4s ease-in-out infinite; transform-origin: 50% 100%; }
+      .mascot-bubble { position: relative; margin-bottom: 14px; padding: 6px 10px; border: 2px solid var(--line); background: var(--card); color: var(--ink); box-shadow: 3px 3px 0 var(--shadow); font: 800 11px/1.2 var(--mono); white-space: nowrap; transform-origin: 0 100%; }
+      .mascot-bubble::before { content: ""; position: absolute; left: -8px; bottom: 6px; width: 10px; height: 10px; border-left: 2px solid var(--line); border-bottom: 2px solid var(--line); background: var(--card); transform: skewY(-35deg); }
+      .mascot-bubble.pop { animation: bubble-pop 380ms cubic-bezier(.2,.75,.25,1) both; }
+      .mascot-bubble.alert { background: var(--pink); color: #111; }
+      .mascot-bubble.alert::before { background: var(--pink); }
+      .feature code { padding: 1px 4px; border: 1px solid var(--soft); background: var(--frame); color: var(--ink); font: 700 .92em/1 var(--mono); }
       .mini-head {
         min-width: 0;
         gap: 11px;
@@ -453,12 +499,16 @@
       .status-right { color: #d2c8b1; }
 
       .intro { min-width: 0; min-height: 0; align-self: center; display: flex; flex-direction: column; justify-content: center; padding: 8px 0; }
-      .eyebrow { display: flex; align-items: center; gap: 8px; margin: 0 0 clamp(10px, 2vh, 20px); color: var(--muted); font-size: 10px; font-weight: 800; }
+      .eyebrow { display: flex; align-items: center; gap: 8px; margin: 0 0 clamp(10px, 2vh, 20px); color: var(--muted); font-size: 12px; font-weight: 800; }
+      .eyebrow a { text-decoration: none; }
+      .eyebrow a:hover { color: var(--ink); text-decoration: underline; }
       .eyebrow::before { content: ""; width: 22px; height: 3px; background: var(--pink); }
-      h1 { max-width: 10ch; margin: 0; font-size: clamp(39px, 5.15vw, 76px); font-weight: 900; letter-spacing: -.075em; line-height: .94; }
-      .lede { max-width: 39ch; margin: clamp(12px, 2vh, 20px) 0 0; color: var(--muted); font-size: clamp(13px, 1.15vw, 16px); line-height: 1.5; }
+      h1 { max-width: 10ch; margin: 0; font-size: clamp(39px, 5.15vw, 76px); font-weight: 900; letter-spacing: -.05em; line-height: .96; }
+      .lede { max-width: 40ch; margin: clamp(12px, 2vh, 20px) 0 0; color: var(--muted); font-size: clamp(15px, 1.3vw, 19px); line-height: 1.5; }
+      .lede b { color: var(--ink); }
+      h1 mark { padding: 0 .06em; background: linear-gradient(transparent 58%, var(--pink) 58%, var(--pink) 92%, transparent 92%); color: inherit; }
       .intro-cta { display: flex; align-items: center; gap: 13px; margin: clamp(14px, 2.3vh, 23px) 0 clamp(16px, 2.7vh, 28px); }
-      .primary-link { display: inline-flex; align-items: center; gap: 12px; min-height: 40px; padding: 0 14px; border: 3px solid var(--line); background: var(--green); color: #111; box-shadow: 4px 4px 0 var(--shadow); text-decoration: none; font: 900 10px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; }
+      .primary-link { display: inline-flex; align-items: center; gap: 12px; min-height: 46px; padding: 0 18px; border: 3px solid var(--line); background: var(--green); color: #111; box-shadow: 4px 4px 0 var(--shadow); text-decoration: none; font: 900 13px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; }
       .primary-link:hover { transform: translate(-1px, -1px); box-shadow: 5px 5px 0 var(--shadow); }
       .github-star {
         display: inline-flex;
@@ -471,22 +521,22 @@
         color: var(--ink);
         box-shadow: 2px 2px 0 var(--shadow);
         text-decoration: none;
-        font: 800 10px/1 var(--mono);
+        font: 800 11px/1 var(--mono);
         letter-spacing: .035em;
         text-transform: uppercase;
       }
       .github-star:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--shadow); }
       .github-star-count { padding-left: 7px; border-left: 1px solid var(--line); font-variant-numeric: tabular-nums; }
-      .agent-list { color: var(--muted); font: 9px/1.6 var(--mono); }
-      .feature-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 2px solid var(--line); border-left: 2px solid var(--line); }
-      .feature { min-width: 0; min-height: 78px; padding: 10px 11px 8px; border-right: 2px solid var(--line); border-bottom: 2px solid var(--line); }
-      .feature-title { gap: 7px; margin: 0 0 5px; font: 900 9px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; }
-      .feature-mark { width: 8px; height: 8px; flex: 0 0 8px; border: 1px solid var(--line); background: var(--yellow); }
+      .agent-list { color: var(--muted); font: 11px/1.6 var(--mono); }
+      .feature-grid { display: grid; align-items: stretch; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 2px solid var(--line); border-left: 2px solid var(--line); }
+      .feature { min-width: 0; min-height: 0; padding: 12px 14px 11px; border-right: 2px solid var(--line); border-bottom: 2px solid var(--line); }
+      .feature-title { gap: 8px; margin: 0 0 6px; font: 900 12px/1.1 var(--mono); letter-spacing: .04em; text-transform: uppercase; }
+      .feature-mark { width: 10px; height: 10px; flex: 0 0 10px; border: 1px solid var(--line); background: var(--yellow); }
       .feature:nth-child(2) .feature-mark { background: var(--green); }
       .feature:nth-child(3) .feature-mark { background: var(--pink); }
       .feature:nth-child(4) .feature-mark { background: var(--blue); }
-      .feature p { max-width: 28ch; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
-      .footer { justify-content: space-between; color: var(--muted); font-size: 8px; font-weight: 700; }
+      .feature p { max-width: 34ch; margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.45; }
+      .footer { justify-content: space-between; color: var(--muted); font-size: 11px; font-weight: 700; }
       .footer span:last-child { text-align: right; }
 
       @keyframes journey {
@@ -502,12 +552,16 @@
         80%, 100% { width: 82%; }
       }
       @keyframes whale-leap {
-        0% { opacity: 0; transform: translate(calc(-50% + 260px), 150px) rotate(28deg); animation-timing-function: cubic-bezier(.25,.6,.35,1); }
+        0% { opacity: 0; transform: translate(calc(-50% + 320px), 220px) rotate(28deg); animation-timing-function: cubic-bezier(.25,.6,.35,1); }
         8% { opacity: 1; }
-        46% { opacity: 1; transform: translate(calc(-50% + 70px), -20px) rotate(2deg); animation-timing-function: cubic-bezier(.55,0,.8,.4); }
-        78% { opacity: 1; transform: translate(-50%, 140px) rotate(-38deg); animation-timing-function: linear; }
-        100% { opacity: 1; transform: translate(-50%, 270px) rotate(-62deg); }
+        46% { opacity: 1; transform: translate(calc(-50% + 80px), -30px) rotate(2deg); animation-timing-function: cubic-bezier(.55,0,.8,.4); }
+        78% { opacity: 1; transform: translate(-50%, 210px) rotate(-38deg); animation-timing-function: linear; }
+        100% { opacity: 1; transform: translate(-50%, 430px) rotate(-62deg); }
       }
+      @keyframes boot-line { to { opacity: 1; transform: none; } }
+      @keyframes boot-fill { to { width: 100%; } }
+      @keyframes bubble-pop { 0% { transform: scale(.8) rotate(-3deg); opacity: 0; } 60% { transform: scale(1.06) rotate(1deg); opacity: 1; } 100% { transform: none; opacity: 1; } }
+      @keyframes whale-bob { 50% { transform: translateY(-3px) rotate(-2deg); } }
       @keyframes bowl-bump { 30% { transform: translateY(3px) scaleY(.96); } 70% { transform: translateY(-2px) scaleY(1.02); } }
       @keyframes matcha-wave { 0%, 100% { transform: none; } 20% { transform: translateY(-1px); } 40% { transform: translateY(1px); } 60% { transform: translateY(-1px); } }
       @keyframes steam { 0% { opacity: 0; transform: translateY(4px); } 40% { opacity: .8; } 100% { opacity: 0; transform: translateY(-14px); } }
@@ -536,11 +590,15 @@
         .eyebrow, h1, .lede, .intro-cta { grid-column: 1; }
         .eyebrow { margin-bottom: 8px; }
         h1 { max-width: 12ch; font-size: clamp(34px, 5vw, 51px); }
-        .lede { margin-top: 9px; font-size: 12px; }
+        .lede { margin-top: 9px; font-size: 14px; }
         .intro-cta { margin: 11px 0 0; }
         .feature-grid { grid-column: 2; grid-row: 1 / 4; align-self: stretch; }
+        /* stacked layout: the whale moves to the window's bottom edge, clear of the top bar */
+        .mascot { top: auto; bottom: -22px; left: auto; right: 14px; flex-direction: row-reverse; }
+        .mascot-bubble { margin-bottom: 6px; }
+        .mascot-bubble::before { display: none; }
         .feature { min-height: 0; padding: 10px; }
-        .feature p { font-size: 10px; }
+        .feature p { font-size: 12px; }
       }
       @media (max-width: 560px) {
         .intro-canvas { --bowl-w: 190px; }
@@ -574,6 +632,9 @@
         .folded-project { flex: .9; min-width: 0; overflow: hidden; padding: 3px 5px; border: 1px solid var(--soft); font-size: 6px; }
         .folded-project + .folded-project, .folded-project .caret { display: none; }
         .continue-pop { width: 92%; }
+        .mascot { bottom: -16px; right: 8px; gap: 5px; }
+        .mascot-whale { width: 40px; }
+        .mascot-bubble { margin-bottom: 8px; padding: 4px 6px; font-size: 9px; }
         .pop-row { margin: 4px; padding: 5px; font-size: 6px; gap: 4px; }
         .pop-head { padding: 4px 6px; font-size: 6px; }
         .process, .info-rail { display: none; }
@@ -588,22 +649,31 @@
         .status-left, .status-right { gap: 5px; }
         .task-chip { padding: 2px 3px; }
         .intro { display: flex; justify-content: flex-start; }
-        .eyebrow { margin: 0 0 7px; font-size: 8px; }
+        .eyebrow { margin: 0 0 7px; font-size: 10px; }
         .eyebrow::before { width: 15px; height: 2px; }
         h1 { max-width: 13ch; font-size: clamp(30px, 9.2vw, 40px); line-height: .93; }
-        .lede { margin-top: 7px; font-size: 10px; line-height: 1.35; }
+        .lede { margin-top: 7px; font-size: 12px; line-height: 1.4; }
         .intro-cta { margin: 8px 0 9px; gap: 8px; }
-        .primary-link { min-height: 32px; padding: 0 9px; gap: 7px; border-width: 2px; box-shadow: 3px 3px 0 var(--shadow); font-size: 8px; }
+        .primary-link { min-height: 36px; padding: 0 12px; gap: 7px; border-width: 2px; box-shadow: 3px 3px 0 var(--shadow); font-size: 11px; }
         .agent-list { font-size: 7px; }
         .feature-grid { flex: 1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .feature { padding: 6px 7px; }
-        .feature-title { gap: 5px; margin-bottom: 3px; font-size: 7px; }
+        .feature-title { gap: 5px; margin-bottom: 3px; font-size: 9px; }
         .feature-mark { width: 6px; height: 6px; flex-basis: 6px; }
-        .feature p { font-size: 8px; line-height: 1.25; }
-        .footer { font-size: 6px; }
+        .feature p { font-size: 10.5px; line-height: 1.3; }
+        .footer { font-size: 8px; }
       }
       @media (max-width: 380px) {
         .brand-note { display: none; }
+      }
+      @media (max-height: 820px) and (min-width: 981px) {
+        h1 { font-size: clamp(38px, 4.5vw, 64px); }
+        .lede { margin-top: 12px; font-size: 15.5px; max-width: 46ch; }
+        .intro-cta { margin: 14px 0 16px; }
+        .primary-link { min-height: 42px; }
+        .feature { padding: 9px 12px; }
+        .feature-title { font-size: 11px; }
+        .feature p { font-size: 12.5px; line-height: 1.4; }
       }
       @media (max-height: 680px) and (min-width: 561px) {
         .page { padding-top: 10px; padding-bottom: 8px; gap: 8px; grid-template-rows: 32px minmax(0, 1fr) 14px; }
@@ -612,16 +682,18 @@
         .intro { padding: 0; }
         .eyebrow { margin-bottom: 8px; }
         h1 { font-size: clamp(36px, 4.8vw, 62px); }
-        .lede { margin-top: 9px; font-size: 12px; }
+        .lede { margin-top: 9px; font-size: 14px; }
         .intro-cta { margin: 10px 0 12px; }
-        .feature { min-height: 65px; padding: 7px 9px; }
+        .primary-link { min-height: 40px; }
+        .feature { padding: 8px 10px; }
+        .feature p { font-size: 12px; line-height: 1.35; }
       }
       @media (max-width: 560px) and (max-height: 700px) {
         .stage { grid-template-rows: minmax(0, .72fr) minmax(0, 1.28fr); }
         h1 { font-size: clamp(26px, 8vw, 34px); }
-        .lede { font-size: 9px; }
-        .feature { padding: 4px 6px; }
-        .feature p { font-size: 7px; }
+        .lede { font-size: 11px; }
+        .feature { padding: 5px 7px; }
+        .feature p { font-size: 9.5px; }
         .intro-cta { margin: 6px 0 6px; }
       }
       @media (max-width: 980px) {
@@ -635,8 +707,19 @@
   <body>
     <div class="intro-overlay" id="intro" role="group" aria-label="Orcha intro animation">
       <div class="intro-scene">
-        <div class="intro-console-head"><strong><img class="intro-mark" src="assets/orcha-mark.svg" alt="" />ORCHA / BOOT</strong><span>TERMINAL WORKSPACE</span></div>
+        <div class="intro-console-head"><strong><span class="intro-dots" aria-hidden="true"><i></i><i></i><i></i></span>&nbsp;<img class="intro-mark" src="assets/orcha-mark.svg" alt="" />ORCHA / BOOT</strong><span>~/projects · zsh</span></div>
         <div class="intro-canvas" aria-hidden="true">
+          <ul class="boot-log">
+            <li style="animation-delay:.1s"><span class="cmd">$</span><span>orcha</span></li>
+            <li style="animation-delay:.4s"><span>waking the terminal engine</span><span class="dots">..................</span><span class="ok">ok</span></li>
+            <li style="animation-delay:.7s"><span>projects from Orca &amp; VS Code</span><span class="dots">..................</span><span class="ok">3 found</span></li>
+            <li style="animation-delay:1s"><span>claude · work</span><span class="dots">..................</span><span class="ok">82% fuel</span></li>
+            <li style="animation-delay:1.25s"><span>codex</span><span class="dots">..................</span><span class="ok">ready</span></li>
+            <li style="animation-delay:1.5s"><span>cursor</span><span class="dots">..................</span><span class="ok">ready</span></li>
+            <li style="animation-delay:1.8s"><span>brewing matcha</span><span class="dots">..................</span><span class="warm">warm</span></li>
+            <li class="final" style="animation-delay:2.3s">✓ 3 agents, 0 lost tabs</li>
+          </ul>
+          <div class="boot-bar"><i></i></div>
           <div class="intro-word">ORCHA</div>
           <div class="whale-lane"><div class="whale" id="whale-art"></div></div>
           <div class="bowl" id="bowl-art"></div>
@@ -656,7 +739,7 @@
       <header class="topbar">
         <div class="brand">
           <span class="brand-chip"><img class="brand-mark" src="assets/orcha-mark.svg" alt="" />ORCHA</span>
-          <span class="brand-note">A little home for busy agents</span>
+          <span class="brand-note">Orca’s best bits, terminal edition</span>
         </div>
         <nav class="top-actions" aria-label="Page actions">
           <a class="github-link" href="https://github.com/trungkien1208/orcha" target="_blank" rel="noreferrer" aria-label="View Orcha on GitHub">
@@ -673,6 +756,7 @@
 
       <main class="stage">
         <section class="workspace-window" aria-label="Orcha workspace preview with projects, agent panes, fuel and Git details">
+          <div class="mascot" aria-hidden="true"><div class="mascot-whale" id="mascot-whale"></div><div class="mascot-bubble" id="whale-says">Claude is cooking…</div></div>
           <div class="mini-head" data-spot="commands">
             <span class="mini-brand"><img class="brand-mark" src="assets/orcha-mark.svg" alt="" />ORCHA</span>
             <span class="counts">3 projects · 3 agents</span>
@@ -782,35 +866,35 @@
         </section>
 
         <section class="intro" aria-labelledby="headline">
-          <p class="eyebrow"><a href="https://github.com/trungkien1208/orcha/releases/tag/orcha-0.9.9" target="_blank" rel="noreferrer">0.9.9 beta · fresh out of the kitchen ↗</a></p>
-          <h1 id="headline">Every agent.<br />Every project.<br />In rhythm.</h1>
-          <p class="lede">Claude, Codex and Cursor, all under one roof. See who’s busy and who needs a hand. Less tab hide-and-seek, more getting things done.</p>
+          <p class="eyebrow"><a href="https://github.com/trungkien1208/orcha/releases/tag/orcha-0.9.9" target="_blank" rel="noreferrer">0.9.9 beta · still warm ↗</a></p>
+          <h1 id="headline">All your agents.<br />One terminal.<br /><mark>Zero tab chaos.</mark></h1>
+          <p class="lede">We loved how Orca runs a whole crew of agents at once, so we moved the good parts into the terminal. <b>Claude, Codex and Cursor</b> work side by side, you see who’s cooking and who’s stuck, and you can swap accounts before anyone runs dry.</p>
           <div class="intro-cta">
             <a class="primary-link" href="https://github.com/trungkien1208/orcha#install" target="_blank" rel="noreferrer">Come on in <span aria-hidden="true">↗</span></a>
-            <span class="agent-list">MACOS · WINDOWS<br />YOUR TERMINAL IS WELCOME</span>
+            <span class="agent-list">MACOS · WINDOWS<br />BRING YOUR OWN TERMINAL</span>
           </div>
           <div class="feature-grid" aria-label="Orcha features">
             <article class="feature" tabindex="0" data-target="projects">
               <h2 class="feature-title"><i class="feature-mark" aria-hidden="true"></i>Projects together</h2>
-              <p>Import your projects. Give a new branch its own worktree.</p>
+              <p>Bring them over from Orca, VS Code, Cursor or JetBrains. Each branch can get its own worktree.</p>
             </article>
             <article class="feature" tabindex="0" data-target="commands">
               <h2 class="feature-title"><i class="feature-mark" aria-hidden="true"></i>Find it. Do it.</h2>
-              <p>Search Commands, or send one prompt to every agent here.</p>
+              <p>One search for every action. Or ask every agent in the project the same thing at once.</p>
             </article>
             <article class="feature" tabindex="0" data-target="fuel">
               <h2 class="feature-title"><i class="feature-mark" aria-hidden="true"></i>Pick the next driver</h2>
-              <p>Check fuel. Choose CONTINUE ON to switch accounts or agents.</p>
+              <p>Fuel running low? CONTINUE ON moves the chat to another account or agent, notes included.</p>
             </article>
-            <article class="feature" tabindex="0" data-target="projects git">
-              <h2 class="feature-title"><i class="feature-mark" aria-hidden="true"></i>Make yourself at home</h2>
-              <p>Move panels, pick colors, give projects their own emoji.</p>
+            <article class="feature" tabindex="0" data-target="status git">
+              <h2 class="feature-title"><i class="feature-mark" aria-hidden="true"></i>Let them cook</h2>
+              <p>Close the window and the agents keep working. Type <code>orcha</code> to pop back in.</p>
             </article>
           </div>
         </section>
       </main>
 
-      <footer class="footer"><span>Open source · Mac Apple Silicon &amp; Intel · Windows x64</span><span>Found a wobble? <a href="https://github.com/trungkien1208/orcha/issues" target="_blank" rel="noreferrer">Tell us.</a></span></footer>
+      <footer class="footer"><span>Open source · built on herdr · Mac (Apple Silicon &amp; Intel) · Windows x64</span><span>Found a wobble? <a href="https://github.com/trungkien1208/orcha/issues" target="_blank" rel="noreferrer">Tell us.</a></span></footer>
     </div>
     <script>
       // Pixel art for the intro: one character per pixel.
@@ -843,6 +927,7 @@
       ];
       const whalePalette = { o: "#7a2a50", p: "var(--pink)", w: "#fff4d6", k: "#111", h: "#fff", b: "var(--blue)" };
       document.getElementById("whale-art").innerHTML = pixelArt(whaleRows, whalePalette);
+      document.getElementById("mascot-whale").innerHTML = pixelArt(whaleRows, whalePalette);
       const bowlRows = [
         "..............s.....s.............",
         ".............s.....s..............",
@@ -883,7 +968,7 @@
       } else {
         page.setAttribute("inert", "");
         skipIntro.focus({ preventScroll: true });
-        introTimer = window.setTimeout(finishIntro, 2900);
+        introTimer = window.setTimeout(finishIntro, 3400);
       }
 
       const themeButton = document.querySelector("#theme-toggle");
@@ -961,7 +1046,17 @@
         $("live-codex-pane").classList.toggle("need", asking);
         setRow(rowCodex, asking ? "need" : "idle", asking ? "needs you" : "");
       };
+      const bubble = $("whale-says");
+      const say = (text, alert = false) => {
+        if (bubble.textContent === text) return;
+        bubble.textContent = text;
+        bubble.classList.toggle("alert", alert);
+        bubble.classList.remove("pop");
+        void bubble.offsetWidth; // restart the pop animation
+        bubble.classList.add("pop");
+      };
       const reset = () => {
+        say("Claude is cooking…");
         claudeLines.forEach((line, i) => line.classList.toggle("typing-hidden", i > 1));
         setRow(rowClaude, null, "");
         rowClaude.querySelector(".agent-ico").classList.add("working-pulse");
@@ -980,6 +1075,7 @@
         setProject("need", "needs you");
         setFuel(70, "CLAUDE · PERSONAL");
         meter($("live-meter-week"), 64, false);
+        say("Psst. Codex needs you.", true);
       };
       const steps = [];
       const at = (ms, fn) => steps.push([ms, fn]);
@@ -988,17 +1084,21 @@
       // fuel drains while it works
       [26, 20, 14, 9, 6].forEach((pct, i) => at(1200 + i * 700, () => setFuel(pct)));
       // Codex finishes its checks and asks for you
-      at(3400, () => { setCodexAsking(true); setProject("need", "needs you"); });
+      at(2600, () => say("Fuel is draining. Glug glug."));
+      at(3400, () => { setCodexAsking(true); setProject("need", "needs you"); say("Psst. Codex needs you.", true); });
+      at(4600, () => say("Claude is at 6%. Swap drivers?", true));
       // Demo: the user opens CONTINUE ON and chooses the suggested account.
       at(5200, () => $("live-continue").classList.add("show"));
       at(6600, () => $("live-continue-btn").classList.add("pressed"));
-      at(6900, () => { $("live-continue").classList.remove("show"); setFuel(70, "CLAUDE · PERSONAL"); });
+      at(6900, () => { $("live-continue").classList.remove("show"); setFuel(70, "CLAUDE · PERSONAL"); say("Moved to personal. Same chat."); });
       // Claude finishes
       at(8200, () => {
         rowClaude.querySelector(".agent-ico").classList.remove("working-pulse");
         setRow(rowClaude, "done", "done");
         $("live-active").textContent = "1 ACTIVE";
+        say("Claude’s done. Matcha break?");
       });
+      at(10600, () => say("Codex still wants a yes. Ahem.", true));
       const LOOP = 12500;
       let timers = [];
       const play = () => {
@@ -1012,7 +1112,7 @@
         finalState();
       } else {
         // start once the intro is gone; pause in background tabs
-        setTimeout(play, document.body.classList.contains("intro-done") ? 300 : 2500);
+        setTimeout(play, document.body.classList.contains("intro-done") ? 300 : 3000);
         document.addEventListener("visibilitychange", () => {
           if (document.hidden) { timers.forEach(clearTimeout); timers = []; } else { play(); }
         });
