@@ -182,7 +182,10 @@ impl App {
     }
 
     fn git_refresh_demand(&self) -> GitStatusRefreshDemand {
-        let mut demand = GitStatusRefreshDemand::default();
+        let mut demand = GitStatusRefreshDemand {
+            branch: self.state.sidebar_tree,
+            ..GitStatusRefreshDemand::default()
+        };
         for token in self.state.sidebar_spaces.rows.iter().flatten() {
             match token.parts().0 {
                 crate::config::SpaceSidebarToken::Branch => demand.branch = true,
@@ -585,8 +588,21 @@ mod tests {
     }
 
     #[test]
+    fn tree_sidebar_reads_the_branch_without_a_branch_row() {
+        let mut config = crate::config::Config::default();
+        config.ui.sidebar_tree = true;
+        config.ui.sidebar.spaces.rows = vec![vec![crate::config::SpaceSidebarToken::Workspace]];
+        let mut app = test_app(&config);
+        app.state.workspaces.push(Workspace::test_new("test"));
+
+        assert!(app.git_refresh_demand().branch);
+        assert!(app.git_refresh_deadline().is_some());
+    }
+
+    #[test]
     fn due_git_refresh_does_not_start_without_sidebar_consumer() {
         let mut config = crate::config::Config::default();
+        config.ui.sidebar_tree = false;
         config.ui.sidebar.spaces.rows = vec![vec![crate::config::SpaceSidebarToken::Workspace]];
         let mut app = test_app(&config);
         app.state.workspaces.push(Workspace::test_new("test"));
@@ -676,6 +692,7 @@ mod tests {
 
         for (token, expected) in cases {
             let mut config = crate::config::Config::default();
+            config.ui.sidebar_tree = false;
             config.ui.sidebar.spaces.rows = vec![vec![token.clone()]];
             let mut app = test_app(&config);
             app.state.workspaces.push(Workspace::test_new("test"));
