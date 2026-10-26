@@ -135,7 +135,8 @@ say "pushing $branch and $tag"
 git push -q origin "$branch"
 git push -q origin "$tag"
 
-repo="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || echo trungkien1208/orcha)"
+# the repo we pushed to; `gh repo view` would pick the upstream herdr repo
+repo="$(git remote get-url origin | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##')"
 if [[ $watch == 0 ]]; then
     echo "pushed; the build runs at https://github.com/$repo/actions"
     exit 0
