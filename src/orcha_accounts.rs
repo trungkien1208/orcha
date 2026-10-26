@@ -506,6 +506,9 @@ struct Fetched {
     limits: Limits,
     transient: bool,
     rate_limited: bool,
+    /// Nothing could be asked (the agent sits idle): the last numbers
+    /// still hold, so keep showing them.
+    idle: bool,
 }
 
 impl Fetched {
@@ -519,6 +522,13 @@ impl Fetched {
         }
     }
 
+    fn idle(message: &str) -> Self {
+        Self {
+            idle: true,
+            ..Self::error(message)
+        }
+    }
+
     fn transient(message: String, rate_limited: bool) -> Self {
         Self {
             limits: Limits {
@@ -527,6 +537,7 @@ impl Fetched {
             },
             transient: true,
             rate_limited,
+            idle: false,
         }
     }
 }
@@ -626,7 +637,7 @@ fn claude_limits(accounts: &[AccountConfig], id: &str) -> Fetched {
         // Claude renews the access token itself when it next runs on this
         // account; only a missing renewal token needs a new sign-in
         return if oauth.get("refreshToken").and_then(Value::as_str).is_some() {
-            Fetched::error("idle: fuel shows after Claude next runs on it")
+            Fetched::idle("idle: fuel shows after Claude next runs on it")
         } else {
             Fetched::error("sign-in expired: sign in again")
         };
@@ -893,6 +904,14 @@ fn limits(accounts: &[AccountConfig], account: &AccountConfig, fresh: bool) -> L
         return found.map(|(limits, _)| limits).unwrap_or_default();
     }
     let fetched = fetch(accounts, account);
+    if fetched.idle {
+        // keep the last numbers on disk too: an idle account used nothing
+        // since, and windows that reset meanwhile read full (`windows`)
+        if let Some((old, _)) = found.filter(|(old, _)| old.error.is_none()) {
+            return old;
+        }
+        return fetched.limits;
+    }
     if fetched.transient {
         let wait = if fetched.rate_limited {
             RATE_LIMIT_RETRY_AFTER_SECS
@@ -944,7 +963,12 @@ fn windows(limits: &Limits, now: f64) -> Vec<FuelWindow> {
     ]
     .into_iter()
     .filter_map(|(key, label, window)| {
-        let (used, reset) = window?;
+        let (mut used, mut reset) = window?;
+        if reset.is_some_and(|reset| reset <= now) {
+            // last numbers from before the reset: the window is full again
+            used = 0.0;
+            reset = None;
+        }
         Some(FuelWindow {
             key: key.to_owned(),
             label: label.to_owned(),
@@ -1571,6 +1595,18 @@ mod tests {
         assert_eq!((shown[0].label.as_str(), shown[0].left), ("5H", 70));
         assert_eq!(shown[0].reset.as_deref(), Some("1h 00m"));
         assert_eq!((shown[1].label.as_str(), shown[1].left), ("WEEK", 0));
+    }
+
+    #[test]
+    fn windows_past_their_reset_read_full() {
+        let limits = Limits {
+            session: Some((80.0, Some(100.0))),
+            weekly: Some((40.0, Some(9_000.0))),
+            ..Limits::default()
+        };
+        let shown = windows(&limits, 200.0);
+        assert_eq!((shown[0].left, shown[0].reset.as_deref()), (100, None));
+        assert_eq!(shown[1].left, 60);
     }
 
     #[test]
