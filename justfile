@@ -260,3 +260,8 @@ release $version $preview:
 # Print default config
 default-config:
     cargo run --release --locked -- --default-config
+
+# orcha: bump ORCHA_VERSION, write notes, commit, tag, push and follow the build
+# e.g. `just orcha-release 0.9.10` (flags: --yes --no-edit --test --no-watch)
+orcha-release version *flags:
+    scripts/orcha-release.sh {{version}} {{flags}}
