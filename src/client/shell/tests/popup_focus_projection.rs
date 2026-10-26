@@ -1113,6 +1113,50 @@ fn retained_surface_patch_updates_only_pane_cells_without_recomposing_chrome() {
 }
 
 #[test]
+fn retained_surface_patch_recomposes_under_an_orcha_popup() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    let pane_surface = surface();
+    let mut updated_pane = pane_surface.panes[0].clone();
+    updated_pane.content_revision = 2;
+    state.set_pane_surface(pane_surface);
+    state.open_accounts_overlay();
+    state.compose(100, 30).expect("initial composed frame");
+    let patch = crate::protocol::PaneSurfacePatch {
+        boot_id: "boot-1".into(),
+        projection_revision: 1,
+        base_surface_revision: 1,
+        surface_revision: 2,
+        rows: vec![crate::protocol::PaneSurfacePatchRow {
+            x: 0,
+            y: 0,
+            cells: vec![
+                crate::protocol::CellData {
+                    symbol: "N".into(),
+                    fg: 0,
+                    bg: 0,
+                    modifier: 0,
+                    skip: false,
+                    hyperlink: None,
+                };
+                4
+            ],
+        }],
+        panes: vec![updated_pane],
+        cursor: None,
+    };
+
+    assert!(
+        matches!(
+            state.apply_pane_surface_patch(patch),
+            ClientPaneSurfacePatchOutcome::Applied(None)
+        ),
+        "agent output must not be written over the popup"
+    );
+    assert_eq!(state.pane_surface.as_ref().unwrap().surface_revision, 2);
+}
+
+#[test]
 fn retained_surface_patch_recomposes_client_owned_mode_and_diagnostic_rows() {
     for diagnostic in [false, true] {
         let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));

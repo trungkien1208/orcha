@@ -62,6 +62,10 @@ fn fast_path_blocker(
         Some("client_surface_patch.fallback.mode")
     } else if state.overlay.is_some() {
         Some("client_surface_patch.fallback.overlay")
+    } else if state.orcha_ui.popup.is_some() {
+        // orcha popups dim and cover the panes; rows sent straight to the
+        // terminal would draw over them until the next full frame
+        Some("client_surface_patch.fallback.orcha_popup")
     } else if state.endpoint_error.is_some() {
         Some("client_surface_patch.fallback.endpoint_error")
     } else if state.config_diagnostic.is_some() {
