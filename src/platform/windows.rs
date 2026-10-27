@@ -16,10 +16,12 @@ use std::{
 mod clipboard_image;
 mod config_backup;
 mod notifications;
+mod power;
 pub(crate) use notifications::{
     foreground_desktop_notification_host, maybe_activate_desktop_notification,
     show_actionable_desktop_notification, show_desktop_notification,
 };
+pub(crate) use power::monitor_host_power;
 
 static ALLOW_UNELEVATED_CLIENTS: OnceLock<bool> = OnceLock::new();
 
@@ -48,6 +50,126 @@ try {
     super::project_folder_picker_result(command.output()?)
 }
 
+pub(crate) struct PrivateLocalListener {
+    listener: interprocess::os::windows::named_pipe::PipeListener<
+        interprocess::os::windows::named_pipe::pipe_mode::Bytes,
+        interprocess::os::windows::named_pipe::pipe_mode::Bytes,
+    >,
+    stream_nonblocking: std::sync::atomic::AtomicBool,
+}
+
+impl PrivateLocalListener {
+    pub(crate) fn bind(path: &std::path::Path) -> std::io::Result<Self> {
+        use interprocess::os::windows::{
+            named_pipe::PipeListenerOptions, security_descriptor::SecurityDescriptor,
+        };
+
+        let sddl = widestring::U16CString::from_str("D:P(A;;GA;;;SY)(A;;GA;;;OW)")
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
+        let security_descriptor = SecurityDescriptor::deserialize(&sddl)?;
+        // The default 512-byte buffers serialize busy SSH output behind reader polling.
+        let listener = PipeListenerOptions::new()
+            .path(format!(r"\\.\pipe\{}", path.to_string_lossy()))
+            .input_buffer_size_hint(64 * 1024)
+            .output_buffer_size_hint(64 * 1024)
+            .security_descriptor(Some(security_descriptor))
+            .create_duplex()?;
+        Ok(Self {
+            listener,
+            stream_nonblocking: std::sync::atomic::AtomicBool::new(false),
+        })
+    }
+
+    pub(crate) fn accept(&self) -> std::io::Result<crate::ipc::LocalStream> {
+        let stream = self.listener.accept()?;
+        stream.set_nonblocking(self.stream_nonblocking.load(AtomicOrdering::Acquire))?;
+        Ok(crate::ipc::LocalStream::NamedPipe(stream.into()))
+    }
+
+    pub(crate) fn set_nonblocking(
+        &self,
+        mode: interprocess::local_socket::ListenerNonblockingMode,
+    ) -> std::io::Result<()> {
+        self.listener.set_nonblocking(mode.accept_nonblocking())?;
+        self.stream_nonblocking
+            .store(mode.stream_nonblocking(), AtomicOrdering::Release);
+        Ok(())
+    }
+}
+
+pub(crate) struct ChildPipe(std::fs::File);
+
+impl ChildPipe {
+    pub(crate) fn new_reader(pipe: impl Into<OwnedHandle>) -> std::io::Result<Self> {
+        // Rust's stdout/stderr handles lack permission to change pipe mode. Peek before
+        // reading instead; each pipe has exactly one reader.
+        Ok(Self(std::fs::File::from(pipe.into())))
+    }
+
+    pub(crate) fn new_writer(pipe: impl Into<OwnedHandle>) -> std::io::Result<Self> {
+        use windows_sys::Win32::System::Pipes::{SetNamedPipeHandleState, PIPE_NOWAIT};
+        let file = std::fs::File::from(pipe.into());
+        let mode = PIPE_NOWAIT;
+        if unsafe { SetNamedPipeHandleState(file.as_raw_handle(), &mode, null_mut(), null_mut()) }
+            == 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(Self(file))
+    }
+
+    pub(crate) fn wait(&self, _writing: bool) -> std::io::Result<()> {
+        std::thread::sleep(Duration::from_millis(2));
+        Ok(())
+    }
+}
+
+impl std::io::Read for ChildPipe {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        use windows_sys::Win32::System::Pipes::PeekNamedPipe;
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        let mut available = 0;
+        if unsafe {
+            PeekNamedPipe(
+                self.0.as_raw_handle(),
+                null_mut(),
+                0,
+                null_mut(),
+                &mut available,
+                null_mut(),
+            )
+        } == 0
+        {
+            let error = std::io::Error::last_os_error();
+            return if crate::ipc::is_connection_closed_error(&error) {
+                Ok(0)
+            } else {
+                Err(error)
+            };
+        }
+        if available == 0 {
+            return Err(std::io::ErrorKind::WouldBlock.into());
+        }
+        let count = buffer.len().min(available as usize);
+        self.0.read(&mut buffer[..count])
+    }
+}
+
+impl std::io::Write for ChildPipe {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        match self.0.write(buffer) {
+            Ok(0) if !buffer.is_empty() => Err(std::io::ErrorKind::WouldBlock.into()),
+            result => result,
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 pub(crate) fn allow_unelevated_clients() {
     let _ = ALLOW_UNELEVATED_CLIENTS.set(true);
 }
@@ -64,6 +186,20 @@ pub(crate) fn probe_local_server(path: &std::path::Path) -> std::io::Result<()> 
         ConnectWaitMode::Timeout(Duration::from_millis(500)),
     )
     .map(|_| ())
+    .map_err(local_server_connection_error)
+}
+
+pub(crate) fn connect_local_stream_with_timeout(
+    path: &std::path::Path,
+    timeout: Duration,
+) -> std::io::Result<crate::ipc::LocalStream> {
+    use interprocess::os::windows::named_pipe::{pipe_mode::Bytes, DuplexPipeStream};
+    let name = format!(r"\\.\pipe\{}", path.to_string_lossy());
+    DuplexPipeStream::<Bytes>::connect_by_path_with_wait_mode(
+        name.as_str(),
+        interprocess::ConnectWaitMode::Timeout(timeout),
+    )
+    .map(|pipe| crate::ipc::LocalStream::NamedPipe(pipe.into()))
     .map_err(local_server_connection_error)
 }
 
@@ -222,10 +358,11 @@ impl RemoteBridgeWake {
 
 pub(crate) fn wait_client_stream_readable(
     _stream: &crate::ipc::LocalStream,
+    timeout: Duration,
 ) -> std::io::Result<()> {
     // Sync named pipes have no read timeout. The caller peeks before each read and checks its
     // cancellation flag between polls, including when a frame arrives in several fragments.
-    std::thread::sleep(Duration::from_millis(2));
+    std::thread::sleep(timeout.min(Duration::from_millis(2)));
     Ok(())
 }
 
@@ -3659,6 +3796,64 @@ mod tests {
     };
 
     #[test]
+    fn busy_endpoint_connect_obeys_cancellation_and_deadline() {
+        use std::os::windows::io::{FromRawHandle, OwnedHandle};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+        use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
+        use windows_sys::Win32::System::Pipes::CreateNamedPipeW;
+        let path = std::path::PathBuf::from(format!("herdr-busy-{}", std::process::id()));
+        let name = super::wide_null(&format!(r"\\.\pipe\{}", path.display()));
+        let handle = unsafe {
+            CreateNamedPipeW(
+                name.as_ptr(),
+                PIPE_ACCESS_DUPLEX,
+                0,
+                1,
+                512,
+                512,
+                0,
+                std::ptr::null(),
+            )
+        };
+        assert_ne!(handle, INVALID_HANDLE_VALUE);
+        let _listener = unsafe { OwnedHandle::from_raw_handle(handle) };
+        let _occupant =
+            super::connect_local_stream_with_timeout(&path, Duration::from_millis(500)).unwrap();
+        for cancel in [false, true] {
+            let stopped = Arc::new(AtomicBool::new(false));
+            let worker_stop = Arc::clone(&stopped);
+            let cancel_worker = thread::spawn(move || {
+                if cancel {
+                    thread::sleep(Duration::from_millis(50));
+                    worker_stop.store(true, Ordering::Release);
+                }
+            });
+            let start = Instant::now();
+            let result = crate::ipc::connect_local_stream_cancellable(
+                &path,
+                &stopped,
+                start
+                    + if cancel {
+                        Duration::from_secs(5)
+                    } else {
+                        Duration::from_millis(200)
+                    },
+            );
+            cancel_worker.join().unwrap();
+            assert_eq!(
+                result.unwrap_err().kind(),
+                if cancel {
+                    std::io::ErrorKind::ConnectionAborted
+                } else {
+                    std::io::ErrorKind::TimedOut
+                }
+            );
+            assert!(start.elapsed() < Duration::from_secs(1));
+        }
+    }
+
+    #[test]
     fn local_resources_authorize_account_without_admin_rights() {
         use interprocess::local_socket::traits::Listener as _;
         use std::io::{Read, Write};
@@ -4428,6 +4623,7 @@ mod tests {
 
     #[test]
     fn windows_process_cwd_reads_normalized_child_launch_directory() {
+        use std::io::{Read, Write};
         use std::path::PathBuf;
 
         let name = format!("Herdr-Cwd-Case-{}", std::process::id());
@@ -4449,37 +4645,66 @@ mod tests {
                 .args(["/D", "/Q", "/K"])
                 .current_dir(super::normalize_cwd_for_launch_platform(&launch_cwd))
                 .stdin(Stdio::piped())
-                .stdout(Stdio::null())
+                .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
                 .expect("spawn cmd");
-            let observe = |expected: &PathBuf| {
-                let deadline = Instant::now() + Duration::from_secs(5);
+            let mut stdout = super::ChildPipe::new_reader(child.stdout.take().unwrap())
+                .expect("read cmd output");
+            // The inherited cwd is readable before cmd is ready to execute input.
+            let mut wait_for = |marker: &[u8]| {
+                let deadline = Instant::now() + Duration::from_secs(15);
+                let mut output = Vec::new();
                 loop {
-                    let observed = super::process_cwd(child.id());
-                    if observed.as_ref() == Some(expected) || Instant::now() >= deadline {
-                        break observed;
+                    let mut buffer = [0; 1024];
+                    match stdout.read(&mut buffer) {
+                        Ok(0) => break,
+                        Ok(len) => {
+                            output.extend_from_slice(&buffer[..len]);
+                            if output.windows(marker.len()).any(|part| part == marker) {
+                                return Ok(());
+                            }
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                        Err(error) => return Err(error.to_string()),
+                    }
+                    if Instant::now() >= deadline {
+                        break;
                     }
                     thread::sleep(Duration::from_millis(20));
                 }
+                Err(format!(
+                    "cmd did not acknowledge {}: {}",
+                    String::from_utf8_lossy(marker),
+                    String::from_utf8_lossy(&output)
+                ))
             };
-            let initial = observe(&cwd);
-            use std::io::Write;
+            writeln!(child.stdin.as_ref().unwrap(), "echo herdr-cwd-ready\r")
+                .expect("check cmd readiness");
+            let ready = wait_for(b"herdr-cwd-ready");
+            let initial = super::process_cwd(child.id());
             writeln!(
                 child.stdin.as_ref().unwrap(),
-                "cd /d \"{}\"\r",
+                "cd /d \"{}\" 2>&1 && echo herdr-cwd-changed\r",
                 changed.display()
             )
             .expect("change cmd cwd");
-            let after_cd = observe(&changed);
+            let cd_completed = wait_for(b"herdr-cwd-changed");
+            let after_cd = super::process_cwd(child.id());
             let pane_cwd = super::pane_process_cwd(child.id());
             let _ = child.kill();
             let _ = child.wait();
-            observations.push((shell, initial, after_cd, pane_cwd));
+            observations.push((shell, ready, initial, cd_completed, after_cd, pane_cwd));
         }
         let _ = fs::remove_dir_all(&cwd);
-        for (shell, initial, after_cd, pane_cwd) in observations {
+        for (shell, ready, initial, cd_completed, after_cd, pane_cwd) in observations {
+            assert!(ready.is_ok(), "{} readiness: {ready:?}", shell.display());
             assert_eq!(initial, Some(cwd.clone()), "{} launch cwd", shell.display());
+            assert!(
+                cd_completed.is_ok(),
+                "{} cd completion: {cd_completed:?}",
+                shell.display()
+            );
             assert_eq!(
                 after_cd,
                 Some(changed.clone()),

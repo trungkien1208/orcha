@@ -273,34 +273,75 @@ fn system_notification_clicks_keep_endpoint_and_boot_identity() {
     }
 }
 
+fn click_machine(state: &mut ClientShellState, id: &ClientEndpointId, badge: bool) -> bool {
+    state.compose(120, 40).unwrap();
+    let hit = state
+        .hits
+        .machines
+        .iter()
+        .find(|hit| &hit.endpoint_id == id)
+        .unwrap();
+    let (column, row) = if badge {
+        (hit.status_badge.x, hit.status_badge.y)
+    } else {
+        (hit.rect.x.saturating_add(3), hit.rect.y)
+    };
+    let mouse = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    };
+    state
+        .handle_raw_events(vec![RawInputEvent::Mouse(mouse)])
+        .repaint
+}
+
 #[test]
-fn machine_diagnostic_badge_reopens_notice_without_collapsing_machine() {
+fn machine_badge_retries_and_reports_the_fresh_diagnostic() {
     let (mut state, id) = state_with_remote();
     state.set_endpoint_status(&id, ClientEndpointStatus::Attention);
-    state.set_machine_diagnostic(&id, "Permission denied (keyboard-interactive)".into());
+    state.set_machine_diagnostic(&id, "ssh: connect to host build: No route to host".into());
+    state.retry_machine(&id);
+    state.set_endpoint_status(&id, ClientEndpointStatus::Attention);
+    state.report_machine_retry(&id);
+    assert!(state
+        .visible_endpoint_notice
+        .as_ref()
+        .unwrap()
+        .body
+        .contains("No route to host"));
+    assert_eq!(state.take_machine_retries(), vec![id.clone()]);
+
     for _ in 0..2 {
-        state.compose(120, 40).unwrap();
-        let hit = state
-            .hits
-            .machines
-            .iter()
-            .find(|hit| hit.endpoint_id == id)
-            .unwrap();
-        let mouse = MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: hit.status_badge.x,
-            row: hit.status_badge.y,
-            modifiers: KeyModifiers::NONE,
-        };
-        let outcome = state.handle_raw_events(vec![RawInputEvent::Mouse(mouse)]);
-        assert!(outcome.repaint);
+        assert!(click_machine(&mut state, &id, true));
         assert!(!state.collapsed_endpoints.contains(&id));
-        let notice = state.visible_endpoint_notice.take().unwrap();
-        assert!(notice.body.contains("Permission denied"));
-        assert!(notice
-            .title
-            .contains("herdr machine reconnect 0123456789abcdef0123456789abcdef"));
+        assert_eq!(
+            state.endpoint_status(&id),
+            Some(ClientEndpointStatus::Connecting)
+        );
+        assert!(
+            state.visible_endpoint_notice.is_none(),
+            "the stale diagnostic must not outlive the retry it describes"
+        );
     }
+    assert_eq!(state.take_machine_retries(), vec![id.clone()]);
+
+    state.set_endpoint_status(&id, ClientEndpointStatus::Attention);
+    state.set_machine_diagnostic(&id, "Permission denied (keyboard-interactive)".into());
+    state.report_machine_retry(&id);
+    let notice = state.visible_endpoint_notice.take().unwrap();
+    assert!(notice.body.contains("Permission denied"));
+    assert!(notice
+        .title
+        .contains("herdr machine reconnect 0123456789abcdef0123456789abcdef"));
+    state.set_machine_diagnostic(&id, "a later background failure".into());
+    state.report_machine_retry(&id);
+    assert!(
+        state.visible_endpoint_notice.is_none(),
+        "unrequested attempts stay quiet"
+    );
+
     state.set_endpoint_status(&id, ClientEndpointStatus::Online);
     state.compose(120, 40).unwrap();
     assert!(!state.machine_diagnostics.required_for(
@@ -310,6 +351,146 @@ fn machine_diagnostic_badge_reopens_notice_without_collapsing_machine() {
             .find(|endpoint| endpoint.endpoint_id == id)
             .unwrap()
     ));
+    click_machine(&mut state, &id, true);
+    assert!(state.take_machine_retries().is_empty());
+}
+
+#[test]
+fn active_retry_failure_preserves_diagnostic_and_presentation_freeze() {
+    use crate::client::shell_runtime::{
+        present_endpoint_connection_failure, present_handoff_unavailable,
+    };
+    use crate::client::state::ClientState;
+
+    for (status, message, command) in [
+        (
+            ClientEndpointStatus::Attention,
+            "Permission denied (keyboard-interactive)",
+            "herdr machine reconnect",
+        ),
+        (
+            ClientEndpointStatus::Reconnecting,
+            "connection refused",
+            "herdr machine status",
+        ),
+    ] {
+        for previous in [
+            None,
+            Some("disconnect"),
+            Some("attention"),
+            Some("paste"),
+            Some("other"),
+            Some("duplicate-label"),
+        ] {
+            let (mut shell, id) = state_with_remote();
+            assert!(shell.activate_endpoint_projection(&id));
+            shell.mark_endpoint_disconnected(&id);
+            let mut state = ClientState::test_new();
+            state.shell = Some(shell);
+            match previous {
+                Some("disconnect") => {
+                    present_handoff_unavailable(
+                        &mut state,
+                        "Build connection was lost".into(),
+                        Some(&id),
+                    );
+                }
+                Some("attention") => {
+                    present_handoff_unavailable(&mut state, "Build: old failure".into(), Some(&id));
+                }
+                Some("paste") => {
+                    state
+                        .shell
+                        .as_mut()
+                        .unwrap()
+                        .receive_endpoint_error("another notice".into());
+                }
+                Some("other") => {
+                    state
+                        .shell
+                        .as_mut()
+                        .unwrap()
+                        .receive_endpoint_unavailable("Build west: connection lost".into());
+                }
+                Some("duplicate-label") => {
+                    state
+                        .shell
+                        .as_mut()
+                        .unwrap()
+                        .receive_endpoint_unavailable("Build: unrelated error".into());
+                }
+                _ => {}
+            }
+            assert!(click_machine(state.shell.as_mut().unwrap(), &id, false));
+            present_endpoint_connection_failure(&mut state, &id, status, message.into());
+            assert!(state.presentation_frozen);
+            let notice = state
+                .shell
+                .as_ref()
+                .unwrap()
+                .visible_endpoint_notice
+                .as_ref()
+                .unwrap();
+            if previous == Some("paste") {
+                assert_eq!(notice.body, "another notice");
+            } else if previous == Some("other") {
+                assert_eq!(notice.body, "Build west: connection lost");
+            } else if previous == Some("duplicate-label") {
+                assert_eq!(notice.body, "Build: unrelated error");
+            } else {
+                assert_eq!(notice.body, message);
+                assert!(notice.title.contains(command));
+            }
+            let frame = state
+                .shell
+                .as_mut()
+                .unwrap()
+                .compose(state.reported_size.0, state.reported_size.1)
+                .unwrap();
+            assert!(
+                state.blit_encoder.is_current(&frame.frame),
+                "the failure notice must reach the screen while frozen"
+            );
+        }
+    }
+}
+
+#[test]
+fn selecting_a_reconnecting_machine_retries_it() {
+    for active in [false, true] {
+        let (mut state, id) = state_with_remote();
+        if active {
+            assert!(state.activate_endpoint_projection(&id));
+        }
+        state.mark_endpoint_disconnected(&id);
+        assert!(click_machine(&mut state, &id, false));
+        assert_eq!(state.take_machine_retries(), vec![id.clone()]);
+        assert!(state.visible_endpoint_notice.is_none());
+        assert_eq!(
+            state.endpoint_status(&id),
+            Some(ClientEndpointStatus::Connecting)
+        );
+
+        // A successful attempt has nothing left to report.
+        state.set_endpoint_status(&id, ClientEndpointStatus::Online);
+        state.set_endpoint_status(&id, ClientEndpointStatus::Reconnecting);
+        state.set_machine_diagnostic(&id, "connection refused".into());
+        state.report_machine_retry(&id);
+        assert!(state.visible_endpoint_notice.is_none());
+
+        state.set_endpoint_status(&id, ClientEndpointStatus::Disabled);
+        assert!(click_machine(&mut state, &id, false));
+        assert!(state.take_machine_retries().is_empty());
+        if active {
+            assert!(state.visible_endpoint_notice.is_none());
+            assert!(state.collapsed_endpoints.contains(&id));
+        } else {
+            assert!(state
+                .visible_endpoint_notice
+                .as_ref()
+                .is_some_and(|notice| notice.body == "Build is not ready"));
+        }
+    }
 }
 
 fn state_with_scrollable_agents() -> (ClientShellState, ClientEndpointId) {

@@ -7,6 +7,8 @@ Herdr 的 CLI 通过与集成和智能体相同的本地 socket API 与运行中
 
 大多数命令输出 JSON 响应。需要确定性自动化时,从脚本中使用它们。
 
+调用 API 的命令使用同一组参数定义进行解析、显示 `--help` 和生成 shell 补全。带值的选项同时接受 `--label text` 和 `--label=text`。无效参数会在连接服务器之前被拒绝。
+
 ## 启动与状态
 
 ```bash
@@ -63,7 +65,7 @@ herdr machine remove <profile-id>
 
 更改会自动应用到已打开的本地 Herdr 客户端，通常在一秒内生效。新增或启用的机器在后台连接；重命名不会重新连接。移除或禁用只会断开该机器，远程会话仍会继续运行。移除正在查看的机器会返回 Local；如果 Local 不可用，则显示不可用状态，直到重新连接。每份配置在客户端状态文件中保存一个不透明 ID、标签、SSH 目标、明确的远程会话名和启用状态。Herdr 不保存密码、私钥或其他 SSH 凭据。
 
-`herdr machine status [<label-or-id>] [--json]` 可非交互式检查 SSH 和远程 Herdr。`reachable` 表示本次检查成功，不代表 TUI 当前已连接。在终端运行 `herdr machine reconnect <label-or-id>` 可认证并验证连接，不会安装或更新 Herdr。已打开的客户端会在 30 秒内重试。点击 `! auth` 或 `! error` 可查看最新错误和 CLI 命令；侧边栏折叠时显示 `!`。平台限制请参阅[恢复 SSH 认证](/zh-cn/docs/connecting-machines/#恢复-ssh-认证)。需要远程设置时使用 `herdr --remote workbox`，仅在命名会话时添加 `--session <name>`。
+`herdr machine status [<label-or-id>] [--json]` 可非交互式检查 SSH 和远程 Herdr。`reachable` 表示本次检查成功，不代表 TUI 当前已连接。在终端运行 `herdr machine reconnect <label-or-id>` 可认证并验证连接，不会安装或更新 Herdr。已打开的客户端会在 30 秒内重试。点击 `! auth` 或 `! error` 会重试；失败后会显示最新错误和 CLI 命令；侧边栏折叠时显示 `!`。平台限制请参阅[恢复 SSH 认证](/zh-cn/docs/connecting-machines/#恢复-ssh-认证)。需要远程设置时使用 `herdr --remote workbox`，仅在命名会话时添加 `--session <name>`。
 
 工作区、标签页、窗格 ID 和智能体名称仅在所属服务器内有效。UI 中的选择不会改变 CLI 的目标。使用全局**前缀** `--machine <label-or-id>` 将 API 命令发送到已保存的 SSH 机器：
 

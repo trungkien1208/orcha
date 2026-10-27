@@ -7,6 +7,8 @@ Herdr’s CLI talks to the running server over the same local socket API used by
 
 Most commands print JSON responses for deterministic automation in scripts.
 
+API-backed commands use the same argument definitions for parsing, `--help`, and shell completion. Value options accept both `--label text` and `--label=text`. Invalid arguments are rejected before connecting to the server.
+
 ## Launch and status
 
 ```bash
@@ -65,7 +67,7 @@ In an interactive terminal, `machine add` discovers running sessions and lets yo
 
 Changes apply automatically to open local Herdr clients, normally within a second. Added or enabled machines connect in the background; renaming does not reconnect. Removing or disabling disconnects only that machine and leaves its remote sessions running. Removing the machine you are viewing returns to Local, or shows Local as unavailable until it reconnects. Each profile stores an opaque ID, label, SSH target, explicit remote session, and enabled state in client state. Herdr does not store passwords, private keys, or other SSH credentials.
 
-Use `herdr machine status [<label-or-id>] [--json]` for fresh, noninteractive SSH and remote Herdr checks. `reachable` describes this check, not a TUI's current connection. Use `herdr machine reconnect <label-or-id>` in a terminal for SSH authentication and verification; it does not install or update Herdr. Open clients retry failed connections within 30 seconds. Clicking `! auth` or `! error` shows the latest error and CLI guidance; collapsed sidebars show `!`. See [Recovering SSH authentication](/docs/connecting-machines/#recovering-ssh-authentication) for platform limits. For remote setup, use `herdr --remote workbox`, adding `--session <name>` only for a named session.
+Use `herdr machine status [<label-or-id>] [--json]` for fresh, noninteractive SSH and remote Herdr checks. `reachable` describes this check, not a TUI's current connection. Use `herdr machine reconnect <label-or-id>` in a terminal for SSH authentication and verification; it does not install or update Herdr. Open clients retry failed connections within 30 seconds. Clicking `! auth` or `! error` retries the connection; a failed attempt shows the latest error and CLI guidance; collapsed sidebars show `!`. See [Recovering SSH authentication](/docs/connecting-machines/#recovering-ssh-authentication) for platform limits. For remote setup, use `herdr --remote workbox`, adding `--session <name>` only for a named session.
 
 Workspace, tab, pane IDs, and agent names belong to a single server. Selecting a machine in the UI does not retarget CLI commands. Use the global **prefix** `--machine <label-or-id>` to route API commands to a saved SSH machine:
 
