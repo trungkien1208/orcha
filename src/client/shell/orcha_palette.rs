@@ -21,6 +21,7 @@ pub(super) enum PaletteCommand {
     ProjectIcon,
     Accounts,
     RefreshFuel,
+    FindAccounts,
     NeedsYou,
     OpenIde,
     OpenGit,
@@ -36,7 +37,7 @@ pub(super) enum PaletteCommand {
 }
 
 /// (command, title, what it does)
-const COMMANDS: [(PaletteCommand, &str, &str); 22] = [
+const COMMANDS: [(PaletteCommand, &str, &str); 23] = [
     (
         PaletteCommand::NewAgent,
         "New agent",
@@ -82,6 +83,11 @@ const COMMANDS: [(PaletteCommand, &str, &str); 22] = [
         PaletteCommand::RefreshFuel,
         "Refresh fuel",
         "ask every account for its limits now",
+    ),
+    (
+        PaletteCommand::FindAccounts,
+        "Find accounts",
+        "agents and accounts on this machine, to add to FUEL",
     ),
     (
         PaletteCommand::NeedsYou,
@@ -561,6 +567,7 @@ impl ClientShellState {
             PaletteCommand::ProjectIcon => self.open_project_icon_picker(None),
             PaletteCommand::Accounts => self.open_accounts_overlay(),
             PaletteCommand::RefreshFuel => self.refresh_fuel(),
+            PaletteCommand::FindAccounts => self.start_account_scan(true),
             PaletteCommand::NeedsYou => self.jump_to_needs_you(outcome),
             PaletteCommand::OpenIde => self.open_project_in(true),
             PaletteCommand::OpenGit => self.open_project_in(false),

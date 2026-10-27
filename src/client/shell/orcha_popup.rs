@@ -77,6 +77,11 @@ pub(crate) enum OrchaPopup {
     },
     /// What changed in this build, shown once after an update.
     WhatsNew { release: crate::orcha_app::Release },
+    /// Claude sign-ins found on this machine (`OrchaUiState::found_accounts`),
+    /// each with a check; the primary button adds the checked ones.
+    FoundAccounts { selected: usize, chosen: Vec<bool> },
+    /// A file shown read-only (`OrchaUiState::file_view` holds its text).
+    FileView { path: String },
     /// Ctrl+click on a file whose type has no saved app: choose one, and
     /// keep it for the extension when `remember` is on.
     OpenWith {
@@ -509,6 +514,7 @@ fn render_accounts(
             ("↵", "continue"),
             ("alt ↵", "summary first"),
             ("d", "remove"),
+            ("i", "find"),
             ("esc", "not now"),
         ],
         "↻ refresh (r)",
@@ -1492,6 +1498,108 @@ fn render_whats_new(
     Some(())
 }
 
+/// FOUND ACCOUNTS: Claude sign-ins already on this machine, one row each
+/// with a check; IMPORT adds the checked ones as they are (no new sign-in).
+fn render_found_accounts(
+    buffer: &mut Buffer,
+    selected: usize,
+    chosen: &[bool],
+    found: &[crate::orcha_accounts::FoundAccount],
+    t: &Brutal,
+    hits: &mut PopupHits,
+) -> Option<()> {
+    let count = chosen.iter().filter(|on| **on).count();
+    let frame = popup_frame(
+        buffer,
+        76,
+        rows_height(found.len()) + 2,
+        "FOUND ACCOUNTS",
+        "agents on this machine · import adds them to FUEL",
+        &[("↵", "import"), ("space", "check"), ("esc", "not now")],
+        "",
+        t,
+        hits,
+    )?;
+    let mut y = frame.body.y;
+    for (index, account) in found.iter().enumerate() {
+        if y + ROW > frame.body.bottom().saturating_sub(1) {
+            break;
+        }
+        let rect = Rect::new(frame.body.x, y, frame.body.width, ROW);
+        let fill = row_box(buffer, rect, index == 0, index == selected, t);
+        let on = chosen.get(index).copied().unwrap_or(false);
+        let check = brutal::chip(
+            buffer,
+            rect.x + 2,
+            y,
+            5,
+            if on { "✓" } else { " " },
+            t.chip_text,
+            if on { t.green } else { t.frame },
+        );
+        let x = rect.x + 3 + check;
+        let width = rect.right().saturating_sub(x + 2);
+        let title = if account.kind == "claude" {
+            format!("Claude · {}  {}", account.name, account.email)
+        } else {
+            format!("{}  {}", account.name, account.email)
+        };
+        put_text(
+            buffer,
+            x,
+            y,
+            width,
+            &brutal::clip(&title, usize::from(width)),
+            Style::default()
+                .fg(t.ink)
+                .bg(fill)
+                .add_modifier(Modifier::BOLD),
+        );
+        let command = crate::orcha_accounts::agent_kind(&account.kind)
+            .map_or(account.kind.as_str(), |agent| agent.command);
+        let detail = match (account.kind.as_str(), account.signed_in) {
+            ("claude", _) => account
+                .dir
+                .clone()
+                .unwrap_or_else(|| "~/.claude (default)".to_owned()),
+            (_, true) => format!("signed in · runs {command}"),
+            (_, false) => format!("installed · sign in from FUEL after importing ({command})"),
+        };
+        put_text(
+            buffer,
+            x,
+            y + 1,
+            width,
+            &brutal::clip(&detail, usize::from(width)),
+            Style::default().fg(t.muted).bg(fill),
+        );
+        hits.actions
+            .push((Rect::new(rect.x + 2, y, check, 1), index));
+        hits.rows.push((rect, index));
+        y += ROW + 1;
+    }
+    let label = if count == 0 {
+        "IMPORT".to_owned()
+    } else {
+        format!("IMPORT {count} ↵")
+    };
+    let action = button(
+        buffer,
+        frame.body.right() - 1,
+        frame.body.bottom().saturating_sub(1),
+        &label,
+        if count == 0 {
+            ButtonKind::Plain
+        } else {
+            ButtonKind::Primary
+        },
+        t.bg,
+        t,
+    );
+    hits.actions.push((action, found.len()));
+    Some(())
+}
+
 /// OPEN WITH: the suggested app first, then the other choices; a check
 /// under the list keeps the choice for the extension.
 #[allow(clippy::too_many_arguments)] // Render inputs are independent view facts.
@@ -1673,6 +1781,15 @@ pub(super) fn render_popup(
         }
         OrchaPopup::WhatsNew { release } => {
             let _ = render_whats_new(buffer, release, &t, &mut hits);
+        }
+        OrchaPopup::FoundAccounts { selected, chosen } => {
+            let _ =
+                render_found_accounts(buffer, *selected, chosen, &ui.found_accounts, &t, &mut hits);
+        }
+        OrchaPopup::FileView { .. } => {
+            if let Some(view) = ui.file_view.as_ref() {
+                let _ = super::file_viewer::render(buffer, view, &t, &mut hits);
+            }
         }
         OrchaPopup::OpenWith {
             selected,

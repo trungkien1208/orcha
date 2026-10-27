@@ -82,11 +82,132 @@ pub(crate) struct AccountConfig {
     pub dir: Option<String>,
 }
 
-const KINDS: [(&str, &str, &str); 3] = [
-    ("claude", "claude", "Claude"),
-    ("codex", "codex", "Codex"),
-    ("cursor", "cursor-agent", "Cursor"),
+/// An agent CLI orcha can list as an account. `kind` is herdr's agent id.
+pub(crate) struct AgentKind {
+    pub kind: &'static str,
+    pub command: &'static str,
+    pub name: &'static str,
+    /// The shell line that signs in.
+    login: &'static str,
+    /// The shell line that continues the last chat, when the CLI has one.
+    resume: Option<&'static str>,
+    /// orcha reads its usage numbers (FUEL gauges).
+    fuel: bool,
+    /// Files under the home folder that exist once it is signed in; none
+    /// known means orcha cannot tell.
+    sign_in: &'static [&'static str],
+}
+
+const fn agent(
+    kind: &'static str,
+    command: &'static str,
+    name: &'static str,
+    login: &'static str,
+    resume: Option<&'static str>,
+    sign_in: &'static [&'static str],
+) -> AgentKind {
+    AgentKind {
+        kind,
+        command,
+        name,
+        login,
+        resume,
+        fuel: false,
+        sign_in,
+    }
+}
+
+pub(crate) const AGENTS: &[AgentKind] = &[
+    AgentKind {
+        fuel: true,
+        ..agent(
+            "claude",
+            "claude",
+            "Claude",
+            "claude auth login",
+            Some("claude --continue"),
+            &[],
+        )
+    },
+    AgentKind {
+        fuel: true,
+        ..agent(
+            "codex",
+            "codex",
+            "Codex",
+            "codex login",
+            Some("codex resume --last"),
+            &[".codex/auth.json"],
+        )
+    },
+    AgentKind {
+        fuel: true,
+        ..agent(
+            "cursor",
+            "cursor-agent",
+            "Cursor",
+            "cursor-agent login",
+            Some("cursor-agent resume"),
+            &[".cursor/cli-config.json"],
+        )
+    },
+    agent(
+        "gemini",
+        "gemini",
+        "Gemini",
+        "gemini",
+        None,
+        &[".gemini/oauth_creds.json", ".gemini/google_accounts.json"],
+    ),
+    agent(
+        "copilot",
+        "copilot",
+        "Copilot",
+        "copilot",
+        Some("copilot --continue"),
+        &[".copilot/config.json"],
+    ),
+    agent(
+        "opencode",
+        "opencode",
+        "OpenCode",
+        "opencode auth login",
+        Some("opencode --continue"),
+        &[".local/share/opencode/auth.json"],
+    ),
+    agent(
+        "amp",
+        "amp",
+        "Amp",
+        "amp login",
+        None,
+        &[".local/share/amp/secrets.json"],
+    ),
+    agent(
+        "qwen",
+        "qwen",
+        "Qwen",
+        "qwen",
+        None,
+        &[".qwen/oauth_creds.json"],
+    ),
+    agent("droid", "droid", "Droid", "droid", None, &[]),
+    agent("kimi", "kimi", "Kimi", "kimi", None, &[]),
+    agent("grok", "grok", "Grok", "grok", None, &[]),
+    agent("kiro", "kiro-cli", "Kiro", "kiro-cli login", None, &[]),
+    agent("devin", "devin", "Devin", "devin", None, &[]),
+    agent("cline", "cline", "Cline", "cline", None, &[]),
+    agent("kilo", "kilo", "Kilo", "kilo", None, &[]),
+    agent("qodercli", "qodercli", "Qoder", "qodercli", None, &[]),
+    agent("agy", "agy", "Antigravity", "agy", None, &[]),
+    agent("pi", "pi", "Pi", "pi", None, &[]),
+    agent("hermes", "hermes", "Hermes", "hermes", None, &[]),
+    agent("letta", "letta", "Letta", "letta", None, &[]),
 ];
+
+pub(crate) fn agent_kind(kind: &str) -> Option<&'static AgentKind> {
+    AGENTS.iter().find(|agent| agent.kind == kind)
+}
 
 fn home() -> Option<PathBuf> {
     crate::platform::user_home_dir()
@@ -146,7 +267,7 @@ fn parse_accounts(config: &Value) -> Vec<AccountConfig> {
             let field = |key: &str| account.get(key).and_then(Value::as_str).unwrap_or("");
             let id = field("id");
             let kind = field("kind");
-            if id.is_empty() || !KINDS.iter().any(|(known, _, _)| *known == kind) {
+            if id.is_empty() || agent_kind(kind).is_none() {
                 return None;
             }
             Some(AccountConfig {
@@ -184,7 +305,16 @@ pub(crate) fn accounts() -> Vec<AccountConfig> {
     let config = config_path().and_then(|path| read_json(&path));
     let mut out = config.as_ref().map(parse_accounts).unwrap_or_default();
     let hidden = hidden_accounts(config.as_ref());
-    for (kind, command, name) in KINDS {
+    // the agents with fuel show by themselves; the others are offered
+    // (`find_unlisted`)
+    for AgentKind {
+        kind,
+        command,
+        name,
+        ..
+    } in AGENTS.iter().filter(|agent| agent.fuel)
+    {
+        let (kind, command, name) = (*kind, *command, *name);
         let id = if kind == "claude" {
             "claude-main"
         } else {
@@ -822,7 +952,8 @@ fn fetch(accounts: &[AccountConfig], account: &AccountConfig) -> Fetched {
     match account.kind.as_str() {
         "claude" => claude_limits(accounts, &account.id),
         "codex" => codex_limits(),
-        _ => cursor_limits(),
+        "cursor" => cursor_limits(),
+        _ => Fetched::default(),
     }
 }
 
@@ -993,12 +1124,19 @@ fn email(accounts: &[AccountConfig], account: &AccountConfig) -> Option<String> 
                     .map(str::to_owned)
             }
         }
+        kind => agent_email(&home, kind),
+    }
+}
+
+/// Who an agent other than Claude is signed in as, where it says.
+fn agent_email(home: &Path, kind: &str) -> Option<String> {
+    match kind {
         "cursor" => read_json(&home.join(".cursor").join("cli-config.json"))?
             .get("authInfo")?
             .get("email")?
             .as_str()
             .map(str::to_owned),
-        _ => {
+        "codex" => {
             let auth = read_json(&home.join(".codex").join("auth.json"))?;
             let token = auth.get("tokens")?.get("id_token")?.as_str()?;
             jwt_payload(token)?
@@ -1006,7 +1144,25 @@ fn email(accounts: &[AccountConfig], account: &AccountConfig) -> Option<String> 
                 .as_str()
                 .map(str::to_owned)
         }
+        "gemini" => read_json(&home.join(".gemini").join("google_accounts.json"))?
+            .get("active")?
+            .as_str()
+            .map(str::to_owned),
+        "copilot" => read_json(&home.join(".copilot").join("config.json"))?
+            .get("logged_in_users")?
+            .get(0)?
+            .get("login")?
+            .as_str()
+            .map(str::to_owned),
+        _ => None,
     }
+}
+
+/// An agent's sign-in file is there; true when orcha cannot tell.
+fn agent_signed_in(home: &Path, kind: &str) -> bool {
+    agent_kind(kind).is_none_or(|agent| {
+        agent.sign_in.is_empty() || agent.sign_in.iter().any(|path| home.join(path).exists())
+    })
 }
 
 /// There is a sign-in for this account (maybe with an expired token).
@@ -1015,8 +1171,8 @@ fn signed_in(accounts: &[AccountConfig], account: &AccountConfig) -> bool {
         "claude" => claude_slot(accounts, &account.id)
             .and_then(|slot| crate::platform::orcha_secret_read(&slot))
             .is_some(),
-        "codex" => home().is_some_and(|home| home.join(".codex").join("auth.json").exists()),
-        _ => email(accounts, account).is_some(),
+        "cursor" => email(accounts, account).is_some(),
+        kind => home().is_some_and(|home| agent_signed_in(&home, kind)),
     }
 }
 
@@ -1069,14 +1225,11 @@ fn pane_config_dir(pane: &str) -> Option<String> {
 fn pane_account(accounts: &[AccountConfig], pane: &str) -> Option<String> {
     let info = pane_info(pane)?;
     let kind = info.get("agent").and_then(Value::as_str)?;
-    if kind == "codex" || kind == "cursor" {
+    if kind != "claude" {
         return accounts
             .iter()
             .find(|account| account.kind == kind)
             .map(|account| account.id.clone());
-    }
-    if kind != "claude" {
-        return None;
     }
     let Some(dir) = pane_config_dir(pane) else {
         return active_claude(accounts);
@@ -1109,7 +1262,12 @@ pub(crate) fn accounts_with_fuel(pane: Option<&str>, fresh: bool) -> Vec<Account
     accounts
         .iter()
         .map(|account| {
-            let limits = limits(&accounts, account, fresh);
+            let fuel = agent_kind(&account.kind).is_some_and(|agent| agent.fuel);
+            let limits = if fuel {
+                limits(&accounts, account, fresh)
+            } else {
+                Limits::default()
+            };
             Account {
                 id: account.id.clone(),
                 kind: account.kind.clone(),
@@ -1286,10 +1444,12 @@ pub(crate) fn switch(id: &str, pane: &str) -> Result<(), String> {
     });
     let line = match (account.kind.as_str(), session) {
         ("codex", Some(session)) => format!("codex resume {session}"),
-        ("codex", None) => "codex resume --last".to_owned(),
-        _ => "cursor-agent resume".to_owned(),
+        (kind, _) => agent_kind(kind).map_or_else(
+            || kind.to_owned(),
+            |agent| agent.resume.unwrap_or(agent.command).to_owned(),
+        ),
     };
-    // Ctrl+C twice leaves Codex and the Cursor CLI; then the shell resumes
+    // Ctrl+C twice leaves the agent's CLI; then the shell resumes
     for _ in 0..2 {
         send_keys(pane, "ctrl+c");
         std::thread::sleep(std::time::Duration::from_millis(400));
@@ -1372,15 +1532,15 @@ fn split_for(
 }
 
 /// The agent's command continuing its last chat, else a new one.
-fn continue_line(kind: &str) -> &'static str {
+fn continue_line(kind: &str) -> String {
+    let Some(agent) = agent_kind(kind) else {
+        return kind.to_owned();
+    };
     // PowerShell 5 has no `||`; there the agent starts fresh if it must
-    match (kind, cfg!(windows)) {
-        ("claude", false) => "claude --continue || claude",
-        ("claude", true) => "claude --continue",
-        ("codex", false) => "codex resume --last || codex",
-        ("codex", true) => "codex resume --last",
-        (_, false) => "cursor-agent resume || cursor-agent",
-        (_, true) => "cursor-agent resume",
+    match (agent.resume, cfg!(windows)) {
+        (Some(resume), false) => format!("{resume} || {}", agent.command),
+        (Some(resume), true) => resume.to_owned(),
+        (None, _) => agent.command.to_owned(),
     }
 }
 
@@ -1389,7 +1549,7 @@ pub(crate) fn open(id: &str, pane: Option<&str>, cwd: Option<&str>) -> Result<()
     let accounts = accounts();
     let account = find(&accounts, id).ok_or("unknown account")?;
     let new_pane = split_for(account, pane, cwd)?;
-    run_in_pane(&new_pane, continue_line(&account.kind))
+    run_in_pane(&new_pane, &continue_line(&account.kind))
 }
 
 /// An email safe to put on a command line as it is.
@@ -1414,8 +1574,9 @@ pub(crate) fn login(id: &str, pane: Option<&str>) -> Result<(), String> {
             Some(email) => format!("claude auth login --email {email}"),
             None => "claude auth login".to_owned(),
         },
-        "codex" => "codex login".to_owned(),
-        _ => "cursor-agent login".to_owned(),
+        kind => agent_kind(kind)
+            .map_or(kind, |agent| agent.login)
+            .to_owned(),
     };
     forget_limits(id);
     run_in_pane(&new_pane, &line)
@@ -1471,28 +1632,339 @@ pub(crate) fn add(name: &str, pane: Option<&str>) -> Result<String, String> {
     let path = config_path().ok_or("no config folder")?;
     let mut config = read_json(&path).unwrap_or_else(|| serde_json::json!({}));
     // a first run lists the detected accounts too, so they stay
-    if config.get("accounts").is_none() {
-        let detected: Vec<Value> = accounts()
-            .into_iter()
-            .map(|account| {
-                serde_json::json!({
-                    "id": account.id,
-                    "kind": account.kind,
-                    "label": account.label,
-                    "email": account.email,
-                    "dir": account.dir,
-                })
-            })
-            .collect();
-        if let Some(object) = config.as_object_mut() {
-            object.insert("accounts".to_owned(), Value::Array(detected));
-        }
-    }
+    seed_detected(&mut config);
     let id = add_to_config(&mut config, name)?;
     let text = serde_json::to_string_pretty(&config).map_err(|err| err.to_string())?;
     write_atomic(&path, &format!("{text}\n")).map_err(|err| format!("could not save: {err}"))?;
     login(&id, pane)?;
     Ok(id)
+}
+
+/// An agent sign-in on this machine that orcha does not list yet: a
+/// Claude config folder, or another agent's CLI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FoundAccount {
+    /// herdr's agent id (`AGENTS`).
+    pub kind: String,
+    /// Claude's `CLAUDE_CONFIG_DIR`; None for the default folder.
+    pub dir: Option<String>,
+    /// Who it is signed in as; empty when the CLI does not say.
+    pub email: String,
+    /// The name it gets (Claude: `claude-<name>`).
+    pub name: String,
+    /// orcha saw its sign-in (false: installed, sign in after importing).
+    pub signed_in: bool,
+}
+
+impl FoundAccount {
+    /// How config.json remembers a dismissed one.
+    fn key(&self) -> String {
+        if self.kind != "claude" {
+            return format!("agent:{}", self.kind);
+        }
+        self.dir.clone().unwrap_or_else(|| "default".to_owned())
+    }
+}
+
+/// Folders where Claude sign-ins usually live: orcha's own, `~/.claude-*`
+/// and `CLAUDE_CONFIG_DIR`.
+fn claude_folder_candidates() -> Vec<PathBuf> {
+    let mut folders = Vec::new();
+    let Some(home) = home() else {
+        return folders;
+    };
+    let mut push_children = |parent: &Path, prefix: &str| {
+        let Ok(read) = std::fs::read_dir(parent) else {
+            return;
+        };
+        let mut found: Vec<PathBuf> = read
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(prefix))
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .collect();
+        found.sort();
+        folders.extend(found);
+    };
+    push_children(&home.join(".ai-accounts").join("claude"), "");
+    push_children(&home, ".claude-");
+    push_children(&home, ".claude_");
+    if let Ok(dir) = std::env::var("CLAUDE_CONFIG_DIR") {
+        if !dir.trim().is_empty() {
+            folders.push(PathBuf::from(expand(dir.trim())));
+        }
+    }
+    folders
+}
+
+fn same_folder(a: &str, b: &str) -> bool {
+    let canonical =
+        |path: &str| std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
+    a == b || canonical(a) == canonical(b)
+}
+
+/// The name a found folder gets: its folder name without `.claude-`.
+fn found_name(dir: Option<&str>, email: &str) -> String {
+    let from_folder = dir
+        .and_then(|dir| Path::new(dir).file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .map(|name| {
+            name.trim_start_matches(".claude-")
+                .trim_start_matches(".claude_")
+                .trim_start_matches('.')
+                .to_owned()
+        })
+        .filter(|name| !account_slug(name).is_empty() && name != "claude");
+    from_folder.unwrap_or_else(|| {
+        email
+            .split('@')
+            .next()
+            .filter(|user| !account_slug(user).is_empty())
+            .unwrap_or("main")
+            .to_owned()
+    })
+}
+
+/// Signed-in Claude folders and installed agents orcha does not list, in
+/// the order found. `agents` are (kind, email, signed in) of the agent CLIs
+/// installed. `with_dismissed` also returns the ones the user said no to.
+fn find_unlisted_in(
+    config: Option<&Value>,
+    candidates: &[PathBuf],
+    default_email: Option<String>,
+    agents: &[(&str, Option<String>, bool)],
+    with_dismissed: bool,
+) -> Vec<FoundAccount> {
+    let listed = config.map(parse_accounts).unwrap_or_default();
+    let dismissed: Vec<String> = if with_dismissed {
+        Vec::new()
+    } else {
+        config
+            .and_then(|config| config.get("dismissed_account_dirs"))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|dir| dir.as_str().map(str::to_owned))
+            .collect()
+    };
+    let mut found: Vec<FoundAccount> = Vec::new();
+    // the default folder, when the accounts orcha lists all live elsewhere
+    // (with none listed, `accounts` shows it already)
+    let default_listed = listed
+        .iter()
+        .any(|account| account.kind == "claude" && account.dir.is_none());
+    let any_claude = listed.iter().any(|account| account.kind == "claude");
+    if let Some(email) = default_email.filter(|_| any_claude && !default_listed) {
+        found.push(FoundAccount {
+            kind: "claude".to_owned(),
+            dir: None,
+            name: found_name(None, &email),
+            email,
+            signed_in: true,
+        });
+    }
+    for folder in candidates {
+        let dir = folder.to_string_lossy().into_owned();
+        let Some(email) = claude_folder_email(Some(&dir)) else {
+            continue;
+        };
+        let known = listed.iter().any(|account| {
+            account
+                .dir
+                .as_deref()
+                .is_some_and(|listed_dir| same_folder(listed_dir, &dir))
+        }) || found.iter().any(|other| {
+            other
+                .dir
+                .as_deref()
+                .is_some_and(|other| same_folder(other, &dir))
+        });
+        if known {
+            continue;
+        }
+        found.push(FoundAccount {
+            kind: "claude".to_owned(),
+            name: found_name(Some(&dir), &email),
+            dir: Some(dir),
+            email,
+            signed_in: true,
+        });
+    }
+    // agents with fuel show by themselves (`accounts`); the others once
+    // the user says so. Ones taken off the list stay off.
+    let hidden = hidden_accounts(config);
+    for (kind, email, signed_in) in agents {
+        let Some(agent) = agent_kind(kind).filter(|agent| !agent.fuel) else {
+            continue;
+        };
+        if listed.iter().any(|account| account.kind == *kind) || hidden.iter().any(|id| id == kind)
+        {
+            continue;
+        }
+        found.push(FoundAccount {
+            kind: (*kind).to_owned(),
+            dir: None,
+            email: email.clone().unwrap_or_default(),
+            name: agent.name.to_owned(),
+            signed_in: *signed_in,
+        });
+    }
+    found.retain(|account| {
+        !dismissed
+            .iter()
+            .any(|key| *key == account.key() || same_folder(key, &account.key()))
+    });
+    found
+}
+
+/// Signed-in Claude folders and installed agents orcha does not list yet.
+/// `asked`: from the
+/// menu, which also brings back dismissed ones; the look orcha makes by
+/// itself only runs once there is an accounts list to add to (before that,
+/// `accounts` shows the default sign-ins).
+pub(crate) fn find_unlisted(asked: bool) -> Vec<FoundAccount> {
+    let config = config_path().and_then(|path| read_json(&path));
+    if !asked
+        && config
+            .as_ref()
+            .is_none_or(|config| config.get("accounts").is_none())
+    {
+        return Vec::new();
+    }
+    let agents: Vec<(&str, Option<String>, bool)> = match home() {
+        Some(home) => AGENTS
+            .iter()
+            .filter(|agent| !agent.fuel && crate::orcha_handoff::command_installed(agent.command))
+            .map(|agent| {
+                (
+                    agent.kind,
+                    agent_email(&home, agent.kind),
+                    agent_signed_in(&home, agent.kind),
+                )
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    find_unlisted_in(
+        config.as_ref(),
+        &claude_folder_candidates(),
+        claude_folder_email(None),
+        &agents,
+        asked,
+    )
+}
+
+/// Lists the detected accounts in config.json the first time it changes,
+/// so they stay.
+fn seed_detected(config: &mut Value) {
+    if config.get("accounts").is_some() {
+        return;
+    }
+    let detected: Vec<Value> = accounts()
+        .into_iter()
+        .map(|account| {
+            serde_json::json!({
+                "id": account.id,
+                "kind": account.kind,
+                "label": account.label,
+                "email": account.email,
+                "dir": account.dir,
+            })
+        })
+        .collect();
+    if let Some(object) = config.as_object_mut() {
+        object.insert("accounts".to_owned(), Value::Array(detected));
+    }
+}
+
+/// Adds found accounts to config.json (their sign-ins are used as they
+/// are) and drops the others from asking again. Returns the ids added.
+fn import_into_config(
+    config: &mut Value,
+    chosen: &[FoundAccount],
+    dismissed: &[FoundAccount],
+) -> Result<Vec<String>, String> {
+    let object = config
+        .as_object_mut()
+        .ok_or("orcha's config.json is not an object")?;
+    let list = object
+        .entry("accounts")
+        .or_insert_with(|| Value::Array(Vec::new()))
+        .as_array_mut()
+        .ok_or("accounts in config.json is not a list")?;
+    let mut added = Vec::new();
+    for account in chosen {
+        let taken = |id: &str| {
+            list.iter()
+                .any(|known| known.get("id").and_then(Value::as_str) == Some(id))
+        };
+        // Claude accounts are claude-<name>; another agent is its kind
+        let (prefix, base) = if account.kind == "claude" {
+            let base = account_slug(&account.name);
+            (
+                "claude-",
+                if base.is_empty() {
+                    "main".to_owned()
+                } else {
+                    base
+                },
+            )
+        } else {
+            ("", account.kind.clone())
+        };
+        let mut slug = base.clone();
+        let mut n = 2;
+        while taken(&format!("{prefix}{slug}")) {
+            slug = format!("{base}{n}");
+            n += 1;
+        }
+        let id = format!("{prefix}{slug}");
+        let label = if account.kind == "claude" {
+            format!("Claude · {slug}")
+        } else {
+            account.name.clone()
+        };
+        list.push(serde_json::json!({
+            "id": id,
+            "kind": account.kind,
+            "label": label,
+            "email": account.email,
+            "dir": account.dir,
+        }));
+        added.push(id);
+    }
+    if !dismissed.is_empty() {
+        let keys = object
+            .entry("dismissed_account_dirs")
+            .or_insert_with(|| Value::Array(Vec::new()))
+            .as_array_mut()
+            .ok_or("dismissed_account_dirs in config.json is not a list")?;
+        for account in dismissed {
+            let key = account.key();
+            if !keys
+                .iter()
+                .any(|known| known.as_str() == Some(key.as_str()))
+            {
+                keys.push(Value::String(key));
+            }
+        }
+    }
+    Ok(added)
+}
+
+/// Imports the `chosen` found accounts; the `dismissed` ones are not
+/// offered again unless asked for.
+pub(crate) fn import_found(
+    chosen: &[FoundAccount],
+    dismissed: &[FoundAccount],
+) -> Result<Vec<String>, String> {
+    let path = config_path().ok_or("no config folder")?;
+    let mut config = read_json(&path).unwrap_or_else(|| serde_json::json!({}));
+    seed_detected(&mut config);
+    let added = import_into_config(&mut config, chosen, dismissed)?;
+    let text = serde_json::to_string_pretty(&config).map_err(|err| err.to_string())?;
+    write_atomic(&path, &format!("{text}\n")).map_err(|err| format!("could not save: {err}"))?;
+    Ok(added)
 }
 
 /// NEW: a tab in `workspace` running the account's agent.
@@ -1517,10 +1989,7 @@ pub(crate) fn new_agent(id: &str, workspace: &str, cwd: &str) -> Result<(), Stri
     }
     let result = crate::orcha_handoff::herdr_json(&args).ok_or("could not open a tab")?;
     let pane = first_pane_id(&result).ok_or("could not open a tab")?;
-    let command = KINDS
-        .iter()
-        .find(|(kind, _, _)| *kind == account.kind)
-        .map_or("claude", |(_, command, _)| command);
+    let command = agent_kind(&account.kind).map_or("claude", |agent| agent.command);
     run_in_pane(&pane, command)?;
     select(id);
     Ok(())
@@ -1543,12 +2012,139 @@ fn first_pane_id(value: &Value) -> Option<String> {
 mod tests {
     use super::*;
 
+    fn signed_in_folder(root: &Path, name: &str, email: &str) -> PathBuf {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).expect("create folder");
+        std::fs::write(
+            dir.join(".claude.json"),
+            serde_json::json!({"oauthAccount": {"emailAddress": email}}).to_string(),
+        )
+        .expect("write sign-in");
+        dir
+    }
+
+    #[test]
+    fn found_accounts_skip_listed_dismissed_and_signed_out_folders() {
+        let root = std::env::temp_dir().join(format!("orcha-found-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let listed = signed_in_folder(&root, ".claude-listed", "a@x.io");
+        let work = signed_in_folder(&root, ".claude-work", "w@x.io");
+        let gone = signed_in_folder(&root, ".claude-gone", "g@x.io");
+        let empty = root.join(".claude-empty");
+        std::fs::create_dir_all(&empty).expect("create empty");
+        let config = serde_json::json!({
+            "accounts": [{"id": "claude-a", "kind": "claude", "dir": listed.to_string_lossy()}],
+            "dismissed_account_dirs": [gone.to_string_lossy()],
+        });
+        let candidates = [listed, work.clone(), gone.clone(), empty];
+        let found = find_unlisted_in(
+            Some(&config),
+            &candidates,
+            Some("me@x.io".into()),
+            &[],
+            false,
+        );
+        assert_eq!(
+            found,
+            vec![
+                FoundAccount {
+                    kind: "claude".into(),
+                    dir: None,
+                    email: "me@x.io".into(),
+                    name: "me".into(),
+                    signed_in: true,
+                },
+                FoundAccount {
+                    kind: "claude".into(),
+                    dir: Some(work.to_string_lossy().into_owned()),
+                    email: "w@x.io".into(),
+                    name: "work".into(),
+                    signed_in: true,
+                },
+            ]
+        );
+        let all = find_unlisted_in(Some(&config), &candidates, None, &[], true);
+        assert_eq!(all.len(), 2, "asking again brings dismissed ones back");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn importing_picks_free_ids_and_remembers_the_rest() {
+        let mut config = serde_json::json!({"accounts": [
+            {"id": "claude-work", "kind": "claude", "dir": null},
+        ]});
+        let claude = |dir: &str, name: &str| FoundAccount {
+            kind: "claude".into(),
+            dir: Some(dir.into()),
+            email: format!("{name}@x.io"),
+            name: name.into(),
+            signed_in: true,
+        };
+        let gemini = FoundAccount {
+            kind: "gemini".into(),
+            dir: None,
+            email: String::new(),
+            name: "Gemini".into(),
+            signed_in: false,
+        };
+        let added = import_into_config(
+            &mut config,
+            &[claude("/w", "work"), gemini],
+            &[claude("/s", "side")],
+        )
+        .expect("import");
+        assert_eq!(added, ["claude-work2", "gemini"]);
+        let accounts = parse_accounts(&config);
+        assert_eq!(accounts[1].dir.as_deref(), Some("/w"));
+        assert_eq!(accounts[1].email, "work@x.io");
+        assert_eq!(
+            (accounts[2].kind.as_str(), accounts[2].label.as_str()),
+            ("gemini", "Gemini")
+        );
+        assert_eq!(config["dismissed_account_dirs"], serde_json::json!(["/s"]));
+    }
+
+    #[test]
+    fn other_agents_are_offered_once_unless_listed_hidden_or_dismissed() {
+        let config = serde_json::json!({
+            "accounts": [{"id": "amp", "kind": "amp"}],
+            "hidden_accounts": ["qwen"],
+            "dismissed_account_dirs": ["agent:kimi"],
+        });
+        let agents = [
+            ("gemini", Some("g@x.io".to_owned()), true),
+            ("amp", None, true),
+            ("qwen", None, true),
+            ("kimi", None, false),
+            ("codex", None, true),
+            ("opencode", None, false),
+        ];
+        let found = find_unlisted_in(Some(&config), &[], None, &agents, false);
+        let kinds: Vec<_> = found
+            .iter()
+            .map(|account| (account.kind.as_str(), account.signed_in))
+            .collect();
+        assert_eq!(kinds, [("gemini", true), ("opencode", false)]);
+        assert_eq!(found[0].email, "g@x.io");
+        assert_eq!(found[0].key(), "agent:gemini");
+        let again = find_unlisted_in(Some(&config), &[], None, &agents, true);
+        assert!(again.iter().any(|account| account.kind == "kimi"));
+    }
+
+    #[test]
+    fn every_agent_has_a_command_and_a_continue_line() {
+        for agent in AGENTS {
+            assert!(!agent.command.is_empty() && !agent.login.is_empty());
+            assert!(continue_line(agent.kind).contains(agent.command));
+        }
+    }
+
     #[test]
     fn config_accounts_keep_known_kinds_and_expand_folders() {
         let config = serde_json::json!({"accounts": [
             {"id": "claude-work", "kind": "claude", "label": "Claude · work", "email": "a@b.c", "dir": null},
             {"id": "claude-me", "kind": "claude", "label": "", "dir": "/x/me"},
-            {"id": "odd", "kind": "gemini"},
+            {"id": "odd", "kind": "not-an-agent"},
             {"kind": "codex"},
         ]});
         let accounts = parse_accounts(&config);

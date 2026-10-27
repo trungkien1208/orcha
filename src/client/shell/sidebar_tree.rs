@@ -642,7 +642,7 @@ pub(crate) fn render_sidebar_tree(
             if !expanded {
                 1
             } else {
-                let branch = workspace.focused && workspace.branch.is_some();
+                let branch = shown_branch(workspace, state.focused_git).is_some();
                 // The last row stays blank to separate the next project.
                 2u16.saturating_add(u16::from(branch))
                     .saturating_add(u16::try_from(project.rows.len()).unwrap_or(u16::MAX))
@@ -702,6 +702,7 @@ pub(crate) fn render_sidebar_tree(
             buffer,
             Rect::new(x, y, row_width, content),
             workspace,
+            shown_branch(workspace, state.focused_git).as_deref(),
             icon,
             project,
             *expanded,
@@ -739,12 +740,31 @@ fn tab_number_width(tab: usize) -> u16 {
     }
 }
 
+/// The branch under the focused project. The right panel's read wins when
+/// there is one: it follows the focused pane, so both sides name the same
+/// checkout. The workspace's own branch (its first pane's folder) is the
+/// fallback while the panel is off or has not read yet.
+fn shown_branch(
+    workspace: &ClientShellWorkspace,
+    git_panel: Option<&super::git_panel::GitPanelData>,
+) -> Option<String> {
+    if !workspace.focused {
+        return None;
+    }
+    match git_panel {
+        Some(data) if data.branch.is_empty() => Some("(no branch)".to_owned()),
+        Some(data) => Some(data.branch.clone()),
+        None => workspace.branch.clone(),
+    }
+}
+
 /// Project row with an optional branch and its panes as a tree grouped by tab.
 #[allow(clippy::too_many_arguments)] // Render inputs are independent view facts.
 fn render_project(
     buffer: &mut Buffer,
     rect: Rect,
     workspace: &ClientShellWorkspace,
+    branch: Option<&str>,
     icon: Option<&str>,
     project: &ProjectRows<'_>,
     expanded: bool,
@@ -868,7 +888,7 @@ fn render_project(
         return;
     }
     let mut y = rect.y + 1;
-    if let Some(branch) = workspace.branch.as_deref().filter(|_| workspace.focused) {
+    if let Some(branch) = branch {
         if y < rect.bottom() {
             put_text(
                 buffer,

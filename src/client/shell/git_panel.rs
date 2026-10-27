@@ -61,6 +61,12 @@ pub(super) struct GitPanelPoller {
     /// The refs fingerprint `data`'s history and worktrees belong to.
     refs_key: Option<String>,
     pending: Option<Receiver<GitRead>>,
+    /// The folders the pending read and `data` were read at.
+    pending_cwd: Option<String>,
+    data_cwd: Option<String>,
+    /// The focused workspace's branch as the server last reported it; a
+    /// change (a checkout) makes the next read due now.
+    server_branch: Option<String>,
     next_refresh: Option<Instant>,
     /// Time to the next read; doubles while reads find nothing new.
     interval: Duration,
@@ -69,6 +75,26 @@ pub(super) struct GitPanelPoller {
 impl GitPanelPoller {
     pub(super) fn data(&self) -> Option<&GitPanelData> {
         self.data.as_ref()
+    }
+
+    /// `data`, only once it was read at the folder the panel follows now.
+    pub(super) fn current(&self) -> Option<&GitPanelData> {
+        self.data
+            .as_ref()
+            .filter(|_| self.data_cwd.is_some() && self.data_cwd == self.cwd)
+    }
+
+    /// The server's branch for the focused workspace moved: read again now
+    /// instead of waiting out the idle interval.
+    pub(super) fn nudge(&mut self, server_branch: Option<&str>) {
+        if server_branch == self.server_branch.as_deref() {
+            return;
+        }
+        let first = self.server_branch.is_none();
+        self.server_branch = server_branch.map(str::to_owned);
+        if !first {
+            self.next_refresh = None;
+        }
     }
 
     #[cfg(test)]
@@ -84,6 +110,7 @@ impl GitPanelPoller {
             match rx.try_recv() {
                 Ok(read) => {
                     self.pending = None;
+                    self.data_cwd = self.pending_cwd.take();
                     let (data, key) = match read {
                         Some((data, key)) => (Some(data), Some(key)),
                         None => (None, None),
@@ -96,7 +123,10 @@ impl GitPanelPoller {
                     self.interval = next_interval(self.interval, changed);
                     self.next_refresh = Some(now + self.interval);
                 }
-                Err(TryRecvError::Disconnected) => self.pending = None,
+                Err(TryRecvError::Disconnected) => {
+                    self.pending = None;
+                    self.pending_cwd = None;
+                }
                 Err(TryRecvError::Empty) => {}
             }
         }
@@ -119,6 +149,7 @@ impl GitPanelPoller {
                 });
                 if spawned.is_ok() {
                     self.pending = Some(rx);
+                    self.pending_cwd = self.cwd.clone();
                 }
             }
             self.next_refresh = Some(now + self.interval.max(REFRESH));
@@ -132,6 +163,15 @@ impl ClientShellState {
     /// folder (Local endpoint only; a remote pane's path is not on this disk).
     pub(crate) fn tick_git_panel(&mut self, now: Instant) -> bool {
         let wanted = self.config.right_panel && self.active_endpoint_id == ClientEndpointId::Local;
+        let server_branch = self.snapshot.as_deref().and_then(|snapshot| {
+            snapshot
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.focused)?
+                .branch
+                .as_deref()
+        });
+        self.git_panel.nudge(server_branch);
         let cwd = wanted
             .then(|| {
                 let snapshot = self.snapshot.as_deref()?;
@@ -140,7 +180,20 @@ impl ClientShellState {
                 pane.foreground_cwd.clone().or_else(|| pane.cwd.clone())
             })
             .flatten();
-        self.git_panel.tick(cwd.as_deref(), now)
+        let mut changed = self.git_panel.tick(cwd.as_deref(), now);
+        // FILES follows the repository, or the folder itself outside one
+        let root = self
+            .git_panel
+            .current()
+            .map(|data| std::path::PathBuf::from(&data.root))
+            .or_else(|| cwd.as_deref().map(std::path::PathBuf::from));
+        changed |= self
+            .file_tree
+            .tick(root.as_deref(), wanted && self.orcha_ui.files_open, now);
+        if let Some(view) = self.orcha_ui.file_view.as_mut() {
+            changed |= view.poll();
+        }
+        changed
     }
 
     /// Called from the client timer: refreshes the accounts' fuel and moves
@@ -162,6 +215,10 @@ impl ClientShellState {
             self.update_low_fuel_hint();
         }
         repaint |= self.poll_import_scan();
+        if !self.orcha_ui.account_scan_started {
+            self.start_account_scan(false);
+        }
+        repaint |= self.poll_account_scan();
         repaint |= self.poll_handoff();
         repaint |= self.poll_account_action();
         repaint |= self.poll_update();
@@ -531,6 +588,8 @@ enum Row<'a> {
     History(&'a HistoryLine),
     Worktree(&'a str, bool),
     NewWorktree,
+    /// A FILES row and its index in the tree.
+    Tree(&'a super::file_tree::TreeRow, usize),
 }
 
 #[derive(Clone, Copy)]
@@ -543,6 +602,7 @@ enum Slot {
     PullRequest,
     History,
     Worktrees,
+    Files,
 }
 
 fn hit_slot(hits: &mut ShellHitMap, slot: Slot, rect: Rect) {
@@ -555,6 +615,7 @@ fn hit_slot(hits: &mut ShellHitMap, slot: Slot, rect: Rect) {
         Slot::PullRequest => &mut hits.orcha.pull_request,
         Slot::History => &mut hits.orcha.history_toggle,
         Slot::Worktrees => &mut hits.orcha.worktrees_toggle,
+        Slot::Files => &mut hits.orcha.files_toggle,
     };
     *target = rect;
 }
@@ -566,6 +627,7 @@ pub(super) fn render_git_panel(
     buffer: &mut Buffer,
     area: Rect,
     data: Option<&GitPanelData>,
+    tree: &[super::file_tree::TreeRow],
     fuel: Option<&super::accounts::Account>,
     config: &ClientShellConfig,
     ui: &super::OrchaUiState,
@@ -600,8 +662,11 @@ pub(super) fn render_git_panel(
             }
         }
         if account.windows.is_empty() {
-            let note = account.error.clone().unwrap_or_else(|| "no data".into());
-            rows.push(Row::Note(note, t.red));
+            // agents without usage numbers have no error, just nothing to show
+            match account.error.clone() {
+                Some(error) => rows.push(Row::Note(error, t.red)),
+                None => rows.push(Row::Note("no usage numbers".into(), t.muted)),
+            }
         }
     }
     section(&mut rows);
@@ -609,6 +674,7 @@ pub(super) fn render_git_panel(
         rows.push(Row::Title("BRANCH".into(), String::new(), None));
         rows.push(Row::Note("not a git repository".into(), t.muted));
         rows.push(Row::Blank);
+        push_files(&mut rows, area, tree, ui, &t, hits);
         draw_rows(buffer, area, &rows, config, &t, hits);
         return;
     };
@@ -648,7 +714,12 @@ pub(super) fn render_git_panel(
             data.worktrees.len().min(6) + 1
         } else {
             0
-        };
+        } + 2
+            + if ui.files_open {
+                tree.len().clamp(1, FILES_ROWS)
+            } else {
+                0
+            };
     let room =
         usize::from(area.height).saturating_sub(rows.len() + tail + 2 + usize::from(arrived) * 2);
     let shown = data.files.len().min(room.max(1));
@@ -703,7 +774,52 @@ pub(super) fn render_git_panel(
         );
         rows.push(Row::NewWorktree);
     }
+    push_files(&mut rows, area, tree, ui, &t, hits);
     draw_rows(buffer, area, &rows, config, &t, hits);
+}
+
+/// Tree rows FILES keeps room for when the panel is crowded.
+const FILES_ROWS: usize = 14;
+
+/// FILES, last in the panel: the tree fills what the box has left.
+fn push_files<'a>(
+    rows: &mut Vec<Row<'a>>,
+    area: Rect,
+    tree: &'a [super::file_tree::TreeRow],
+    ui: &super::OrchaUiState,
+    t: &Brutal,
+    hits: &mut ShellHitMap,
+) {
+    if !rows.is_empty() {
+        rows.push(Row::Rule);
+    }
+    let arrow = if ui.files_open { "▾" } else { "▸" };
+    rows.push(Row::Title(
+        format!("{arrow} FILES"),
+        String::new(),
+        Some(Slot::Files),
+    ));
+    if !ui.files_open {
+        return;
+    }
+    if tree.is_empty() {
+        rows.push(Row::Note("reading…".into(), t.muted));
+        return;
+    }
+    // the box's two lines, and the rows already in it
+    let room = usize::from(area.height)
+        .saturating_sub(rows.len() + 2)
+        .max(1);
+    let shown = tree.len().min(room);
+    hits.orcha.files_max_scroll = tree.len() - shown;
+    let start = ui.files_scroll.min(hits.orcha.files_max_scroll);
+    rows.extend(
+        tree.iter()
+            .enumerate()
+            .skip(start)
+            .take(shown)
+            .map(|(index, row)| Row::Tree(row, index)),
+    );
 }
 
 fn draw_rows(
@@ -943,6 +1059,30 @@ fn draw_rows(
                     style,
                 );
             }
+            Row::Tree(row, index) => {
+                let indent = (row.depth * 2).min(w / 2);
+                let (mark, style) = if row.is_dir {
+                    (
+                        if row.open { "▾ " } else { "▸ " },
+                        Style::default()
+                            .fg(t.ink)
+                            .bg(t.card)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    ("  ", Style::default().fg(t.ink).bg(t.card))
+                };
+                let slash = if row.is_dir { "/" } else { "" };
+                let text = format!("{}{mark}{}{slash}", " ".repeat(indent), row.name);
+                put_text(buffer, x, y, inner_width, &clip_right(&text, w), style);
+                let row_rect = Rect::new(rect.x + 1, y, rect.width.saturating_sub(2), 1);
+                hits.orcha.file_rows.push((row_rect, *index));
+                hits.orcha.files_area = if hits.orcha.files_area.is_empty() {
+                    row_rect
+                } else {
+                    hits.orcha.files_area.union(row_rect)
+                };
+            }
             Row::NewWorktree => {
                 // an outlined button on the paper, like the mockup's dashed one
                 let button = Rect::new(x, y, inner_width, 1);
@@ -967,6 +1107,38 @@ mod tests {
         }
         assert_eq!(interval, super::REFRESH_IDLE);
         assert_eq!(super::next_interval(interval, true), super::REFRESH);
+    }
+
+    #[test]
+    fn data_read_at_another_folder_is_not_current() {
+        let mut poller = super::GitPanelPoller {
+            data: Some(super::GitPanelData {
+                branch: "main".into(),
+                ..Default::default()
+            }),
+            data_cwd: Some("/a".into()),
+            cwd: Some("/a".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            poller.current().map(|data| data.branch.as_str()),
+            Some("main")
+        );
+        poller.cwd = Some("/b".into());
+        assert!(poller.current().is_none());
+        assert!(poller.data().is_some());
+    }
+
+    #[test]
+    fn a_server_branch_change_makes_the_next_read_due() {
+        let mut poller = super::GitPanelPoller::default();
+        let later = std::time::Instant::now() + super::REFRESH_IDLE;
+        poller.nudge(Some("main"));
+        poller.next_refresh = Some(later);
+        poller.nudge(Some("main"));
+        assert_eq!(poller.next_refresh, Some(later));
+        poller.nudge(Some("feature"));
+        assert!(poller.next_refresh.is_none());
     }
 
     #[test]

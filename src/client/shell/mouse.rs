@@ -1908,6 +1908,24 @@ impl ClientShellState {
                     outcome,
                 );
             }
+            MouseEventKind::ScrollUp if super::contains(self.hits.orcha.files_area, point) => {
+                let next = self.orcha_ui.files_scroll.saturating_sub(1);
+                if next != self.orcha_ui.files_scroll {
+                    self.orcha_ui.files_scroll = next;
+                    outcome.repaint = true;
+                }
+            }
+            MouseEventKind::ScrollDown if super::contains(self.hits.orcha.files_area, point) => {
+                let next = self
+                    .orcha_ui
+                    .files_scroll
+                    .saturating_add(1)
+                    .min(self.hits.orcha.files_max_scroll);
+                if next != self.orcha_ui.files_scroll {
+                    self.orcha_ui.files_scroll = next;
+                    outcome.repaint = true;
+                }
+            }
             MouseEventKind::ScrollUp if super::contains(self.hits.agent_body, point) => {
                 let next = self.agent_scroll.saturating_sub(1);
                 if next != self.agent_scroll {

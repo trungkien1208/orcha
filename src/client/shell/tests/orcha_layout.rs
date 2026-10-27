@@ -147,6 +147,105 @@ fn folds_open_from_the_panel() {
 }
 
 #[test]
+fn files_open_folders_and_show_a_file() {
+    let root = std::env::temp_dir().join(format!("orcha-files-panel-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(root.join("src/main.rs"), "fn main() {}\n").expect("write main");
+    let mut state = orcha_state(true, true);
+    state.orcha_ui.files_open = true;
+    let mut listings = std::collections::HashMap::new();
+    listings.insert(
+        root.clone(),
+        vec![crate::client::shell::file_tree::Entry {
+            name: "src".into(),
+            is_dir: true,
+        }],
+    );
+    listings.insert(
+        root.join("src"),
+        vec![crate::client::shell::file_tree::Entry {
+            name: "main.rs".into(),
+            is_dir: false,
+        }],
+    );
+    state.file_tree.set_for_test(&root, listings, &[]);
+    let frame = state.compose(140, 40).expect("frame");
+    let all = frame_rows(&frame).join("\n");
+    assert!(all.contains("FILES") && all.contains("▸ src/"));
+
+    let mut outcome = ClientShellInput::default();
+    let (rect, _) = state.hits.orcha.file_rows[0];
+    assert!(state.handle_orcha_click((rect.x, rect.y), &mut outcome));
+    let frame = state.compose(140, 40).expect("frame");
+    assert!(frame_rows(&frame).join("\n").contains("main.rs"));
+
+    let (rect, _) = state.hits.orcha.file_rows[1];
+    assert!(state.handle_orcha_click((rect.x, rect.y), &mut outcome));
+    assert!(matches!(
+        state.orcha_ui.popup.as_ref(),
+        Some(crate::client::shell::orcha_popup::OrchaPopup::FileView { .. })
+    ));
+    let view = state.orcha_ui.file_view.as_mut().expect("file view");
+    while !view.poll() {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let frame = state.compose(140, 40).expect("frame");
+    assert!(frame_rows(&frame).join("\n").contains("fn main()"));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn found_accounts_wait_for_a_free_screen_then_offer_a_checked_list() {
+    let mut state = orcha_state(true, true);
+    state.orcha_ui.account_scan_started = true;
+    state.orcha_ui.found_accounts = vec![
+        crate::orcha_accounts::FoundAccount {
+            kind: "claude".into(),
+            dir: Some("/home/me/.claude-work".into()),
+            email: "w@x.io".into(),
+            name: "work".into(),
+            signed_in: true,
+        },
+        crate::orcha_accounts::FoundAccount {
+            kind: "gemini".into(),
+            dir: None,
+            email: "me@x.io".into(),
+            name: "Gemini".into(),
+            signed_in: false,
+        },
+    ];
+    state.orcha_ui.popup = Some(crate::client::shell::orcha_popup::OrchaPopup::WhatsNew {
+        release: crate::orcha_app::Release {
+            version: "1.0.0".into(),
+            notes: Vec::new(),
+        },
+    });
+    assert!(!state.poll_account_scan(), "another popup is open");
+    state.orcha_ui.popup = None;
+    assert!(state.poll_account_scan());
+    let frame = state.compose(140, 40).expect("frame");
+    let all = frame_rows(&frame).join("\n");
+    assert!(all.contains("FOUND ACCOUNTS") && all.contains("IMPORT 2"));
+    assert!(all.contains("Claude · work") && all.contains("/home/me/.claude-work"));
+    assert!(all.contains("Gemini  me@x.io") && all.contains("installed · sign in"));
+
+    let mut outcome = ClientShellInput::default();
+    state.route_orcha_popup_key(
+        &crate::input::TerminalKey::new(
+            crossterm::event::KeyCode::Char(' '),
+            crossterm::event::KeyModifiers::NONE,
+        ),
+        &mut outcome,
+    );
+    assert!(matches!(
+        state.orcha_ui.popup.as_ref(),
+        Some(crate::client::shell::orcha_popup::OrchaPopup::FoundAccounts { chosen, .. })
+            if chosen == &[false, true]
+    ));
+}
+
+#[test]
 fn new_button_offers_current_project_or_another_folder() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 

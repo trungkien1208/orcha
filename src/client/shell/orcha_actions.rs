@@ -300,6 +300,22 @@ impl ClientShellState {
             outcome.repaint = true;
             return true;
         }
+        if let Some(index) = hits
+            .file_rows
+            .iter()
+            .find(|(rect, _)| super::contains(*rect, point))
+            .map(|(_, index)| *index)
+        {
+            self.click_file_row(index);
+            outcome.repaint = true;
+            return true;
+        }
+        if super::contains(hits.files_toggle, point) {
+            self.orcha_ui.files_open = !self.orcha_ui.files_open;
+            self.orcha_ui.files_scroll = 0;
+            outcome.repaint = true;
+            return true;
+        }
         if super::contains(hits.new_worktree, point) {
             self.record_binding(
                 crate::input::KeybindMatch::Action(crate::input::KeybindAction::NewWorktree),
@@ -424,6 +440,11 @@ enum AccountAction {
     Remove {
         id: String,
     },
+    /// Adds the found accounts in `chosen`; `dismissed` are not asked again.
+    Import {
+        chosen: Vec<crate::orcha_accounts::FoundAccount>,
+        dismissed: Vec<crate::orcha_accounts::FoundAccount>,
+    },
     NewAgent {
         id: String,
         workspace: String,
@@ -449,6 +470,13 @@ impl AccountAction {
             Self::Add { name, pane } => accounts::add(&name, pane.as_deref())
                 .map(|id| format!("{id} added: sign in in the new pane")),
             Self::Remove { id } => accounts::remove(&id).map(|()| format!("{id} removed")),
+            Self::Import { chosen, dismissed } => {
+                accounts::import_found(&chosen, &dismissed).map(|added| match added.len() {
+                    0 => "found accounts: not asking again".to_owned(),
+                    1 => format!("{} added to FUEL", added[0]),
+                    n => format!("{n} accounts added to FUEL"),
+                })
+            }
             Self::NewAgent { id, workspace, cwd } => {
                 accounts::new_agent(&id, &workspace, &cwd).map(|()| format!("{id} started"))
             }
@@ -669,9 +697,14 @@ impl ClientShellState {
                 super::orcha_popup::NEW_WORKSPACE_ROWS
             }
             Some(super::orcha_popup::OrchaPopup::OpenWith { choices, .. }) => choices.len(),
+            Some(super::orcha_popup::OrchaPopup::FoundAccounts { chosen, .. }) => chosen.len(),
             Some(super::orcha_popup::OrchaPopup::Update { .. }) => 3,
             Some(super::orcha_popup::OrchaPopup::WhatsNew { .. }) => 1,
-            Some(super::orcha_popup::OrchaPopup::Welcome(_)) | None => 0,
+            Some(
+                super::orcha_popup::OrchaPopup::Welcome(_)
+                | super::orcha_popup::OrchaPopup::FileView { .. },
+            )
+            | None => 0,
         }
     }
 
@@ -686,13 +719,15 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::NewAgent { selected, .. }
                 | super::orcha_popup::OrchaPopup::NewWorkspace { selected, .. }
                 | super::orcha_popup::OrchaPopup::OpenWith { selected, .. }
+                | super::orcha_popup::OrchaPopup::FoundAccounts { selected, .. }
                 | super::orcha_popup::OrchaPopup::Update { selected, .. }
                 | super::orcha_popup::OrchaPopup::Palette { selected, .. }
                 | super::orcha_popup::OrchaPopup::Import { selected, .. },
             ) => *selected = index,
             Some(
                 super::orcha_popup::OrchaPopup::WhatsNew { .. }
-                | super::orcha_popup::OrchaPopup::Broadcast { .. },
+                | super::orcha_popup::OrchaPopup::Broadcast { .. }
+                | super::orcha_popup::OrchaPopup::FileView { .. },
             ) => {}
             Some(super::orcha_popup::OrchaPopup::Welcome(welcome)) => welcome.selected = index,
             None => {}
@@ -710,13 +745,15 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::NewAgent { selected, .. }
                 | super::orcha_popup::OrchaPopup::NewWorkspace { selected, .. }
                 | super::orcha_popup::OrchaPopup::OpenWith { selected, .. }
+                | super::orcha_popup::OrchaPopup::FoundAccounts { selected, .. }
                 | super::orcha_popup::OrchaPopup::Update { selected, .. }
                 | super::orcha_popup::OrchaPopup::Palette { selected, .. }
                 | super::orcha_popup::OrchaPopup::Import { selected, .. },
             ) => *selected,
             Some(
                 super::orcha_popup::OrchaPopup::WhatsNew { .. }
-                | super::orcha_popup::OrchaPopup::Broadcast { .. },
+                | super::orcha_popup::OrchaPopup::Broadcast { .. }
+                | super::orcha_popup::OrchaPopup::FileView { .. },
             ) => 0,
             Some(super::orcha_popup::OrchaPopup::Welcome(welcome)) => welcome.selected,
             None => 0,
@@ -770,8 +807,9 @@ impl ClientShellState {
         };
         let orcha = self.config.orcha.clone();
         match popup {
-            // the setup handles its own keys and clicks
-            super::orcha_popup::OrchaPopup::Welcome(_) => return,
+            // the setup and the file view handle their own keys and clicks
+            super::orcha_popup::OrchaPopup::Welcome(_)
+            | super::orcha_popup::OrchaPopup::FileView { .. } => return,
             super::orcha_popup::OrchaPopup::WhatsNew { .. } => {
                 self.orcha_ui.popup = None;
                 return;
@@ -853,6 +891,13 @@ impl ClientShellState {
                 return;
             }
             // a check flips; the button past the rows imports
+            super::orcha_popup::OrchaPopup::FoundAccounts { chosen, .. } => {
+                if index >= chosen.len() {
+                    self.import_found_accounts();
+                } else {
+                    self.toggle_found_account(index);
+                }
+            }
             super::orcha_popup::OrchaPopup::Import { .. } => {
                 if index >= self.orcha_ui.import_sources.len() {
                     self.import_chosen(outcome);
@@ -1158,9 +1203,36 @@ impl ClientShellState {
             self.route_project_icon_key(key, outcome);
             return;
         }
+        if matches!(
+            self.orcha_ui.popup,
+            Some(super::orcha_popup::OrchaPopup::FileView { .. })
+        ) {
+            self.route_file_view_key(key, outcome);
+            return;
+        }
         outcome.repaint = true;
         let len = self.popup_len();
         let selected = self.popup_selected();
+        if matches!(
+            self.orcha_ui.popup,
+            Some(super::orcha_popup::OrchaPopup::FoundAccounts { .. })
+        ) {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.dismiss_found_accounts();
+                    return;
+                }
+                KeyCode::Char(' ') => {
+                    self.toggle_found_account(selected);
+                    return;
+                }
+                KeyCode::Enter => {
+                    self.import_found_accounts();
+                    return;
+                }
+                _ => {}
+            }
+        }
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => self.orcha_ui.popup = None,
             KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab if len > 0 => {
@@ -1225,6 +1297,14 @@ impl ClientShellState {
             {
                 self.refresh_fuel();
             }
+            KeyCode::Char('i') | KeyCode::Char('I')
+                if matches!(
+                    self.orcha_ui.popup,
+                    Some(super::orcha_popup::OrchaPopup::Accounts { .. })
+                ) =>
+            {
+                self.start_account_scan(true);
+            }
             KeyCode::Char('d') | KeyCode::Delete
                 if matches!(
                     self.orcha_ui.popup,
@@ -1252,6 +1332,23 @@ impl ClientShellState {
             self.handle_welcome_mouse(mouse, outcome);
             return;
         }
+        if matches!(
+            self.orcha_ui.popup,
+            Some(super::orcha_popup::OrchaPopup::FileView { .. })
+        ) {
+            let lines = match mouse.kind {
+                MouseEventKind::ScrollUp => -3,
+                MouseEventKind::ScrollDown => 3,
+                _ => 0,
+            };
+            if lines != 0 {
+                if let Some(view) = self.orcha_ui.file_view.as_mut() {
+                    view.scroll_by(lines);
+                    outcome.repaint = true;
+                }
+                return;
+            }
+        }
         if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
             return;
         }
@@ -1259,7 +1356,15 @@ impl ClientShellState {
         let hits = self.hits.orcha.popup.clone();
         outcome.repaint = true;
         if super::contains(hits.close, point) || !super::contains(hits.area, point) {
+            if matches!(
+                self.orcha_ui.popup,
+                Some(super::orcha_popup::OrchaPopup::FoundAccounts { .. })
+            ) {
+                self.dismiss_found_accounts();
+                return;
+            }
             self.orcha_ui.popup = None;
+            self.orcha_ui.file_view = None;
             return;
         }
         if super::contains(hits.extra, point)
@@ -1423,11 +1528,18 @@ impl ClientShellState {
                 }
             }
         }
+        self.open_existing_path(&path, line);
+        true
+    }
+
+    /// Opens a file or folder that exists: a folder in the file manager, a
+    /// file in the app kept for its type, else the OPEN WITH choices.
+    pub(super) fn open_existing_path(&mut self, path: &std::path::Path, line: Option<u32>) {
         let shown = path.to_string_lossy().into_owned();
         let line = line.unwrap_or(1);
         if path.is_dir() {
             open_orcha_target(crate::platform::OrchaOpenTarget::SystemDefault, &shown, 1);
-            return true;
+            return;
         }
         let extension = path
             .extension()
@@ -1444,9 +1556,9 @@ impl ClientShellState {
             .and_then(|value| super::orcha_popup::OpenChoice::from_config_value(value))
         {
             open_with_choice(&choice, &shown, line);
-            return true;
+            return;
         }
-        let choices = open_choices(&path, &self.config.orcha.ide);
+        let choices = open_choices(path, &self.config.orcha.ide);
         self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::OpenWith {
             selected: 0,
             path: shown,
@@ -1455,7 +1567,59 @@ impl ClientShellState {
             choices,
             remember: true,
         });
-        true
+    }
+
+    /// FILES: a folder opens or closes, a file shows in the FILE popup.
+    fn click_file_row(&mut self, index: usize) {
+        let Some(row) = self.file_tree.rows().get(index).cloned() else {
+            return;
+        };
+        if row.is_dir {
+            self.file_tree.toggle(&row.path);
+            return;
+        }
+        let root = self.file_tree.root().map(std::path::Path::to_path_buf);
+        self.orcha_ui.file_view = Some(super::file_viewer::FileView::open(row.path.clone(), root));
+        self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::FileView {
+            path: row.path.to_string_lossy().into_owned(),
+        });
+    }
+
+    /// Keys in the FILE popup: scroll, o opens the file in another app,
+    /// esc closes.
+    fn route_file_view_key(
+        &mut self,
+        key: &crate::input::TerminalKey,
+        outcome: &mut ClientShellInput,
+    ) {
+        use crossterm::event::KeyCode;
+        outcome.repaint = true;
+        if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
+            self.orcha_ui.popup = None;
+            self.orcha_ui.file_view = None;
+            return;
+        }
+        if matches!(key.code, KeyCode::Char('o') | KeyCode::Char('O')) {
+            let Some(view) = self.orcha_ui.file_view.take() else {
+                return;
+            };
+            self.orcha_ui.popup = None;
+            self.open_existing_path(&view.path, None);
+            return;
+        }
+        let Some(view) = self.orcha_ui.file_view.as_mut() else {
+            return;
+        };
+        let page = view.page();
+        match key.code {
+            KeyCode::Down | KeyCode::Char('j') => view.scroll_by(1),
+            KeyCode::Up | KeyCode::Char('k') => view.scroll_by(-1),
+            KeyCode::PageDown | KeyCode::Char(' ') | KeyCode::Char('f') => view.scroll_by(page),
+            KeyCode::PageUp | KeyCode::Char('b') => view.scroll_by(-page),
+            KeyCode::Home | KeyCode::Char('g') => view.scroll = 0,
+            KeyCode::End | KeyCode::Char('G') => view.scroll_to_end(),
+            _ => {}
+        }
     }
 
     fn toggle_open_with_remember(&mut self) {
@@ -1508,6 +1672,98 @@ impl ClientShellState {
             return None;
         }
         find_file_named(&root, printed)
+    }
+
+    /// Looks for Claude sign-ins orcha does not list, off the input path.
+    /// `asked`: from the menu (says when there is none, and offers the ones
+    /// dismissed before too); otherwise the quiet look once per start.
+    pub(super) fn start_account_scan(&mut self, asked: bool) {
+        self.orcha_ui.account_scan_started = true;
+        if self.orcha_ui.account_scan.is_some() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let spawned = crate::thread_spawn::spawn_named("orcha-account-scan", move || {
+            let _ = tx.send(crate::orcha_accounts::find_unlisted(asked));
+        });
+        if spawned.is_ok() {
+            self.orcha_ui.account_scan = Some((rx, asked));
+        }
+    }
+
+    /// Collects the account look and offers what it found once the screen
+    /// is free of other popups. Returns true when the screen changed.
+    pub(super) fn poll_account_scan(&mut self) -> bool {
+        let mut changed = false;
+        if let Some((rx, asked)) = &self.orcha_ui.account_scan {
+            let asked = *asked;
+            match rx.try_recv() {
+                Ok(found) => {
+                    self.orcha_ui.account_scan = None;
+                    if found.is_empty() && asked {
+                        self.show_notice("no other signed-in accounts found".to_owned());
+                        changed = true;
+                    }
+                    if asked && !found.is_empty() {
+                        // asked from the accounts popup: this replaces it
+                        self.orcha_ui.popup = None;
+                    }
+                    self.orcha_ui.found_accounts = found;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.orcha_ui.account_scan = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if !self.orcha_ui.found_accounts.is_empty()
+            && self.orcha_ui.popup.is_none()
+            && self.overlay.is_none()
+        {
+            self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::FoundAccounts {
+                selected: 0,
+                chosen: vec![true; self.orcha_ui.found_accounts.len()],
+            });
+            changed = true;
+        }
+        changed
+    }
+
+    fn toggle_found_account(&mut self, index: usize) {
+        if let Some(super::orcha_popup::OrchaPopup::FoundAccounts { chosen, .. }) =
+            self.orcha_ui.popup.as_mut()
+        {
+            if let Some(on) = chosen.get_mut(index) {
+                *on = !*on;
+            }
+        }
+    }
+
+    /// IMPORT: adds the checked accounts; the unchecked ones are not
+    /// offered again.
+    fn import_found_accounts(&mut self) {
+        let Some(super::orcha_popup::OrchaPopup::FoundAccounts { chosen, .. }) =
+            self.orcha_ui.popup.take()
+        else {
+            return;
+        };
+        let found = std::mem::take(&mut self.orcha_ui.found_accounts);
+        let (chosen, dismissed): (Vec<_>, Vec<_>) =
+            found.into_iter().zip(chosen).partition(|(_, on)| *on);
+        self.start_account_action(AccountAction::Import {
+            chosen: chosen.into_iter().map(|(account, _)| account).collect(),
+            dismissed: dismissed.into_iter().map(|(account, _)| account).collect(),
+        });
+    }
+
+    /// Not now: none of the found accounts is offered again by itself.
+    fn dismiss_found_accounts(&mut self) {
+        self.orcha_ui.popup = None;
+        let dismissed = std::mem::take(&mut self.orcha_ui.found_accounts);
+        self.start_account_action(AccountAction::Import {
+            chosen: Vec::new(),
+            dismissed,
+        });
     }
 
     /// Looks for projects to import off the input path; the popup opens

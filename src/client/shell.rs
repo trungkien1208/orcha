@@ -16,6 +16,8 @@ mod endpoint_navigation;
 mod endpoint_notices;
 mod endpoint_sidebar;
 mod endpoints;
+mod file_tree;
+mod file_viewer;
 pub(super) use endpoints::*;
 mod accounts;
 mod brutal;

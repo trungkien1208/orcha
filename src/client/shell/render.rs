@@ -231,6 +231,10 @@ pub(super) fn render_mode_bar(
 
 pub(super) struct ShellRenderState<'a> {
     pub(super) git_panel: Option<&'a super::git_panel::GitPanelData>,
+    /// `git_panel`, only when it was read at the focused pane's folder.
+    pub(super) focused_git: Option<&'a super::git_panel::GitPanelData>,
+    /// FILES: the tree's visible rows.
+    pub(super) file_tree: &'a [super::file_tree::TreeRow],
     pub(super) orcha_ui: &'a super::OrchaUiState,
     /// orcha: the focused agent's account, for the FUEL gauges.
     pub(super) fuel: Option<&'a super::accounts::Account>,
@@ -399,6 +403,7 @@ pub(super) fn render_shell(
             buffer,
             panel,
             state.git_panel,
+            state.file_tree,
             state.fuel,
             config,
             state.orcha_ui,

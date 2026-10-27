@@ -57,6 +57,8 @@ impl ClientShellState {
         let mut render_state = render::ShellRenderState {
             machine_diagnostics: &self.machine_diagnostics,
             git_panel: self.git_panel.data(),
+            focused_git: self.git_panel.current(),
+            file_tree: self.file_tree.rows(),
             orcha_ui: &self.orcha_ui,
             fuel: self.accounts.current(),
             endpoints: &self.endpoints,
@@ -216,6 +218,8 @@ impl ClientShellState {
             render::ShellRenderState {
                 machine_diagnostics: &self.machine_diagnostics,
                 git_panel: self.git_panel.data(),
+                focused_git: self.git_panel.current(),
+                file_tree: self.file_tree.rows(),
                 orcha_ui: &self.orcha_ui,
                 fuel: self.accounts.current(),
                 endpoints: &self.endpoints,

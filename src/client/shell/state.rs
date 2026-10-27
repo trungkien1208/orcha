@@ -120,6 +120,12 @@ pub(super) struct OrchaHits {
     pub(super) project_toggles: Vec<(Rect, String)>,
     pub(super) history_toggle: Rect,
     pub(super) worktrees_toggle: Rect,
+    /// FILES: its title, the tree's rows (index into `FileTree::rows`) and
+    /// the area the wheel scrolls.
+    pub(super) files_toggle: Rect,
+    pub(super) file_rows: Vec<(Rect, usize)>,
+    pub(super) files_area: Rect,
+    pub(super) files_max_scroll: usize,
     pub(super) new_worktree: Rect,
     pub(super) ide: Rect,
     pub(super) git_gui: Rect,
@@ -162,6 +168,15 @@ pub(crate) struct OrchaUiState {
     pub(super) imported_folders: HashSet<String>,
     /// What the import popup offers.
     pub(super) import_sources: Vec<crate::orcha_import::ImportSource>,
+    /// Claude sign-ins on this machine orcha does not list, being looked up
+    /// (true when asked for, false for the look once per start).
+    pub(super) account_scan: Option<(
+        std::sync::mpsc::Receiver<Vec<crate::orcha_accounts::FoundAccount>>,
+        bool,
+    )>,
+    pub(super) account_scan_started: bool,
+    /// What FOUND ACCOUNTS offers; kept until the screen is free of popups.
+    pub(super) found_accounts: Vec<crate::orcha_accounts::FoundAccount>,
     /// Projects expanded in the sidebar besides the selected one.
     pub(super) open_projects: HashSet<String>,
     /// Explicitly folded projects, including the currently selected project.
@@ -170,6 +185,11 @@ pub(crate) struct OrchaUiState {
     pub(super) process_folded: bool,
     pub(super) history_open: bool,
     pub(super) worktrees_open: bool,
+    pub(super) files_open: bool,
+    /// First tree row FILES shows.
+    pub(super) files_scroll: usize,
+    /// The file the FILE popup shows.
+    pub(super) file_view: Option<super::file_viewer::FileView>,
     /// Animation frame of the PROCESS trains.
     pub(super) process_frame: u64,
     pub(super) next_process_tick: Option<std::time::Instant>,
@@ -1049,6 +1069,7 @@ pub(crate) struct ClientShellState {
     pub(super) selection_repaint_deadline: Option<std::time::Instant>,
     /// orcha: git facts for the right panel, refreshed in the background.
     pub(super) git_panel: super::git_panel::GitPanelPoller,
+    pub(super) file_tree: super::file_tree::FileTree,
     pub(super) orcha_ui: OrchaUiState,
     /// orcha: accounts and their fuel, refreshed in the background.
     pub(super) accounts: super::accounts::AccountsPoller,
@@ -1227,6 +1248,7 @@ impl ClientShellState {
             last_composed_at: None,
             selection_repaint_deadline: None,
             git_panel: Default::default(),
+            file_tree: Default::default(),
             orcha_ui: Default::default(),
             accounts: Default::default(),
             hits: ShellHitMap::default(),
