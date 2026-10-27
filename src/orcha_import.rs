@@ -165,11 +165,16 @@ fn vscode_recent(db: &Path) -> Vec<(String, String)> {
     if !db.is_file() {
         return Vec::new();
     }
-    let output = std::process::Command::new("sqlite3")
+    let mut command = std::process::Command::new("sqlite3");
+    command
         .arg("-readonly")
         .arg(db)
         .arg("select value from ItemTable where key = 'history.recentlyOpenedPathsList'")
-        .output();
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    // no console window flashing up on Windows
+    crate::platform::configure_background_command(&mut command);
+    let output = command.output();
     match output {
         Ok(output) if output.status.success() => {
             parse_vscode_recent(&String::from_utf8_lossy(&output.stdout))
