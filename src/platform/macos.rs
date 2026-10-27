@@ -340,9 +340,15 @@ pub(crate) fn orcha_secret_read(slot: &super::OrchaSecretSlot) -> Option<String>
     keychain_read(&super::orcha_claude_service(slot))
 }
 
-/// Writes through `security -i`, so the secret (hex encoded) travels on
-/// stdin and never shows in `ps`. The item keeps its account attribute;
-/// a new one gets the default item's.
+/// `security -i` reads its commands into a 4096-byte line buffer: a longer
+/// line runs cut short (writing a truncated secret) and fails after.
+const SECURITY_LINE_MAX: usize = 4000;
+
+/// Writes through `/usr/bin/security`, the app the item's access list
+/// trusts, so Claude keeps reading it without a prompt. The secret (hex
+/// encoded) travels on stdin through `security -i` and never shows in `ps`;
+/// a sign-in too long for its line buffer goes as an argument instead. The
+/// item keeps its account attribute; a new one gets the default item's.
 pub(crate) fn orcha_secret_write(
     slot: &super::OrchaSecretSlot,
     secret: &str,
@@ -350,26 +356,42 @@ pub(crate) fn orcha_secret_write(
 ) -> std::io::Result<()> {
     let service = super::orcha_claude_service(slot);
     let account = keychain_account(&super::orcha_claude_service(account_from));
+    let service = service.replace('"', "");
+    let account = account.replace('"', "");
     let hex: String = secret.bytes().map(|b| format!("{b:02x}")).collect();
-    let script = format!(
-        "add-generic-password -U -s \"{}\" -a \"{}\" -X {hex}\n",
-        service.replace('"', ""),
-        account.replace('"', "")
-    );
-    let mut child = Command::new("security")
-        .arg("-i")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(script.as_bytes())?;
-    }
-    if child.wait()?.success() {
-        Ok(())
+    let script = format!("add-generic-password -U -s \"{service}\" -a \"{account}\" -X {hex}\n");
+    let written = if script.len() <= SECURITY_LINE_MAX {
+        let mut child = Command::new("security")
+            .arg("-i")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(script.as_bytes())?;
+        }
+        child.wait()?.success()
     } else {
-        Err(std::io::Error::other("keychain write failed"))
+        Command::new("security")
+            .args(["add-generic-password", "-U", "-s", &service, "-a", &account])
+            .arg("-X")
+            .arg(&hex)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()?
+            .success()
+    };
+    if !written {
+        return Err(std::io::Error::other("keychain write failed"));
     }
+    // only a sign-in that reads back whole counts as written
+    if keychain_read(&service).as_deref() != Some(secret.trim_end_matches('\n')) {
+        return Err(std::io::Error::other(
+            "keychain write did not keep the sign-in",
+        ));
+    }
+    Ok(())
 }
 
 /// The Cursor CLI's access token (a JWT) from the Keychain.
