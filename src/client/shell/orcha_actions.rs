@@ -340,6 +340,16 @@ impl ClientShellState {
             self.open_project_in(ide);
             return true;
         }
+        if super::contains(hits.branch_toggle, point) {
+            self.orcha_ui.branch_folded = !self.orcha_ui.branch_folded;
+            outcome.repaint = true;
+            return true;
+        }
+        if super::contains(hits.changes_toggle, point) {
+            self.orcha_ui.changes_folded = !self.orcha_ui.changes_folded;
+            outcome.repaint = true;
+            return true;
+        }
         false
     }
 

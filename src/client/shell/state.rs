@@ -118,6 +118,9 @@ pub(super) struct OrchaHits {
     pub(super) fuel_show: Rect,
     /// ▸/▾ of a project: open or fold it without selecting it.
     pub(super) project_toggles: Vec<(Rect, String)>,
+    /// BRANCH and CHANGES titles: fold or open their section.
+    pub(super) branch_toggle: Rect,
+    pub(super) changes_toggle: Rect,
     pub(super) history_toggle: Rect,
     pub(super) worktrees_toggle: Rect,
     /// FILES: its title, the tree's rows (index into `FileTree::rows`) and
@@ -183,6 +186,9 @@ pub(crate) struct OrchaUiState {
     pub(super) folded_projects: HashSet<String>,
     /// PROCESS starts open; a click folds it to one line.
     pub(super) process_folded: bool,
+    /// BRANCH and CHANGES start open; a click on the title folds them.
+    pub(super) branch_folded: bool,
+    pub(super) changes_folded: bool,
     pub(super) history_open: bool,
     pub(super) worktrees_open: bool,
     pub(super) files_open: bool,

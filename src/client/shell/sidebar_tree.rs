@@ -70,7 +70,17 @@ fn running(agent: &ClientShellAgent) -> bool {
     )
 }
 
-fn agent_color(agent: &ClientShellAgent, t: &Brutal) -> Color {
+/// Most urgent first: needs you, working, done, the rest.
+pub(super) fn status_rank(status: AgentStatus) -> u8 {
+    match status {
+        AgentStatus::Blocked => 0,
+        AgentStatus::Working => 1,
+        AgentStatus::Done => 2,
+        _ => 3,
+    }
+}
+
+pub(super) fn agent_color(agent: &ClientShellAgent, t: &Brutal) -> Color {
     match agent.agent_status {
         AgentStatus::Blocked => t.red,
         AgentStatus::Working => {

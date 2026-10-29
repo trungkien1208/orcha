@@ -61,8 +61,16 @@ fn orcha_state(right_panel: bool, status_bar: bool) -> ClientShellState {
             ("D".into(), "old.js".into()),
         ],
         worktrees: vec![
-            ("main".into(), false),
-            ("feature/42-dark-menu".into(), true),
+            crate::client::shell::git_panel::Worktree {
+                name: "main".into(),
+                path: "/tmp/herdr-repo".into(),
+                current: false,
+            },
+            crate::client::shell::git_panel::Worktree {
+                name: "feature/42-dark-menu".into(),
+                path: "/tmp/herdr-worktrees/repo/feature-42".into(),
+                current: true,
+            },
         ],
         insertions: 26,
         deletions: 4,
@@ -965,14 +973,37 @@ fn orcha_preview() {
             ("D".into(), "old.js".into()),
         ],
         worktrees: vec![
-            ("main".into(), false),
-            ("feature/42-dark-menu".into(), true),
+            crate::client::shell::git_panel::Worktree {
+                name: "main".into(),
+                path: "/tmp/herdr-repo".into(),
+                current: false,
+            },
+            crate::client::shell::git_panel::Worktree {
+                name: "feature/42-dark-menu".into(),
+                path: "/repo".into(),
+                current: true,
+            },
+            crate::client::shell::git_panel::Worktree {
+                name: "fix/7-amex".into(),
+                path: "/repo-amex".into(),
+                current: false,
+            },
         ],
         insertions: 26,
         deletions: 4,
         last_commit: Some(("dark mode toggle".into(), "2 minutes ago".into())),
         history: demo_history(),
     }));
+    // the explain chat works in the amex checkout
+    if let Some(mut projected) = state.snapshot.as_deref().cloned() {
+        let mut amex = projected.panes[0].clone();
+        amex.pane_id = "pane_2".into();
+        amex.focused = false;
+        amex.foreground_cwd = Some("/repo-amex/src".into());
+        projected.panes.retain(|pane| pane.pane_id != "pane_2");
+        projected.panes.push(amex);
+        state.set_snapshot(Box::new(projected));
+    }
     let frame = state.compose(cols, rows).expect("frame");
     let cells: Vec<serde_json::Value> = frame
         .cells
@@ -1247,4 +1278,75 @@ fn whats_new_shows_once_and_got_it_closes() {
         &mut outcome,
     );
     assert!(state.orcha_ui.popup.is_none());
+}
+
+#[test]
+fn worktrees_show_which_agents_work_in_them() {
+    let mut state = orcha_state(true, true);
+    let mut projected = state.snapshot.as_deref().expect("snapshot").clone();
+    // Claude in a checkout nested under the main one, Codex in the main one
+    projected.panes[0].foreground_cwd = Some("/tmp/herdr-repo/.worktrees/menu/src".into());
+    let mut codex = projected.panes[0].clone();
+    codex.pane_id = "pane_2".into();
+    codex.focused = false;
+    codex.foreground_cwd = Some("/tmp/herdr-repo/".into());
+    projected.panes.push(codex);
+    state.set_snapshot(Box::new(projected));
+    let mut data = state.git_panel.data().expect("git data").clone();
+    data.worktrees[1].path = "/tmp/herdr-repo/.worktrees/menu".into();
+    state.git_panel.set_for_test(Some(data));
+
+    let frame = state.compose(140, 40).expect("frame");
+    let all = frame_rows(&frame).join("\n");
+    assert!(
+        all.contains("agents in 2"),
+        "the folded title says where agents work"
+    );
+
+    state.orcha_ui.worktrees_open = true;
+    let frame = state.compose(140, 40).expect("frame");
+    let rows = frame_rows(&frame);
+    let line = |name: &str| {
+        rows.iter()
+            .find(|row| row.contains(name) && (row.contains('●') || row.contains('○')))
+            .cloned()
+            .unwrap_or_default()
+    };
+    assert!(line("feature/42").contains("Claude"), "{rows:#?}");
+    assert!(!line("feature/42").contains("Codex"));
+    assert!(line("main").contains("Codex"), "{rows:#?}");
+}
+
+#[test]
+fn branch_and_changes_fold_from_their_titles() {
+    let mut state = orcha_state(true, true);
+    state.compose(140, 40).expect("frame");
+    let click = |state: &mut ClientShellState, rect: Rect| {
+        let mut outcome = ClientShellInput::default();
+        assert!(state.handle_orcha_click((rect.x + 1, rect.y), &mut outcome));
+    };
+    // a button inside the section is not the fold
+    let ide = state.hits.orcha.ide;
+    assert!(!ide.is_empty());
+    assert!(!state.hits.orcha.branch_toggle.intersects(ide));
+
+    let branch = state.hits.orcha.branch_toggle;
+    click(&mut state, branch);
+    let frame = state.compose(140, 40).expect("frame");
+    let text = frame_rows(&frame).join("\n");
+    assert!(state.orcha_ui.branch_folded);
+    assert!(text.contains("▸ ⎇ feature/42"), "{text}");
+    assert!(text.contains("↑2 to push"), "folded: the sync stays");
+    assert!(
+        state.hits.orcha.ide.is_empty(),
+        "folded: IDE and Git are gone"
+    );
+
+    assert!(text.contains("theme.ts"));
+    let changes = state.hits.orcha.changes_toggle;
+    click(&mut state, changes);
+    let frame = state.compose(140, 40).expect("frame");
+    let text = frame_rows(&frame).join("\n");
+    assert!(text.contains("▸ CHANGES"));
+    assert!(!text.contains("theme.ts"), "folded: the files are gone");
 }

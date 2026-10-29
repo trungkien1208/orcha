@@ -403,6 +403,7 @@ pub(super) fn render_shell(
             buffer,
             panel,
             state.git_panel,
+            Some(snapshot),
             state.file_tree,
             state.fuel,
             config,

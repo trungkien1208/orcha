@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use super::brutal::{self, Brutal};
 use super::render::{display_width, put_right_text, put_text};
 use super::*;
+use crate::protocol::ClientShellAgent;
 
 const REFRESH: Duration = Duration::from_secs(3);
 /// Unchanged reads stretch the interval up to this.
@@ -31,8 +32,7 @@ pub(super) struct GitPanelData {
     pub behind: usize,
     /// (porcelain status code, path relative to the root)
     pub files: Vec<(String, String)>,
-    /// (branch or detached label, is the focused checkout)
-    pub worktrees: Vec<(String, bool)>,
+    pub worktrees: Vec<Worktree>,
     /// Lines added and removed against HEAD.
     pub insertions: usize,
     pub deletions: usize,
@@ -40,6 +40,16 @@ pub(super) struct GitPanelData {
     pub last_commit: Option<(String, String)>,
     /// `git log --graph` of the local branches, newest first.
     pub history: Vec<HistoryLine>,
+}
+
+/// One checkout of the repository (`git worktree list`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct Worktree {
+    /// Branch, or "<folder> (detached)".
+    pub name: String,
+    pub path: String,
+    /// The focused pane's checkout.
+    pub current: bool,
 }
 
 /// One row of the commit graph: the graph glyphs, then (for a commit row)
@@ -367,13 +377,21 @@ fn read_git(cwd: &Path, previous: Option<(GitPanelData, String)>) -> GitRead {
                 path = p.to_owned();
             } else if let Some(branch) = line.strip_prefix("branch ") {
                 let name = branch.trim_start_matches("refs/heads/").to_owned();
-                data.worktrees.push((name, path == root));
+                data.worktrees.push(Worktree {
+                    name,
+                    current: path == root,
+                    path: path.clone(),
+                });
             } else if line == "detached" {
                 let name = Path::new(&path)
                     .file_name()
                     .map(|n| format!("{} (detached)", n.to_string_lossy()))
                     .unwrap_or_else(|| "(detached)".to_owned());
-                data.worktrees.push((name, path == root));
+                data.worktrees.push(Worktree {
+                    name,
+                    current: path == root,
+                    path: path.clone(),
+                });
             }
         }
     }
@@ -534,6 +552,14 @@ pub(super) fn draw_gauge_wide(
 }
 
 fn title(buffer: &mut Buffer, x: u16, y: u16, width: u16, text: &str, note: &str, t: &Brutal) {
+    // a long title (a folded BRANCH's name) leaves the note room
+    let note_width = display_width(note).min(width / 2);
+    let text_room = if note.is_empty() {
+        usize::from(width)
+    } else {
+        usize::from(width.saturating_sub(note_width + 2))
+    };
+    let text = &clip_right(text, text_room);
     put_text(
         buffer,
         x,
@@ -586,7 +612,8 @@ enum Row<'a> {
     Buttons(Vec<(&'static str, bool, Slot)>),
     File(&'a str, &'a str),
     History(&'a HistoryLine),
-    Worktree(&'a str, bool),
+    /// A checkout and the agents working in it.
+    Worktree(&'a Worktree, Vec<&'a ClientShellAgent>),
     NewWorktree,
     /// A FILES row and its index in the tree.
     Tree(&'a super::file_tree::TreeRow, usize),
@@ -595,6 +622,8 @@ enum Row<'a> {
 #[derive(Clone, Copy)]
 enum Slot {
     Fuel,
+    Branch,
+    Changes,
     Ide,
     GitGui,
     Diff,
@@ -608,6 +637,8 @@ enum Slot {
 fn hit_slot(hits: &mut ShellHitMap, slot: Slot, rect: Rect) {
     let target = match slot {
         Slot::Fuel => &mut hits.orcha.fuel,
+        Slot::Branch => &mut hits.orcha.branch_toggle,
+        Slot::Changes => &mut hits.orcha.changes_toggle,
         Slot::Ide => &mut hits.orcha.ide,
         Slot::GitGui => &mut hits.orcha.git_gui,
         Slot::Diff => &mut hits.orcha.diff,
@@ -627,6 +658,7 @@ pub(super) fn render_git_panel(
     buffer: &mut Buffer,
     area: Rect,
     data: Option<&GitPanelData>,
+    snapshot: Option<&ClientShellSnapshot>,
     tree: &[super::file_tree::TreeRow],
     fuel: Option<&super::accounts::Account>,
     config: &ClientShellConfig,
@@ -685,17 +717,26 @@ pub(super) fn render_git_panel(
         (Some(_), 0, b) => format!("↓{b} to pull"),
         (Some(_), a, b) => format!("↑{a} ↓{b}"),
     };
-    rows.push(Row::Title("BRANCH".into(), sync, None));
     let branch = if data.branch.is_empty() {
         "(no branch)"
     } else {
         &data.branch
     };
-    rows.push(Row::Strong(format!("⎇ {branch}")));
-    rows.push(Row::Buttons(vec![
-        ("↗ IDE", false, Slot::Ide),
-        ("↗ Git", false, Slot::GitGui),
-    ]));
+    if ui.branch_folded {
+        // folded, the title still names the branch
+        rows.push(Row::Title(
+            format!("▸ ⎇ {branch}"),
+            sync,
+            Some(Slot::Branch),
+        ));
+    } else {
+        rows.push(Row::Title("▾ BRANCH".into(), sync, Some(Slot::Branch)));
+        rows.push(Row::Strong(format!("⎇ {branch}")));
+        rows.push(Row::Buttons(vec![
+            ("↗ IDE", false, Slot::Ide),
+            ("↗ Git", false, Slot::GitGui),
+        ]));
+    }
 
     section(&mut rows);
     let stat = if data.files.is_empty() {
@@ -703,7 +744,12 @@ pub(super) fn render_git_panel(
     } else {
         format!("+{} −{}", data.insertions, data.deletions)
     };
-    rows.push(Row::Title("CHANGES".into(), stat, None));
+    let arrow = if ui.changes_folded { "▸" } else { "▾" };
+    rows.push(Row::Title(
+        format!("{arrow} CHANGES"),
+        stat,
+        Some(Slot::Changes),
+    ));
     // what is left of the box after the other sections decides how many files show
     let tail =
         5 + if ui.history_open {
@@ -722,7 +768,11 @@ pub(super) fn render_git_panel(
             };
     let room =
         usize::from(area.height).saturating_sub(rows.len() + tail + 2 + usize::from(arrived) * 2);
-    let shown = data.files.len().min(room.max(1));
+    let shown = if ui.changes_folded {
+        0
+    } else {
+        data.files.len().min(room.max(1))
+    };
     for (index, (code, path)) in data.files.iter().enumerate().take(shown) {
         if index + 1 == shown && data.files.len() > shown {
             rows.push(Row::Note(
@@ -760,22 +810,202 @@ pub(super) fn render_git_panel(
     }
     section(&mut rows);
     let arrow = if ui.worktrees_open { "▾" } else { "▸" };
+    let mut agents = agents_by_worktree(&data.worktrees, snapshot);
+    let busy = agents.iter().filter(|agents| !agents.is_empty()).count();
+    // folded, the title still says where agents are at work
+    let note = match busy {
+        0 => data.worktrees.len().to_string(),
+        1 => format!("{} · agents in 1", data.worktrees.len()),
+        n => format!("{} · agents in {n}", data.worktrees.len()),
+    };
     rows.push(Row::Title(
         format!("{arrow} WORKTREES"),
-        data.worktrees.len().to_string(),
+        note,
         Some(Slot::Worktrees),
     ));
     if ui.worktrees_open {
         rows.extend(
             data.worktrees
                 .iter()
+                .zip(agents.drain(..))
                 .take(6)
-                .map(|(name, current)| Row::Worktree(name, *current)),
+                .map(|(worktree, agents)| Row::Worktree(worktree, agents)),
         );
         rows.push(Row::NewWorktree);
     }
     push_files(&mut rows, area, tree, ui, &t, hits);
     draw_rows(buffer, area, &rows, config, &t, hits);
+}
+
+/// The agents whose pane sits in each worktree; a pane inside nested
+/// checkouts belongs to the deepest one.
+fn agents_by_worktree<'a>(
+    worktrees: &[Worktree],
+    snapshot: Option<&'a ClientShellSnapshot>,
+) -> Vec<Vec<&'a ClientShellAgent>> {
+    let mut out = vec![Vec::new(); worktrees.len()];
+    let Some(snapshot) = snapshot else {
+        return out;
+    };
+    let roots: Vec<String> = worktrees
+        .iter()
+        .map(|worktree| comparable_path(&worktree.path))
+        .collect();
+    for agent in &snapshot.agents {
+        let Some(cwd) = snapshot
+            .panes
+            .iter()
+            .find(|pane| pane.pane_id == agent.pane_id)
+            .and_then(|pane| pane.foreground_cwd.as_deref().or(pane.cwd.as_deref()))
+        else {
+            continue;
+        };
+        let cwd = comparable_path(cwd);
+        let deepest = roots
+            .iter()
+            .enumerate()
+            .filter(|(_, root)| {
+                !root.is_empty()
+                    && cwd
+                        .strip_prefix(root.as_str())
+                        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+            })
+            .max_by_key(|(_, root)| root.len());
+        if let Some((index, _)) = deepest {
+            out[index].push(agent);
+        }
+    }
+    out
+}
+
+/// A path git and the panes both spell the same way: forward slashes, no
+/// trailing one, and on Windows any letter case.
+fn comparable_path(path: &str) -> String {
+    let path = path.replace('\\', "/");
+    let path = path.trim_end_matches('/');
+    if cfg!(windows) {
+        path.to_lowercase()
+    } else {
+        path.to_owned()
+    }
+}
+
+/// One WORKTREES row: the focused checkout on a green band, like the
+/// branch chips in HISTORY; any checkout lists its agents on the right in
+/// their state colors.
+#[allow(clippy::too_many_arguments)] // one draw call, all inputs are distinct facts
+fn draw_worktree(
+    buffer: &mut Buffer,
+    x: u16,
+    y: u16,
+    inner_width: u16,
+    worktree: &Worktree,
+    agents: &[&ClientShellAgent],
+    t: &Brutal,
+) {
+    let w = usize::from(inner_width);
+    let bg = if worktree.current { t.green } else { t.card };
+    if worktree.current {
+        // the band spans the row's air on both sides
+        let band = Rect::new(x - 1, y, inner_width + 2, 1);
+        put_text(
+            buffer,
+            band.x,
+            y,
+            band.width,
+            &" ".repeat(usize::from(band.width)),
+            Style::default().bg(bg),
+        );
+    }
+    // on the band everything takes the chip's text color
+    let on_band = |color: ratatui::style::Color| {
+        if worktree.current {
+            t.chip_text
+        } else {
+            color
+        }
+    };
+    let urgent = agents
+        .iter()
+        .min_by_key(|agent| super::sidebar_tree::status_rank(agent.agent_status));
+    let icon_color = match urgent {
+        Some(agent) => super::sidebar_tree::agent_color(agent, t),
+        None => t.muted,
+    };
+    put_text(
+        buffer,
+        x,
+        y,
+        1,
+        "⎇",
+        Style::default()
+            .fg(on_band(t.mark(icon_color, bg)))
+            .bg(bg)
+            .add_modifier(Modifier::BOLD),
+    );
+    // the right side: "● Claude ● Codex", or "here" for an idle focused one
+    let mut tags: Vec<(String, ratatui::style::Color)> = agents
+        .iter()
+        .map(|agent| {
+            let name = agent
+                .display_agent
+                .as_deref()
+                .or(agent.agent.as_deref())
+                .or(agent.name.as_deref())
+                .unwrap_or("agent");
+            (
+                format!("● {name}"),
+                super::sidebar_tree::agent_color(agent, t),
+            )
+        })
+        .collect();
+    if tags.is_empty() && worktree.current {
+        tags.push(("here".to_owned(), t.muted));
+    }
+    let tags_width: usize = tags
+        .iter()
+        .map(|(tag, _)| tag.chars().count() + 1)
+        .sum::<usize>()
+        .saturating_sub(1);
+    // the name keeps at least half the row
+    let tags_room = tags_width.min(w.saturating_sub(2) / 2);
+    let name_room = w.saturating_sub(2 + tags_room + usize::from(tags_room > 0));
+    let strong = worktree.current || !agents.is_empty();
+    let mut name_style = Style::default()
+        .fg(on_band(if strong { t.ink } else { t.muted }))
+        .bg(bg);
+    if strong {
+        name_style = name_style.add_modifier(Modifier::BOLD);
+    }
+    put_text(
+        buffer,
+        x + 2,
+        y,
+        inner_width.saturating_sub(2),
+        &clip_right(&worktree.name, name_room),
+        name_style,
+    );
+    let end = x + inner_width;
+    let mut tx = end.saturating_sub(u16::try_from(tags_room).unwrap_or(u16::MAX));
+    for (tag, color) in tags {
+        if tx >= end {
+            break;
+        }
+        let text = clip_right(&tag, usize::from(end - tx));
+        let width = display_width(&text);
+        put_text(
+            buffer,
+            tx,
+            y,
+            width,
+            &text,
+            Style::default()
+                .fg(on_band(t.text(color, bg)))
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        );
+        tx = tx.saturating_add(width + 1);
+    }
 }
 
 /// Tree rows FILES keeps room for when the panel is crowded.
@@ -890,8 +1120,13 @@ fn draw_rows(
                     );
                     hits.orcha.fuel_hide = close;
                 }
-                if let Some(slot) = slot {
-                    open_slot = Some((*slot, y.saturating_sub(1)));
+                match slot {
+                    // their sections hold buttons: only the title folds them
+                    Some(slot @ (Slot::Branch | Slot::Changes)) => {
+                        hit_slot(hits, *slot, Rect::new(rect.x, y, rect.width, 1));
+                    }
+                    Some(slot) => open_slot = Some((*slot, y.saturating_sub(1))),
+                    None => {}
                 }
             }
             Row::Gauge(window) => {
@@ -1038,26 +1273,8 @@ fn draw_rows(
                     Style::default().fg(t.ink).bg(t.card),
                 );
             }
-            Row::Worktree(name, current) => {
-                let (mark, style) = if *current {
-                    (
-                        "●",
-                        Style::default()
-                            .fg(t.ink)
-                            .bg(t.card)
-                            .add_modifier(Modifier::BOLD),
-                    )
-                } else {
-                    ("○", Style::default().fg(t.ink).bg(t.card))
-                };
-                put_text(
-                    buffer,
-                    x,
-                    y,
-                    inner_width,
-                    &clip_right(&format!("{mark} {name}"), w),
-                    style,
-                );
+            Row::Worktree(worktree, agents) => {
+                draw_worktree(buffer, x, y, inner_width, worktree, agents, t);
             }
             Row::Tree(row, index) => {
                 let indent = (row.depth * 2).min(w / 2);
