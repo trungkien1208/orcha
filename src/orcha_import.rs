@@ -286,6 +286,8 @@ mod tests {
         assert!(parse_orca("not json").is_empty());
     }
 
+    // a Unix path is not a local folder on Windows
+    #[cfg(unix)]
     #[test]
     fn vscode_keeps_local_folders_only() {
         let text = r#"{"entries":[{"folderUri":"file:///Users/me/my%20app"},
@@ -299,6 +301,19 @@ mod tests {
                 ("my app".to_owned(), "/Users/me/my app".to_owned()),
                 ("api".to_owned(), "/Users/me/api".to_owned()),
             ]
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn vscode_keeps_local_windows_folders_only() {
+        let text = r#"{"entries":[{"folderUri":"file:///c%3A/Users/me/my%20app"},
+            {"fileUri":"file:///c%3A/Users/me/notes.md"},
+            {"folderUri":"vscode-remote://ssh-remote+box/srv"},
+            {"folderUri":"file:///Users/me/unix"}]}"#;
+        assert_eq!(
+            parse_vscode_recent(text),
+            vec![("my app".to_owned(), "c:\\Users\\me\\my app".to_owned())]
         );
     }
 
