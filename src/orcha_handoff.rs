@@ -616,16 +616,58 @@ pub(crate) fn targets(source: Option<&str>) -> Vec<&'static str> {
         .collect()
 }
 
+/// One request to this session's API from this process. Typing into panes
+/// goes this way rather than through a CLI child: a program that keeps
+/// starting copies of itself to type into other programs is what Windows
+/// security products flag.
+pub(crate) fn api(method: crate::api::schema::Method) -> bool {
+    use crate::api::client::{ApiClient, ConnectionTarget};
+    let client = ApiClient::for_target(ConnectionTarget::SocketPath(
+        crate::session::active_api_socket_path(),
+    ));
+    let request = crate::api::schema::Request {
+        id: "orcha".to_owned(),
+        method,
+    };
+    match client.request(request) {
+        Ok(_) => true,
+        Err(err) => {
+            tracing::warn!(err = %err, "orcha: api request failed");
+            false
+        }
+    }
+}
+
+/// Sends key presses ("enter", "ctrl+c") to `pane`.
+pub(crate) fn send_keys(pane: &str, keys: &[&str]) -> bool {
+    api(crate::api::schema::Method::PaneSendKeys(
+        crate::api::schema::PaneSendKeysParams {
+            pane_id: pane.to_owned(),
+            keys: keys.iter().map(|key| (*key).to_owned()).collect(),
+        },
+    ))
+}
+
+/// Types `line` into `pane` and presses enter (runs a shell command).
+pub(crate) fn run_line(pane: &str, line: &str) -> bool {
+    api(crate::api::schema::Method::PaneSendInput(
+        crate::api::schema::PaneSendInputParams {
+            pane_id: pane.to_owned(),
+            text: line.to_owned(),
+            keys: vec!["Enter".to_owned()],
+        },
+    ))
+}
+
 /// Types `text` into `pane` and presses enter (asks its agent something).
 pub(crate) fn send_prompt(pane: &str, text: &str) -> bool {
-    let sent = herdr(&["pane", "send-text", pane, text])
-        .stdout(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success());
-    sent && herdr(&["pane", "send-keys", pane, "enter"])
-        .stdout(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+    let sent = api(crate::api::schema::Method::PaneSendText(
+        crate::api::schema::PaneSendTextParams {
+            pane_id: pane.to_owned(),
+            text: text.to_owned(),
+        },
+    ));
+    sent && send_keys(pane, &["enter"])
 }
 
 /// Builds the notes for `pane`, opens `target` next to it and tells it to
@@ -736,11 +778,7 @@ pub(crate) fn hand_off(pane: &str, target: &str, mode: Mode) -> Result<String, S
     );
     // double quotes read the same in sh, zsh, fish, PowerShell and cmd
     let line = format!("{command} \"{}\"", prompt.replace('"', "'"));
-    let ran = herdr(&["pane", "run", &new_pane, &line])
-        .stdout(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success());
-    if !ran {
+    if !run_line(&new_pane, &line) {
         return Err(format!("{target_name} could not be started"));
     }
     Ok(format!("{target_name} continues in the new pane"))

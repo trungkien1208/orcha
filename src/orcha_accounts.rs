@@ -1410,11 +1410,7 @@ fn switch_claude_pane(accounts: &[AccountConfig], id: &str, pane: &str) -> Resul
 }
 
 fn run_in_pane(pane: &str, line: &str) -> Result<(), String> {
-    let ran = crate::orcha_handoff::herdr(&["pane", "run", pane, line])
-        .stdout(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success());
-    if ran {
+    if crate::orcha_handoff::run_line(pane, line) {
         Ok(())
     } else {
         Err("could not run it in the pane".to_owned())
@@ -1422,9 +1418,7 @@ fn run_in_pane(pane: &str, line: &str) -> Result<(), String> {
 }
 
 fn send_keys(pane: &str, keys: &str) {
-    let _ = crate::orcha_handoff::herdr(&["pane", "send-keys", pane, keys])
-        .stdout(Stdio::null())
-        .status();
+    let _ = crate::orcha_handoff::send_keys(pane, &[keys]);
 }
 
 /// Continues `pane`'s conversation on another account. Claude: the running
