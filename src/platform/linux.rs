@@ -407,7 +407,7 @@ pub(crate) fn orcha_config_base_dir_platform() -> Option<std::path::PathBuf> {
 pub(crate) fn orcha_application_support_dir_platform(
     _home: &std::path::Path,
 ) -> std::path::PathBuf {
-    orcha_config_base_dir_platform().unwrap_or_else(|| std::env::temp_dir())
+    orcha_config_base_dir_platform().unwrap_or_else(std::env::temp_dir)
 }
 
 pub(crate) fn orcha_secret_read(slot: &super::OrchaSecretSlot) -> Option<String> {

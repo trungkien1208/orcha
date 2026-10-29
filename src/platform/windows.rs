@@ -1397,31 +1397,72 @@ pub(crate) fn expand_orcha_home_command_platform(command: &str) -> String {
     format!("{invoke}{}", &rest[end..])
 }
 
+/// `name` on PATH the way Windows finds it: each folder in order, trying
+/// the PATHEXT extensions (`.exe`, `.cmd`, ...). Folders are skipped.
+fn find_program_on_path(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    let extensions = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_owned());
+    find_program_in(name, &path, &extensions)
+}
+
+fn find_program_in(name: &str, path: &std::ffi::OsStr, extensions: &str) -> Option<PathBuf> {
+    std::env::split_paths(path).find_map(|folder| {
+        extensions
+            .split(';')
+            .filter(|extension| !extension.is_empty())
+            .map(|extension| folder.join(format!("{name}{}", extension.to_ascii_lowercase())))
+            .find(|candidate| candidate.is_file())
+    })
+}
+
+/// Opens the target by starting the app itself, not through a PowerShell
+/// script: security products flag encoded PowerShell from an unsigned app.
 pub(crate) fn open_orcha_target_platform(
     target: super::OrchaOpenTarget,
     path: &std::path::Path,
     line: u32,
 ) -> std::process::Command {
-    use super::quote_powershell_arg as quote;
-
-    let path = path.to_string_lossy();
-    let path = quote(&path);
-    let line = line.to_string();
-    let script = match target {
-        super::OrchaOpenTarget::Ide => format!(
-            "$path = {path}; foreach ($name in @('cursor', 'code', 'zed', 'subl', 'idea')) {{ $app = Get-Command $name -ErrorAction SilentlyContinue; if ($app -and $app.Source) {{ & $app.Source $path; exit }} }}; & 'explorer.exe' $path"
-        ),
-        super::OrchaOpenTarget::GitGui => format!(
-            "$path = {path}; foreach ($name in @('fork', 'sourcetree', 'github', 'gitkraken')) {{ $app = Get-Command $name -ErrorAction SilentlyContinue; if ($app -and $app.Source) {{ & $app.Source $path; exit }} }}; & 'explorer.exe' $path"
-        ),
-        super::OrchaOpenTarget::File => format!(
-            "$path = {path}; $line = {line}; foreach ($name in @('cursor', 'code')) {{ $app = Get-Command $name -ErrorAction SilentlyContinue; if ($app -and $app.Source) {{ & $app.Source --goto ($path + ':' + $line); exit }} }}; $app = Get-Command 'zed' -ErrorAction SilentlyContinue; if ($app -and $app.Source) {{ & $app.Source ($path + ':' + $line); exit }}; & 'explorer.exe' $path"
-        ),
-        super::OrchaOpenTarget::SystemDefault => {
-            format!("& 'explorer.exe' {path}")
-        }
+    let first = |names: &[&str]| names.iter().find_map(|name| find_program_on_path(name));
+    let explorer = || {
+        let mut command = std::process::Command::new("explorer.exe");
+        command.arg(path);
+        command
     };
-    encoded_powershell_process(&script, true)
+    let at_line = || {
+        let mut place = path.as_os_str().to_owned();
+        place.push(format!(":{line}"));
+        place
+    };
+    match target {
+        super::OrchaOpenTarget::Ide => first(&["cursor", "code", "zed", "subl", "idea"])
+            .map(|program| {
+                let mut command = std::process::Command::new(program);
+                command.arg(path);
+                command
+            })
+            .unwrap_or_else(explorer),
+        super::OrchaOpenTarget::GitGui => first(&["fork", "sourcetree", "github", "gitkraken"])
+            .map(|program| {
+                let mut command = std::process::Command::new(program);
+                command.arg(path);
+                command
+            })
+            .unwrap_or_else(explorer),
+        super::OrchaOpenTarget::File => {
+            if let Some(program) = first(&["cursor", "code"]) {
+                let mut command = std::process::Command::new(program);
+                command.arg("--goto").arg(at_line());
+                command
+            } else if let Some(program) = find_program_on_path("zed") {
+                let mut command = std::process::Command::new(program);
+                command.arg(at_line());
+                command
+            } else {
+                explorer()
+            }
+        }
+        super::OrchaOpenTarget::SystemDefault => explorer(),
+    }
 }
 
 pub(crate) fn user_home_dir_platform() -> Option<PathBuf> {
@@ -3783,6 +3824,25 @@ impl Drop for InputSourceRestore {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn programs_are_found_by_pathext_and_folders_are_skipped() {
+        let root = std::env::temp_dir().join(format!("orcha-find-program-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (first, second) = (root.join("first"), root.join("second"));
+        // a folder named like the program comes first on PATH
+        std::fs::create_dir_all(first.join("code.exe")).expect("create folder");
+        std::fs::create_dir_all(&second).expect("create second");
+        std::fs::write(second.join("code.cmd"), "@echo off\r\n").expect("write shim");
+        let path = std::env::join_paths([&first, &second]).expect("join PATH");
+        assert_eq!(
+            super::find_program_in("code", &path, ".EXE;.CMD"),
+            Some(second.join("code.cmd"))
+        );
+        assert_eq!(super::find_program_in("zed", &path, ".EXE;.CMD"), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     use std::{
         fs,
         process::{Command, Stdio},
