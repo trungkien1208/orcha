@@ -273,3 +273,42 @@ pub struct AgentSessionInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript_path: Option<String>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentModelsParams {
+    /// `claude`, `codex` or `cursor`.
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentModelInfo {
+    /// The id the agent CLI uses for this model (for Cursor, the base of its variant ids).
+    pub id: String,
+    pub name: String,
+    /// Reasoning efforts this model accepts, in the agent's order.
+    #[serde(default)]
+    pub efforts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_effort: Option<String>,
+    /// Whether fast mode exists for this model.
+    #[serde(default)]
+    pub fast_available: bool,
+    /// When fast mode exists only for some efforts, those efforts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fast_efforts: Vec<String>,
+    /// Cursor only: its own id for each effort and fast combination.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variants: Vec<AgentModelVariant>,
+    /// The agent's default model.
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub default: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentModelVariant {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default)]
+    pub fast: bool,
+}

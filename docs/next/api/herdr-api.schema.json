@@ -1367,6 +1367,18 @@
     },
     "request": {
       "$defs": {
+        "AgentModelsParams": {
+          "properties": {
+            "kind": {
+              "description": "`claude`, `codex` or `cursor`.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
         "AgentPromptParams": {
           "properties": {
             "target": {
@@ -6550,6 +6562,22 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.models",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentModelsParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -7013,6 +7041,80 @@
             "source",
             "source_kind",
             "local_override_shadowing_remote"
+          ],
+          "type": "object"
+        },
+        "AgentModelInfo": {
+          "properties": {
+            "default": {
+              "description": "The agent's default model.",
+              "type": "boolean"
+            },
+            "default_effort": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "efforts": {
+              "default": [],
+              "description": "Reasoning efforts this model accepts, in the agent's order.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "fast_available": {
+              "default": false,
+              "description": "Whether fast mode exists for this model.",
+              "type": "boolean"
+            },
+            "fast_efforts": {
+              "description": "When fast mode exists only for some efforts, those efforts.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "id": {
+              "description": "The id the agent CLI uses for this model (for Cursor, the base of its variant ids).",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "variants": {
+              "description": "Cursor only: its own id for each effort and fast combination.",
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/AgentModelVariant"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "id",
+            "name"
+          ],
+          "type": "object"
+        },
+        "AgentModelVariant": {
+          "properties": {
+            "effort": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fast": {
+              "default": false,
+              "type": "boolean"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
           ],
           "type": "object"
         },
@@ -9638,6 +9740,34 @@
                 "session_version",
                 "session_epoch",
                 "changes"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "models": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/AgentModelInfo"
+                  },
+                  "type": "array"
+                },
+                "source": {
+                  "description": "Where the catalog came from: a cache file or a CLI command.",
+                  "type": "string"
+                },
+                "type": {
+                  "const": "agent_models",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "kind",
+                "source",
+                "models"
               ],
               "type": "object"
             },

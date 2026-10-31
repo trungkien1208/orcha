@@ -844,6 +844,24 @@ fn handle_request(
         return server_capabilities_response(request.id);
     }
 
+    // Catalogs come from files and CLIs, never from the UI thread.
+    if let Method::AgentModels(params) = &request.method {
+        return match crate::agent_models::catalog(&params.kind) {
+            Ok(catalog) => serde_json::to_string(&SuccessResponse {
+                id: request.id,
+                result: ResponseResult::AgentModels {
+                    kind: params.kind.clone(),
+                    source: catalog.source,
+                    models: catalog.models,
+                },
+            })
+            .unwrap_or_else(|_| {
+                error_response_json(String::new(), "internal_error", "encode".into())
+            }),
+            Err(message) => error_response_json(request.id, "models_unavailable", message),
+        };
+    }
+
     if matches!(&request.method, Method::ClientShellSurfaceSet(_)) {
         return error_response_json(
             request.id,

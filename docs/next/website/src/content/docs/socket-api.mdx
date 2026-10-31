@@ -106,7 +106,7 @@ Raw socket method names use dot notation:
 | Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.close`, `pane.wait_for_output` |
 | Popup | `popup.close` |
 | Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio` |
-| Agent | `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
+| Agent | `agent.models`, `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
 | Events | `events.subscribe`, `events.wait` |
 | Integrations | `integration.install`, `integration.uninstall` |
 | Plugins | `plugin.link`, `plugin.list`, `plugin.unlink`, `plugin.enable`, `plugin.disable`, `plugin.action.list`, `plugin.action.invoke`, `plugin.log.list`, `plugin.pane.open`, `plugin.pane.focus`, `plugin.pane.close` |
@@ -1140,6 +1140,30 @@ Other reporters can set the model with `pane.report_agent_session`'s optional
 `model` field (CLI: `--model`).
 
 Feature flag: `agent.model_state`.
+
+### agent.models
+
+The model catalog an agent CLI offers, read from the same place the CLI uses:
+Claude Code's model-catalog cache (`~/.claude/cache/model-catalog`, or
+`$CLAUDE_CONFIG_DIR`), Codex's `models_cache.json` (`$CODEX_HOME`, default
+`~/.codex`; only models Codex lists), and `cursor-agent models` (cached for ten
+minutes). The server answers without involving the UI.
+
+```json
+{"id":"m1","method":"agent.models","params":{"kind":"codex"}}
+```
+
+```json
+{"id":"m1","result":{"type":"agent_models","kind":"codex","source":"/Users/me/.codex/models_cache.json","models":[
+  {"id":"gpt-6.1-sol","name":"GPT-6.1-Sol","efforts":["low","medium","high","xhigh","max","ultra"],"default_effort":"low","fast_available":true}
+]}}
+```
+
+`fast_efforts` appears when fast mode exists only for some efforts. Cursor
+models also list `variants`, Cursor's own id for each effort and fast
+combination; a variant with no `effort` uses the model's default effort.
+`default: true` marks the agent's default model. A missing cache or CLI returns
+`models_unavailable` with a hint. CLI: `herdr api call agent.models '{"kind":"cursor"}'`.
 
 ## Protocol stability
 

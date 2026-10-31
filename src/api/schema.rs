@@ -147,6 +147,7 @@ operations::define_operations! {
     PluginPaneClose(PluginPaneCloseParams) => "plugin.pane.close", true, false;
     ServerCapabilitiesGet(EmptyParams) => "server.capabilities", false, false;
     ServerMultiplex(EmptyParams) => "server.multiplex", false, false;
+    AgentModels(AgentModelsParams) => "agent.models", false, false;
 }
 
 #[cfg(test)]

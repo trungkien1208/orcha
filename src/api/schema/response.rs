@@ -63,6 +63,12 @@ pub enum ResponseResult {
         session_epoch: String,
         changes: Vec<super::session::SessionChange>,
     },
+    AgentModels {
+        kind: String,
+        /// Where the catalog came from: a cache file or a CLI command.
+        source: String,
+        models: Vec<super::agents::AgentModelInfo>,
+    },
     ServerCapabilities {
         version: String,
         protocol: u32,
