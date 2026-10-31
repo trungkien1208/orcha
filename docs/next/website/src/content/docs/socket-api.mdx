@@ -790,6 +790,7 @@ The first response acknowledges the subscription. Later lines are pushed events.
 All entries must be valid: if any referenced pane does not exist, Herdr rejects
 the entire request with an error and closes the connection. Refresh the pane list
 and retry rather than assuming the other entries were subscribed.
+The all-pane form of `pane.agent_status_changed` below is the exception.
 Lifecycle subscriptions start when the request is accepted and do not replay
 events retained before that point.
 
@@ -971,6 +972,25 @@ works even while the UI is busy.
 `methods` lists every request method, `events` every event name that
 `events.subscribe` can deliver, and `features` optional behaviors of existing
 methods that a method name alone cannot show.
+
+### Agent status for every pane
+
+Omit `pane_id` from a `pane.agent_status_changed` subscription to follow every
+current and future pane. Narrow it with `workspace_id` or with a `pane_ids`
+list. Unknown ids in `pane_ids` are skipped and listed in the acknowledgement's
+`warnings`; they never reject the subscription. A single `pane_id` keeps its
+old behavior and still rejects an unknown pane. `agent_status` filters as before.
+
+```json
+{"id":"s1","method":"events.subscribe","params":{"subscriptions":[{"type":"pane.agent_status_changed","pane_ids":["w1:p1","w9:p9"]}]}}
+```
+
+```json
+{"id":"s1","result":{"type":"subscription_started","warnings":["pane w9:p9 not found; skipped"]}}
+{"event":"pane.agent_status_changed","data":{"pane_id":"w1:p1","workspace_id":"w1","agent_status":"working","agent":"claude"}}
+```
+
+Feature flag: `events.subscribe.agent_status_all_panes`.
 
 ## Protocol stability
 

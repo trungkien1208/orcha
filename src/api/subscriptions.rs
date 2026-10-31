@@ -57,6 +57,26 @@ pub(super) struct ActiveAgentStatusChangedSubscription {
     request_prefix: String,
 }
 
+/// Follows agent status for every pane in scope, including panes created later.
+pub(super) struct ActiveAgentStatusSetSubscription {
+    workspace_id: Option<String>,
+    pane_ids: Option<std::collections::HashSet<String>>,
+    status_filter: Option<crate::api::schema::AgentStatus>,
+    known: std::collections::HashMap<
+        String,
+        (crate::api::schema::AgentStatus, PanePresentationSnapshot),
+    >,
+    last_sequence: u64,
+    last_reconcile: std::time::Instant,
+    initial_events: Vec<PaneAgentStatusChangedEvent>,
+    request_prefix: String,
+}
+
+/// Status that can change without a lifecycle event (a pane marked seen by
+/// focus) is caught by comparing one pane list at this cadence.
+const AGENT_STATUS_SET_RECONCILE_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(500);
+
 pub(super) struct ActiveScrollChangedSubscription {
     pane_id: String,
     last_scroll: Option<PaneScrollInfo>,
@@ -101,6 +121,7 @@ pub(super) enum ActiveSubscription {
     Event(ActiveEventSubscription),
     OutputMatched(ActiveOutputMatchedSubscription),
     AgentStatusChanged(Box<ActiveAgentStatusChangedSubscription>),
+    AgentStatusSet(Box<ActiveAgentStatusSetSubscription>),
     ScrollChanged(ActiveScrollChangedSubscription),
 }
 
@@ -112,6 +133,26 @@ impl ActiveSubscription {
         api_tx: &ApiRequestSender,
         event_hub: &EventHub,
         event_start_sequence: u64,
+    ) -> Result<Self, ErrorResponse> {
+        Self::new_with_warnings(
+            subscription,
+            request_id,
+            index,
+            api_tx,
+            event_hub,
+            event_start_sequence,
+            &mut Vec::new(),
+        )
+    }
+
+    pub(super) fn new_with_warnings(
+        subscription: Subscription,
+        request_id: &str,
+        index: usize,
+        api_tx: &ApiRequestSender,
+        event_hub: &EventHub,
+        event_start_sequence: u64,
+        warnings: &mut Vec<String>,
     ) -> Result<Self, ErrorResponse> {
         let event_subscription = |event_kind| {
             Self::Event(ActiveEventSubscription {
@@ -204,8 +245,45 @@ impl ActiveSubscription {
                 }))
             }
             Subscription::PaneAgentStatusChanged {
-                pane_id,
+                pane_id: None,
+                workspace_id,
+                pane_ids,
                 agent_status,
+            } => Ok(Self::AgentStatusSet(Box::new(
+                ActiveAgentStatusSetSubscription::new(
+                    workspace_id,
+                    pane_ids,
+                    agent_status,
+                    format!("{request_id}:sub:{index}"),
+                    api_tx,
+                    event_hub,
+                    warnings,
+                )?,
+            ))),
+            Subscription::PaneAgentStatusChanged {
+                pane_id: Some(pane_id),
+                agent_status,
+                pane_ids,
+                ..
+            } if !pane_ids.is_empty() => {
+                let mut pane_ids = pane_ids;
+                pane_ids.push(pane_id);
+                Ok(Self::AgentStatusSet(Box::new(
+                    ActiveAgentStatusSetSubscription::new(
+                        None,
+                        pane_ids,
+                        agent_status,
+                        format!("{request_id}:sub:{index}"),
+                        api_tx,
+                        event_hub,
+                        warnings,
+                    )?,
+                )))
+            }
+            Subscription::PaneAgentStatusChanged {
+                pane_id: Some(pane_id),
+                agent_status,
+                ..
             } => {
                 let last_sequence = event_hub.current_sequence();
                 let probe = pane_get(format!("{request_id}:sub:{index}:probe"), &pane_id, api_tx)?;
@@ -260,6 +338,12 @@ impl ActiveSubscription {
             Self::AgentStatusChanged(subscription) => {
                 serde_json::to_value(subscription.poll(api_tx, event_hub)?).ok()
             }
+            Self::AgentStatusSet(subscription) => subscription
+                .poll_batch(api_tx, event_hub)
+                .ok()?
+                .into_iter()
+                .next()
+                .and_then(|event| serde_json::to_value(event).ok()),
             Self::ScrollChanged(subscription) => {
                 serde_json::to_value(subscription.poll(api_tx)?).ok()
             }
@@ -314,6 +398,11 @@ impl ActiveSubscription {
                 }
                 Ok(matching)
             }
+            Self::AgentStatusSet(subscription) => subscription
+                .poll_batch(api_tx, event_hub)?
+                .into_iter()
+                .map(|event| serde_json::to_value(event).map_err(event_encoding_error))
+                .collect(),
             // These subscriptions sample current state, not retained event history.
             // Keep their existing cadence even when a lifecycle batch was nonempty.
             Self::OutputMatched(_) | Self::ScrollChanged(_) => {
@@ -538,6 +627,196 @@ impl ActiveAgentStatusChangedSubscription {
     }
 }
 
+impl ActiveAgentStatusSetSubscription {
+    fn new(
+        workspace_id: Option<String>,
+        pane_ids: Vec<String>,
+        status_filter: Option<crate::api::schema::AgentStatus>,
+        request_prefix: String,
+        api_tx: &ApiRequestSender,
+        event_hub: &EventHub,
+        warnings: &mut Vec<String>,
+    ) -> Result<Self, ErrorResponse> {
+        let last_sequence = event_hub.current_sequence();
+        let panes = pane_list(
+            format!("{request_id}:probe", request_id = request_prefix),
+            workspace_id.as_deref(),
+            api_tx,
+        )?;
+        let pane_ids = (!pane_ids.is_empty()).then(|| {
+            let mut wanted = std::collections::HashSet::new();
+            for pane_id in pane_ids {
+                if panes.iter().any(|pane| pane.pane_id == pane_id) {
+                    wanted.insert(pane_id);
+                } else {
+                    warnings.push(format!("pane {pane_id} not found; skipped"));
+                }
+            }
+            wanted
+        });
+        let mut subscription = Self {
+            workspace_id,
+            pane_ids,
+            status_filter,
+            known: std::collections::HashMap::new(),
+            last_sequence,
+            last_reconcile: std::time::Instant::now(),
+            initial_events: Vec::new(),
+            request_prefix,
+        };
+        for pane in panes {
+            if !subscription.in_scope(&pane.pane_id, &pane.workspace_id) {
+                continue;
+            }
+            if status_filter.is_some_and(|wanted| wanted == pane.agent_status) {
+                subscription
+                    .initial_events
+                    .push(status_event_from_pane(pane.clone()));
+            }
+            subscription.known.insert(
+                pane.pane_id.clone(),
+                (pane.agent_status, PanePresentationSnapshot::from(&pane)),
+            );
+        }
+        Ok(subscription)
+    }
+
+    fn in_scope(&self, pane_id: &str, workspace_id: &str) -> bool {
+        self.workspace_id
+            .as_deref()
+            .is_none_or(|wanted| wanted == workspace_id)
+            && self
+                .pane_ids
+                .as_ref()
+                .is_none_or(|wanted| wanted.contains(pane_id))
+    }
+
+    fn poll_batch(
+        &mut self,
+        api_tx: &ApiRequestSender,
+        event_hub: &EventHub,
+    ) -> Result<Vec<SubscriptionEventEnvelope>, ErrorBody> {
+        let mut matching: Vec<_> = self.initial_events.drain(..).map(status_envelope).collect();
+        for (sequence, event) in subscription_events_after(event_hub, self.last_sequence)? {
+            self.last_sequence = sequence;
+            match event.data {
+                crate::api::schema::EventData::PaneAgentStatusChanged {
+                    pane_id,
+                    workspace_id,
+                    agent_status,
+                    agent,
+                    title,
+                    display_agent,
+                    state_labels,
+                } => {
+                    if !self.in_scope(&pane_id, &workspace_id) {
+                        continue;
+                    }
+                    self.known.insert(
+                        pane_id.clone(),
+                        (
+                            agent_status,
+                            PanePresentationSnapshot::from_event(
+                                &title,
+                                &display_agent,
+                                &state_labels,
+                            ),
+                        ),
+                    );
+                    if self
+                        .status_filter
+                        .is_some_and(|wanted| wanted != agent_status)
+                    {
+                        continue;
+                    }
+                    matching.push(status_envelope(PaneAgentStatusChangedEvent {
+                        pane_id,
+                        workspace_id,
+                        agent_status,
+                        agent,
+                        title,
+                        display_agent,
+                        state_labels,
+                    }));
+                }
+                crate::api::schema::EventData::PaneClosed { pane_id, .. } => {
+                    self.known.remove(&pane_id);
+                }
+                _ => {}
+            }
+        }
+        if matching.is_empty()
+            && self.last_reconcile.elapsed() >= AGENT_STATUS_SET_RECONCILE_INTERVAL
+        {
+            self.last_reconcile = std::time::Instant::now();
+            matching.extend(self.reconcile(api_tx, event_hub));
+        }
+        Ok(matching)
+    }
+
+    /// Emits status changes that reached the pane list without a lifecycle event.
+    fn reconcile(
+        &mut self,
+        api_tx: &ApiRequestSender,
+        event_hub: &EventHub,
+    ) -> Vec<SubscriptionEventEnvelope> {
+        let before = self.last_sequence;
+        if event_hub.current_sequence() != before {
+            return Vec::new();
+        }
+        let Ok(panes) = pane_list(
+            format!("{}:list", self.request_prefix),
+            self.workspace_id.as_deref(),
+            api_tx,
+        ) else {
+            return Vec::new();
+        };
+        if event_hub.current_sequence() != before {
+            return Vec::new();
+        }
+        let mut events = Vec::new();
+        for pane in panes {
+            if !self.in_scope(&pane.pane_id, &pane.workspace_id) {
+                continue;
+            }
+            let current = (pane.agent_status, PanePresentationSnapshot::from(&pane));
+            let previous = self.known.insert(pane.pane_id.clone(), current.clone());
+            // A pane first seen here is new; its status events arrive through history.
+            let Some(previous) = previous else {
+                continue;
+            };
+            if previous == current
+                || self
+                    .status_filter
+                    .is_some_and(|wanted| wanted != pane.agent_status)
+            {
+                continue;
+            }
+            events.push(status_envelope(status_event_from_pane(pane)));
+        }
+        events
+    }
+}
+
+fn status_event_from_pane(pane: crate::api::schema::PaneInfo) -> PaneAgentStatusChangedEvent {
+    PaneAgentStatusChangedEvent {
+        pane_id: pane.pane_id,
+        workspace_id: pane.workspace_id,
+        agent_status: pane.agent_status,
+        agent: pane.agent,
+        title: pane.title,
+        display_agent: pane.display_agent,
+        state_labels: pane.state_labels,
+    }
+}
+
+fn status_envelope(event: PaneAgentStatusChangedEvent) -> SubscriptionEventEnvelope {
+    SubscriptionEventEnvelope {
+        event: SubscriptionEventKind::PaneAgentStatusChanged,
+        data: SubscriptionEventData::PaneAgentStatusChanged(event),
+    }
+}
+
 impl ActiveScrollChangedSubscription {
     fn poll(&mut self, api_tx: &ApiRequestSender) -> Option<SubscriptionEventEnvelope> {
         let pane = pane_get(
@@ -617,6 +896,38 @@ fn pane_read(
             message: "failed to decode pane read result".into(),
         },
     })
+}
+
+fn pane_list(
+    request_id: String,
+    workspace_id: Option<&str>,
+    api_tx: &ApiRequestSender,
+) -> Result<Vec<crate::api::schema::PaneInfo>, ErrorResponse> {
+    let response = dispatch_to_app_with_timeout(
+        Request {
+            id: request_id.clone(),
+            method: Method::PaneList(crate::api::schema::PaneListParams {
+                workspace_id: workspace_id.map(str::to_string),
+            }),
+        },
+        api_tx,
+        Some(APP_RESPONSE_TIMEOUT),
+    );
+    let decode_error = |message: &str| ErrorResponse {
+        id: request_id.clone(),
+        error: ErrorBody {
+            code: "internal_error".into(),
+            message: message.into(),
+        },
+    };
+    let value: serde_json::Value = serde_json::from_str(&response)
+        .map_err(|_| decode_error("failed to decode pane list response"))?;
+    if value.get("error").is_some() {
+        return Err(serde_json::from_value::<ErrorResponse>(value)
+            .map_err(|_| decode_error("failed to decode pane list error"))?);
+    }
+    serde_json::from_value(value["result"]["panes"].clone())
+        .map_err(|_| decode_error("failed to decode pane list result"))
 }
 
 fn pane_get(
@@ -799,6 +1110,182 @@ mod tests {
             panic!("expected lifecycle subscription");
         };
         assert_eq!(subscription.last_sequence, event_hub.current_sequence());
+    }
+
+    fn status_event(pane_id: &str, workspace_id: &str, status: AgentStatus) -> EventEnvelope {
+        EventEnvelope {
+            event: EventKind::PaneAgentStatusChanged,
+            data: EventData::PaneAgentStatusChanged {
+                pane_id: pane_id.into(),
+                workspace_id: workspace_id.into(),
+                agent_status: status,
+                agent: Some("claude".into()),
+                title: None,
+                display_agent: None,
+                state_labels: HashMap::new(),
+            },
+        }
+    }
+
+    fn pane(pane_id: &str, workspace_id: &str, status: AgentStatus) -> PaneInfo {
+        PaneInfo {
+            pane_id: pane_id.into(),
+            workspace_id: workspace_id.into(),
+            agent_status: status,
+            ..pane_info_with_scroll(None)
+        }
+    }
+
+    /// Answers `pane.list` with each listed snapshot in turn, repeating the last.
+    fn spawn_pane_list_responder(
+        snapshots: Vec<Vec<PaneInfo>>,
+    ) -> (ApiRequestSender, std::thread::JoinHandle<usize>) {
+        let (api_tx, mut api_rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::api::ApiRequestMessage>();
+        let thread = std::thread::spawn(move || {
+            let mut calls = 0;
+            while let Some(message) = api_rx.blocking_recv() {
+                let Method::PaneList(_) = message.request.method else {
+                    panic!("unexpected request {:?}", message.request.method);
+                };
+                let panes = snapshots[calls.min(snapshots.len() - 1)].clone();
+                calls += 1;
+                let response = crate::api::schema::SuccessResponse {
+                    id: message.request.id,
+                    result: crate::api::schema::ResponseResult::PaneList { panes },
+                };
+                let _ = message
+                    .respond_to
+                    .send(serde_json::to_string(&response).unwrap());
+            }
+            calls
+        });
+        (api_tx, thread)
+    }
+
+    fn all_panes_subscription(pane_ids: Vec<String>, workspace_id: Option<&str>) -> Subscription {
+        Subscription::PaneAgentStatusChanged {
+            pane_id: None,
+            workspace_id: workspace_id.map(str::to_string),
+            pane_ids,
+            agent_status: None,
+        }
+    }
+
+    fn statuses(events: &[serde_json::Value]) -> Vec<(String, String)> {
+        events
+            .iter()
+            .map(|event| {
+                assert_eq!(event["event"], "pane.agent_status_changed");
+                (
+                    event["data"]["pane_id"].as_str().unwrap().to_string(),
+                    event["data"]["agent_status"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn all_panes_status_subscription_follows_current_and_future_panes() {
+        let event_hub = EventHub::default();
+        let (api_tx, responder) =
+            spawn_pane_list_responder(vec![vec![pane("w1:p1", "w1", AgentStatus::Idle)]]);
+        let mut warnings = Vec::new();
+        let mut subscription = ActiveSubscription::new_with_warnings(
+            all_panes_subscription(Vec::new(), None),
+            "all",
+            0,
+            &api_tx,
+            &event_hub,
+            event_hub.current_sequence(),
+            &mut warnings,
+        )
+        .unwrap();
+        assert!(warnings.is_empty());
+
+        event_hub.push(status_event("w1:p1", "w1", AgentStatus::Working));
+        event_hub.push(status_event("w2:p1", "w2", AgentStatus::Working));
+        let events = subscription.poll_batch(&api_tx, &event_hub).unwrap();
+        assert_eq!(
+            statuses(&events),
+            vec![
+                ("w1:p1".to_string(), "working".to_string()),
+                ("w2:p1".to_string(), "working".to_string()),
+            ]
+        );
+        drop(api_tx);
+        drop(subscription);
+        responder.join().unwrap();
+    }
+
+    #[test]
+    fn pane_list_status_subscription_skips_unknown_ids_with_a_warning() {
+        let event_hub = EventHub::default();
+        let (api_tx, responder) = spawn_pane_list_responder(vec![vec![
+            pane("w1:p1", "w1", AgentStatus::Idle),
+            pane("w1:p2", "w1", AgentStatus::Idle),
+        ]]);
+        let mut warnings = Vec::new();
+        let mut subscription = ActiveSubscription::new_with_warnings(
+            all_panes_subscription(vec!["w1:p1".into(), "w9:p9".into()], None),
+            "list",
+            0,
+            &api_tx,
+            &event_hub,
+            event_hub.current_sequence(),
+            &mut warnings,
+        )
+        .unwrap();
+        assert_eq!(warnings, vec!["pane w9:p9 not found; skipped".to_string()]);
+
+        event_hub.push(status_event("w1:p2", "w1", AgentStatus::Working));
+        event_hub.push(status_event("w1:p1", "w1", AgentStatus::Blocked));
+        let events = subscription.poll_batch(&api_tx, &event_hub).unwrap();
+        assert_eq!(
+            statuses(&events),
+            vec![("w1:p1".to_string(), "blocked".to_string())]
+        );
+        drop(api_tx);
+        drop(subscription);
+        responder.join().unwrap();
+    }
+
+    #[test]
+    fn workspace_status_subscription_reconciles_changes_without_events() {
+        let event_hub = EventHub::default();
+        let (api_tx, responder) = spawn_pane_list_responder(vec![
+            vec![
+                pane("w1:p1", "w1", AgentStatus::Done),
+                pane("w2:p1", "w2", AgentStatus::Done),
+            ],
+            vec![
+                pane("w1:p1", "w1", AgentStatus::Idle),
+                pane("w2:p1", "w2", AgentStatus::Idle),
+            ],
+        ]);
+        let mut subscription = ActiveSubscription::new_with_warnings(
+            all_panes_subscription(Vec::new(), Some("w1")),
+            "workspace",
+            0,
+            &api_tx,
+            &event_hub,
+            event_hub.current_sequence(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        let ActiveSubscription::AgentStatusSet(set) = &mut subscription else {
+            panic!("expected all-pane subscription");
+        };
+        set.last_reconcile -= AGENT_STATUS_SET_RECONCILE_INTERVAL;
+
+        let events = subscription.poll_batch(&api_tx, &event_hub).unwrap();
+        assert_eq!(
+            statuses(&events),
+            vec![("w1:p1".to_string(), "idle".to_string())]
+        );
+        drop(api_tx);
+        drop(subscription);
+        assert_eq!(responder.join().unwrap(), 2);
     }
 
     #[test]

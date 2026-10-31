@@ -72,9 +72,17 @@ pub enum Subscription {
         #[serde(default = "super::common::default_true")]
         strip_ansi: bool,
     },
+    /// With `pane_id`, follows one pane and rejects an unknown id. Without it,
+    /// follows every current and future pane, narrowed by `workspace_id` or
+    /// `pane_ids`; unknown ids in `pane_ids` are skipped with a warning.
     #[serde(rename = "pane.agent_status_changed")]
     PaneAgentStatusChanged {
-        pane_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pane_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pane_ids: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_status: Option<AgentStatus>,
     },

@@ -650,8 +650,9 @@ fn subscribe_request_parses_parameterized_subscriptions() {
     assert!(matches!(
         &params.subscriptions[1],
         Subscription::PaneAgentStatusChanged {
-            pane_id,
+            pane_id: Some(pane_id),
             agent_status: Some(AgentStatus::Done),
+            ..
         } if pane_id == "p_1_1"
     ));
     assert!(matches!(

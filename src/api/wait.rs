@@ -765,7 +765,9 @@ fn event_match_subscription(
             pane_id,
             agent_status,
         } => Ok(Subscription::PaneAgentStatusChanged {
-            pane_id,
+            pane_id: Some(pane_id),
+            workspace_id: None,
+            pane_ids: Vec::new(),
             agent_status: Some(agent_status),
         }),
         _ => Err(ErrorResponse {

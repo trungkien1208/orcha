@@ -4215,6 +4215,7 @@
               "type": "object"
             },
             {
+              "description": "With `pane_id`, follows one pane and rejects an unknown id. Without it,\nfollows every current and future pane, narrowed by `workspace_id` or\n`pane_ids`; unknown ids in `pane_ids` are skipped with a warning.",
               "properties": {
                 "agent_status": {
                   "anyOf": [
@@ -4227,16 +4228,30 @@
                   ]
                 },
                 "pane_id": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "pane_ids": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
                 },
                 "type": {
                   "const": "pane.agent_status_changed",
                   "type": "string"
+                },
+                "workspace_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               },
               "required": [
-                "type",
-                "pane_id"
+                "type"
               ],
               "type": "object"
             },
@@ -9976,6 +9991,13 @@
                 "type": {
                   "const": "subscription_started",
                   "type": "string"
+                },
+                "warnings": {
+                  "description": "Parts of the request that were skipped, such as unknown pane ids.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
                 }
               },
               "required": [

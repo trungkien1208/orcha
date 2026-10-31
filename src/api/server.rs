@@ -607,7 +607,10 @@ fn handle_request(
 
 /// Optional behaviors of existing methods. Method and event names are listed
 /// separately; a feature names a capability that a method name alone cannot show.
-const API_FEATURES: &[&str] = &[];
+const API_FEATURES: &[&str] = &[
+    // `pane.agent_status_changed` without `pane_id` follows every pane.
+    "events.subscribe.agent_status_all_panes",
+];
 
 fn server_capabilities_response(id: String) -> String {
     let mut methods: Vec<String> = Method::OPERATIONS
@@ -859,14 +862,16 @@ fn stream_subscriptions(
 ) -> std::io::Result<()> {
     let event_start_sequence = event_hub.current_sequence();
     let mut subscriptions = Vec::with_capacity(params.subscriptions.len());
+    let mut warnings = Vec::new();
     for (index, subscription) in params.subscriptions.into_iter().enumerate() {
-        let active = match ActiveSubscription::new(
+        let active = match ActiveSubscription::new_with_warnings(
             subscription,
             &request_id,
             index,
             api_tx,
             event_hub,
             event_start_sequence,
+            &mut warnings,
         ) {
             Ok(active) => active,
             Err(mut response) => {
@@ -887,7 +892,7 @@ fn stream_subscriptions(
         &mut stream,
         &SuccessResponse {
             id: request_id.clone(),
-            result: ResponseResult::SubscriptionStarted {},
+            result: ResponseResult::SubscriptionStarted { warnings },
         },
     ) {
         if is_connection_closed_error(&err) {

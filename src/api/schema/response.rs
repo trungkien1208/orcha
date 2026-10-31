@@ -195,7 +195,11 @@ pub enum ResponseResult {
     AgentExplain {
         explain: serde_json::Value,
     },
-    SubscriptionStarted {},
+    SubscriptionStarted {
+        /// Parts of the request that were skipped, such as unknown pane ids.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<String>,
+    },
     WaitMatched {
         event: EventEnvelope,
     },
