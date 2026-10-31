@@ -300,7 +300,7 @@ fn validate_machine_command(args: &[String]) -> Result<(), String> {
                         .iter()
                         .any(|arg| arg == "--file" || arg.starts_with("--file=")))
         }
-        "api" => subcommand == "snapshot",
+        "api" => matches!(subcommand, "snapshot" | "call"),
         "status" => subcommand == "server",
         "plugin" => matches!(
             subcommand,
@@ -466,6 +466,7 @@ mod tests {
             &["worktree", "create", "--branch", "feature"],
             &["tab", "list"],
             &["api", "snapshot"],
+            &["api", "call", "agent.list"],
             &["server", "stop"],
         ] {
             let mut input = args(&["herdr"]);

@@ -189,6 +189,12 @@ fn api_command() -> Command {
         .about("Inspect socket API metadata and live runtime state")
         .subcommand(Command::new("snapshot").about("Print the live session snapshot"))
         .subcommand(
+            Command::new("call")
+                .about("Send any socket method by name and print the JSON response")
+                .arg(Arg::new("method").value_name("METHOD").required(true))
+                .arg(Arg::new("params").value_name("PARAMS_JSON")),
+        )
+        .subcommand(
             Command::new("schema")
                 .about("Print or write the bundled API schema")
                 .arg(json_flag())

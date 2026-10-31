@@ -49,6 +49,18 @@ herdr api schema --output herdr-api.schema.json
 with the installed binary. Use `--json` for the full JSON Schema document, or
 `--output PATH` to write that document to a file.
 
+Call any socket method by name:
+
+```bash
+herdr api call server.capabilities
+herdr api call session.snapshot '{"since":41}'
+herdr api call agent.models '{"kind":"codex"}'
+```
+
+`herdr api call METHOD [PARAMS_JSON]` sends one request with the given params
+(default `{}`) and prints the JSON response, so every socket method, including
+ones without a dedicated command, is reachable from the CLI.
+
 ## Saved SSH machines
 
 ```bash
@@ -80,7 +92,7 @@ herdr --machine "Build machine" worktree create --cwd /srv/project --branch revi
 
 The selector must match an enabled saved profile ID or a unique, case-sensitive label, not an arbitrary SSH hostname. The saved remote session is used; combining `--machine` with `--session` or `--remote` is an error. Without the prefix, commands retain their existing local session/socket behavior.
 
-Supported commands are `workspace`, `worktree`, `tab`, `pane`, `notification`, `agent` (except `attach` and local `explain --file`), `api snapshot`, `status server`, and API-backed plugin commands (`link`, `unlink`, `enable`, `disable`, `list`, `action`, `log`, `pane`). Server commands support `stop`, `reload-config`, `agent-manifests`, and `reload-agent-manifests`. Local installation/configuration commands, plugin installation, session management, and interactive terminal attachment are not forwarded.
+Supported commands are `workspace`, `worktree`, `tab`, `pane`, `notification`, `agent` (except `attach` and local `explain --file`), `api snapshot`, `api call`, `status server`, and API-backed plugin commands (`link`, `unlink`, `enable`, `disable`, `list`, `action`, `log`, `pane`). Server commands support `stop`, `reload-config`, `agent-manifests`, and `reload-agent-manifests`. Local installation/configuration commands, plugin installation, session management, and interactive terminal attachment are not forwarded.
 
 Requests and responses travel through the JSON API over non-interactive SSH; API payloads are not interpolated into the SSH shell command. No open TUI is required, and the bridge never installs, starts, or restarts a server. Update the local CLI and remote Herdr installation to support machine forwarding, and keep the running remote server's API protocol compatible. Authentication, unavailable machines, and incompatible versions fail without falling back to Local. Requests are not automatically retried after connection failure.
 

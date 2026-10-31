@@ -11,6 +11,7 @@ pub(super) fn run_api_command(args: &[String]) -> std::io::Result<i32> {
     match subcommand {
         "schema" => api_schema(&args[1..]),
         "snapshot" => api_snapshot(&args[1..]),
+        "call" => api_call(&args[1..]),
         "help" | "--help" | "-h" => {
             print_api_help();
             Ok(0)
@@ -65,6 +66,37 @@ fn api_snapshot(args: &[String]) -> std::io::Result<i32> {
     })?)
 }
 
+/// Sends any socket method by name, so every method has a CLI equivalent.
+fn api_call(args: &[String]) -> std::io::Result<i32> {
+    let (method, params) = match args {
+        [method] => (method, "{}"),
+        [method, params] => (method, params.as_str()),
+        _ => {
+            eprintln!("usage: herdr api call METHOD [PARAMS_JSON]");
+            return Ok(2);
+        }
+    };
+    let request = match call_request(method, params) {
+        Ok(request) => request,
+        Err(message) => {
+            eprintln!("{message}");
+            return Ok(2);
+        }
+    };
+    super::print_response(&super::send_request(&request)?)
+}
+
+fn call_request(method: &str, params: &str) -> Result<Request, String> {
+    let params: serde_json::Value =
+        serde_json::from_str(params).map_err(|err| format!("invalid params JSON: {err}"))?;
+    serde_json::from_value(serde_json::json!({
+        "id": format!("cli:api:call:{method}"),
+        "method": method,
+        "params": params,
+    }))
+    .map_err(|err| format!("invalid request for {method}: {err}"))
+}
+
 fn write_schema_file(path: &std::path::Path) -> std::io::Result<()> {
     std::fs::write(path, API_SCHEMA_JSON)
 }
@@ -99,6 +131,7 @@ fn schema_summary_text() -> std::io::Result<String> {
 fn print_api_help() {
     eprintln!("herdr api commands:");
     eprintln!("  herdr api snapshot");
+    eprintln!("  herdr api call METHOD [PARAMS_JSON]");
     eprintln!("  herdr api schema [--json | --output PATH]");
 }
 
@@ -108,6 +141,24 @@ fn print_api_schema_help() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn api_call_builds_typed_requests_and_rejects_bad_input() {
+        let request = super::call_request("session.snapshot", r#"{"since":3}"#).unwrap();
+        assert!(matches!(
+            request.method,
+            crate::api::schema::Method::SessionSnapshot(
+                crate::api::schema::SessionSnapshotParams { since: Some(3), .. }
+            )
+        ));
+        assert!(super::call_request("server.capabilities", "{}").is_ok());
+        assert!(super::call_request("no.such.method", "{}")
+            .unwrap_err()
+            .starts_with("invalid request"));
+        assert!(super::call_request("ping", "{")
+            .unwrap_err()
+            .starts_with("invalid params JSON"));
+    }
+
     #[test]
     fn schema_summary_text_stays_human_sized() {
         let text = super::schema_summary_text().unwrap();
