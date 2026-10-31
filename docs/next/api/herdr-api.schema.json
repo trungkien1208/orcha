@@ -766,6 +766,44 @@
                 "changes"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "effort": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "fast": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "model": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "pane_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "pane_agent_model_changed",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id",
+                "workspace_id"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -797,7 +835,8 @@
             "pane_agent_detected",
             "pane_agent_status_changed",
             "layout_updated",
-            "session_changed"
+            "session_changed",
+            "pane_agent_model_changed"
           ],
           "type": "string"
         },
@@ -3043,6 +3082,13 @@
                 "null"
               ]
             },
+            "model": {
+              "description": "Model the session runs on, as the agent names it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "pane_id": {
               "type": "string"
             },
@@ -4392,6 +4438,18 @@
               "properties": {
                 "type": {
                   "const": "session.changed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "pane.agent_model_changed",
                   "type": "string"
                 }
               },
@@ -6746,6 +6804,22 @@
                 "null"
               ]
             },
+            "effort": {
+              "default": null,
+              "description": "Reasoning effort of the current session; null when unknown.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fast": {
+              "default": null,
+              "description": "Whether fast mode is on; null when unknown.",
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
             "focused": {
               "type": "boolean"
             },
@@ -6760,6 +6834,14 @@
             },
             "launch_pending": {
               "type": "boolean"
+            },
+            "model": {
+              "default": null,
+              "description": "Model of the current session, as the agent reported it; null when unknown.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "name": {
               "type": [
@@ -7643,6 +7725,44 @@
                 "changes"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "effort": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "fast": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "model": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "pane_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "pane_agent_model_changed",
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id",
+                "workspace_id"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -7689,7 +7809,8 @@
             "pane_agent_detected",
             "pane_agent_status_changed",
             "layout_updated",
-            "session_changed"
+            "session_changed",
+            "pane_agent_model_changed"
           ],
           "type": "string"
         },

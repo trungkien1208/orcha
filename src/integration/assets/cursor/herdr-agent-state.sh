@@ -37,6 +37,7 @@ session_id = first_text("conversation_id", "conversationId", "session_id", "sess
 if session_id is None:
     raise SystemExit(0)
 transcript_path = first_text("transcript_path", "transcriptPath")
+model = first_text("model")
 
 seq = time.time_ns()
 params = {
@@ -48,6 +49,8 @@ params = {
 }
 if transcript_path is not None:
     params["agent_session_path"] = transcript_path
+if model is not None:
+    params["model"] = model
 request = json.dumps({
     "id": f"herdr:cursor:{seq}",
     "method": "pane.report_agent_session",

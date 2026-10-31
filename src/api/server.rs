@@ -884,6 +884,8 @@ const API_FEATURES: &[&str] = &[
     "session.snapshot.since",
     // `agent_session` carries `id` and `transcript_path`.
     "agent_session.transcript_path",
+    // Agent records carry `model`, `effort` and `fast`.
+    "agent.model_state",
 ];
 
 fn server_capabilities_response(id: String) -> String {

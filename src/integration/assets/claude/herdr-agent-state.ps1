@@ -2,7 +2,7 @@
 # managed by herdr; reinstalling or updating the integration overwrites this file.
 # add custom hooks beside this file instead of editing it.
 # HERDR_INTEGRATION_ID=claude
-# HERDR_INTEGRATION_VERSION=11
+# HERDR_INTEGRATION_VERSION=12
 
 param([string]$Action = "")
 
@@ -46,6 +46,11 @@ try {
     )
     if ($payload.transcript_path -is [string] -and -not [string]::IsNullOrWhiteSpace($payload.transcript_path)) {
         $args += @("--agent-session-path", "$($payload.transcript_path)")
+    }
+    $model = $payload.model
+    if ($model -isnot [string] -and $null -ne $model) { $model = $model.id }
+    if ($model -is [string] -and -not [string]::IsNullOrWhiteSpace($model)) {
+        $args += @("--model", "$model")
     }
     if ($payload.hook_event_name -eq "SessionStart" -and $payload.source -is [string] -and -not [string]::IsNullOrWhiteSpace($payload.source)) {
         $args += @("--session-start-source", "$($payload.source)")

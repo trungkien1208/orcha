@@ -92,6 +92,8 @@ pub enum Subscription {
     LayoutUpdated {},
     #[serde(rename = "session.changed")]
     SessionChanged {},
+    #[serde(rename = "pane.agent_model_changed")]
+    PaneAgentModelChanged {},
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -229,6 +231,7 @@ pub enum EventKind {
     PaneAgentStatusChanged,
     LayoutUpdated,
     SessionChanged,
+    PaneAgentModelChanged,
 }
 
 impl EventKind {
@@ -261,6 +264,7 @@ impl EventKind {
             EventKind::PaneAgentStatusChanged => "pane.agent_status_changed",
             EventKind::LayoutUpdated => "layout.updated",
             EventKind::SessionChanged => "session.changed",
+            EventKind::PaneAgentModelChanged => "pane.agent_model_changed",
         }
     }
 }
@@ -293,6 +297,7 @@ pub const KNOWN_EVENT_KINDS: &[EventKind] = &[
     EventKind::PaneAgentStatusChanged,
     EventKind::LayoutUpdated,
     EventKind::SessionChanged,
+    EventKind::PaneAgentModelChanged,
 ];
 
 pub const PLUGIN_HOOK_EVENT_KINDS: &[EventKind] = &[
@@ -573,5 +578,12 @@ pub enum EventData {
         version: u64,
         epoch: String,
         changes: Vec<super::session::SessionChange>,
+    },
+    PaneAgentModelChanged {
+        pane_id: String,
+        workspace_id: String,
+        model: Option<String>,
+        effort: Option<String>,
+        fast: Option<bool>,
     },
 }

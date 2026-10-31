@@ -3,7 +3,7 @@
 # managed by herdr; reinstalling or updating the integration overwrites this file.
 # add custom hooks beside this file instead of editing it.
 # HERDR_INTEGRATION_ID=claude
-# HERDR_INTEGRATION_VERSION=11
+# HERDR_INTEGRATION_VERSION=12
 
 set -eu
 
@@ -62,6 +62,11 @@ session_id = hook_input.get("session_id")
 agent_session_id = session_id if isinstance(session_id, str) and session_id else None
 transcript_path = hook_input.get("transcript_path")
 agent_session_path = transcript_path if isinstance(transcript_path, str) and transcript_path else None
+model = hook_input.get("model")
+if isinstance(model, dict):
+    model = model.get("id") or model.get("display_name")
+if not isinstance(model, str) or not model.strip():
+    model = None
 session_start_source = hook_input.get("source") if hook_event_name == "SessionStart" else None
 if not isinstance(session_start_source, str) or not session_start_source:
     session_start_source = None
@@ -75,6 +80,8 @@ if agent_session_id:
     }
     if agent_session_path:
         params["agent_session_path"] = agent_session_path
+    if model:
+        params["model"] = model
     if session_start_source:
         params["session_start_source"] = session_start_source
     request = {

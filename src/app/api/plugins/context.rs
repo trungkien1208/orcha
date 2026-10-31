@@ -169,6 +169,11 @@ impl App {
                 pane_id,
                 workspace_id,
             }
+            | EventData::PaneAgentModelChanged {
+                pane_id,
+                workspace_id,
+                ..
+            }
             | EventData::PaneAgentDetected {
                 pane_id,
                 workspace_id,

@@ -1137,7 +1137,7 @@ fn claude_v9_integration_status_is_outdated_until_reinstalled() {
 
     assert_eq!(claude.path, hook_path);
     assert_eq!(claude.installed_version, Some(9));
-    assert_eq!(claude.expected_version, 11);
+    assert_eq!(claude.expected_version, 12);
     assert_eq!(claude.state, IntegrationStatusKind::Outdated);
 
     install_claude().unwrap();
@@ -1146,7 +1146,7 @@ fn claude_v9_integration_status_is_outdated_until_reinstalled() {
         hook_path,
         CLAUDE_INTEGRATION_VERSION,
     );
-    assert_eq!(status.installed_version, Some(11));
+    assert_eq!(status.installed_version, Some(12));
     assert_eq!(status.state, IntegrationStatusKind::Current);
 
     std::env::remove_var("HOME");
@@ -1176,7 +1176,7 @@ fn claude_v2_integration_status_is_outdated() {
 
     assert_eq!(claude.path, hook_path);
     assert_eq!(claude.installed_version, Some(2));
-    assert_eq!(claude.expected_version, 11);
+    assert_eq!(claude.expected_version, 12);
     assert_eq!(claude.state, IntegrationStatusKind::Outdated);
 
     std::env::remove_var("HOME");
@@ -5426,7 +5426,7 @@ fn codex_hook_reports_new_sessions_before_the_rollout_exists() {
 
     let with_rollout = socket_hook_request(
         &installed.hook_path,
-        r#"{"hook_event_name":"SessionStart","session_id":"thread-1","transcript_path":"/r/rollout-thread-1.jsonl"}"#,
+        r#"{"hook_event_name":"SessionStart","session_id":"thread-1","transcript_path":"/r/rollout-thread-1.jsonl","model":"gpt-5.5"}"#,
         &[],
     )
     .unwrap();
@@ -5434,6 +5434,7 @@ fn codex_hook_reports_new_sessions_before_the_rollout_exists() {
         with_rollout["params"]["agent_session_path"],
         "/r/rollout-thread-1.jsonl"
     );
+    assert_eq!(with_rollout["params"]["model"], "gpt-5.5");
 
     assert!(socket_hook_request(
         &installed.hook_path,
@@ -5458,7 +5459,7 @@ fn cursor_hook_reports_the_conversation_id_and_transcript() {
 
     let request = socket_hook_request(
         &installed.hook_path,
-        r#"{"hook_event_name":"sessionStart","session_id":"cli-1","conversation_id":"chat-1","transcript_path":"/c/chat-1/chat-1.jsonl"}"#,
+        r#"{"hook_event_name":"sessionStart","session_id":"cli-1","conversation_id":"chat-1","transcript_path":"/c/chat-1/chat-1.jsonl","model":"sonnet-4.5"}"#,
         &[],
     )
     .unwrap();
@@ -5467,6 +5468,7 @@ fn cursor_hook_reports_the_conversation_id_and_transcript() {
         request["params"]["agent_session_path"],
         "/c/chat-1/chat-1.jsonl"
     );
+    assert_eq!(request["params"]["model"], "sonnet-4.5");
 
     clear_integration_path_env();
     let _ = fs::remove_dir_all(base);

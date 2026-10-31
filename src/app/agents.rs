@@ -379,6 +379,10 @@ impl App {
             return None;
         }
         let pane = self.pane_metadata(ws_idx, pane_id)?;
+        let session_value = pane
+            .agent_session
+            .as_ref()
+            .map(|session| session.value.clone());
         Some(crate::api::schema::AgentInfo {
             terminal_id: pane.terminal_id,
             name: terminal.agent_name.clone(),
@@ -401,6 +405,17 @@ impl App {
             state_change_seq: terminal.last_agent_state_change_seq.unwrap_or(0),
             completion_seq: terminal.last_agent_completion_seq,
             cwd: pane.cwd,
+            model: session_value
+                .as_ref()
+                .and_then(|session_value| {
+                    terminal
+                        .agent_model
+                        .as_ref()
+                        .filter(|(reported, _)| reported == session_value)
+                })
+                .map(|(_, model)| model.clone()),
+            effort: None,
+            fast: None,
             foreground_cwd: pane.foreground_cwd,
             revision: pane.revision,
         })

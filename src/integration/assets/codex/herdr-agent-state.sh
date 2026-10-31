@@ -64,6 +64,11 @@ if not isinstance(transcript_path, str) or not transcript_path.strip():
 inherited_session_id = os.environ.get("CODEX_THREAD_ID")
 if inherited_session_id and inherited_session_id != agent_session_id:
     raise SystemExit(0)
+model = hook_input.get("model")
+if isinstance(model, dict):
+    model = model.get("id") or model.get("display_name")
+if not isinstance(model, str) or not model.strip():
+    model = None
 session_start_source = hook_input.get("source") if hook_event_name == "SessionStart" else None
 if not isinstance(session_start_source, str) or not session_start_source:
     session_start_source = None
@@ -77,6 +82,8 @@ if agent_session_id:
     }
     if transcript_path:
         params["agent_session_path"] = transcript_path
+    if model:
+        params["model"] = model
     if session_start_source:
         params["session_start_source"] = session_start_source
     request = {

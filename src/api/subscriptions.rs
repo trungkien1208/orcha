@@ -202,6 +202,9 @@ impl ActiveSubscription {
                 Ok(event_subscription(EventKind::PaneAgentDetected))
             }
             Subscription::LayoutUpdated {} => Ok(event_subscription(EventKind::LayoutUpdated)),
+            Subscription::PaneAgentModelChanged {} => {
+                Ok(event_subscription(EventKind::PaneAgentModelChanged))
+            }
             Subscription::SessionChanged {} => Ok(Self::Event(ActiveEventSubscription {
                 event_kind: EventKind::SessionChanged,
                 last_sequence: event_start_sequence,

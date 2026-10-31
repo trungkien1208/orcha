@@ -1093,6 +1093,23 @@ after a server restart.
 
 Feature flag: `agent_session.transcript_path`.
 
+### Model state
+
+Agent records carry `model`, `effort` and `fast`, each `null` when Herdr does
+not know it. `model` comes from the agent's session-start hook (Claude, Codex
+and Cursor send it when the agent includes it; reinstall their integrations).
+Herdr does not observe effort or fast mode yet, so those stay `null`. A
+`pane.agent_model_changed` event fires when a pane's model changes:
+
+```json
+{"event":"pane_agent_model_changed","data":{"type":"pane_agent_model_changed","pane_id":"w1:p1","workspace_id":"w1","model":"claude-opus-5-5","effort":null,"fast":null}}
+```
+
+Other reporters can set the model with `pane.report_agent_session`'s optional
+`model` field (CLI: `--model`).
+
+Feature flag: `agent.model_state`.
+
 ## Protocol stability
 
 The client-rendered Herdr UI uses a stable endpoint generation for local and SSH

@@ -45,6 +45,11 @@ try {
     if ($payload.transcript_path -is [string] -and -not [string]::IsNullOrWhiteSpace($payload.transcript_path)) {
         $args += @("--agent-session-path", "$($payload.transcript_path)")
     }
+    $model = $payload.model
+    if ($model -isnot [string] -and $null -ne $model) { $model = $model.id }
+    if ($model -is [string] -and -not [string]::IsNullOrWhiteSpace($model)) {
+        $args += @("--model", "$model")
+    }
     if ($payload.hook_event_name -eq "SessionStart" -and $payload.source -is [string] -and -not [string]::IsNullOrWhiteSpace($payload.source)) {
         $args += @("--session-start-source", "$($payload.source)")
     }

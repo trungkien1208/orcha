@@ -56,6 +56,11 @@ $herdr = if ([string]::IsNullOrWhiteSpace($env:HERDR_BIN_PATH)) { "herdr" } else
 try {
     $args = @("pane", "report-agent-session", $env:HERDR_PANE_ID, "--source", "herdr:cursor", "--agent", "cursor", "--seq", "$seq", "--agent-session-id", "$sessionId")
     if ($transcriptPath) { $args += @("--agent-session-path", "$transcriptPath") }
+    $model = $payload.model
+    if ($model -isnot [string] -and $null -ne $model) { $model = $model.id }
+    if ($model -is [string] -and -not [string]::IsNullOrWhiteSpace($model)) {
+        $args += @("--model", "$model")
+    }
     & $herdr @args 2>$null | Out-Null
 } catch {
 }

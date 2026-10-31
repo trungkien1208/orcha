@@ -7970,6 +7970,7 @@ fn api_report_agent_stores_valid_resume_argv_and_rejects_invalid() {
                     agent_session_id: None,
                     agent_session_path: None,
                     session_start_source: None,
+                    model: None,
                     resume_argv: Some(vec!["intruder".into()]),
                 },
             ),
@@ -8012,6 +8013,7 @@ fn api_resume_argv_is_ignored_when_its_session_report_is_refused() {
             agent_session_id: Some(session.into()),
             agent_session_path: None,
             session_start_source: None,
+            model: None,
             resume_argv: Some(vec!["claude".into(), "--resume".into(), session.into()]),
         })
     };
@@ -8152,6 +8154,7 @@ fn completion_guard_api_session_replacement_does_not_notify_finished() {
                     agent_session_path: Some(new_session.clone()),
                     resume_argv: None,
                     session_start_source: Some(reason.into()),
+                    model: None,
                 }),
             );
             let mut report = PaneReportAgentParams {
@@ -8446,7 +8449,7 @@ fn reported_session_exposes_its_id_and_transcript_path() {
         .unwrap()
         .set_detected_state(Some(Agent::Claude), AgentState::Idle);
     let public_pane_id = server.app.public_pane_id(0, pane_id).unwrap();
-    let report = |seq, path: Option<&str>| {
+    let report = |seq, path: Option<&str>, model: Option<&str>| {
         Method::PaneReportAgentSession(PaneReportAgentSessionParams {
             pane_id: public_pane_id.clone(),
             source: "herdr:claude".into(),
@@ -8456,6 +8459,7 @@ fn reported_session_exposes_its_id_and_transcript_path() {
             agent_session_path: path.map(str::to_string),
             resume_argv: None,
             session_start_source: Some("startup".into()),
+            model: model.map(str::to_string),
         })
     };
     let session = |server: &HeadlessServer| {
@@ -8469,7 +8473,10 @@ fn reported_session_exposes_its_id_and_transcript_path() {
             .expect("reported session")
     };
 
-    completion_guard_api_report(&mut server, report(1, Some("/t/session-1.jsonl")));
+    completion_guard_api_report(
+        &mut server,
+        report(1, Some("/t/session-1.jsonl"), Some("claude-opus-5-5")),
+    );
     let reported = session(&server);
     assert_eq!(reported.id.as_deref(), Some("session-1"));
     assert_eq!(
@@ -8477,10 +8484,33 @@ fn reported_session_exposes_its_id_and_transcript_path() {
         Some("/t/session-1.jsonl")
     );
 
-    completion_guard_api_report(&mut server, report(2, None));
+    completion_guard_api_report(&mut server, report(2, None, None));
     assert_eq!(
         session(&server).transcript_path.as_deref(),
         Some("/t/session-1.jsonl"),
         "a later report without a path keeps the known transcript"
+    );
+
+    let agent = server
+        .app
+        .session_snapshot()
+        .agents
+        .into_iter()
+        .find(|agent| agent.pane_id == public_pane_id)
+        .expect("agent record");
+    assert_eq!(agent.model.as_deref(), Some("claude-opus-5-5"));
+    assert_eq!(agent.effort, None);
+    assert_eq!(agent.fast, None);
+    let model_events: Vec<_> = server
+        .app
+        .event_hub
+        .events_after(0)
+        .into_iter()
+        .filter(|(_, event)| event.event == api::schema::EventKind::PaneAgentModelChanged)
+        .collect();
+    assert_eq!(
+        model_events.len(),
+        1,
+        "unchanged reports do not repeat the event"
     );
 }

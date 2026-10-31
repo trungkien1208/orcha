@@ -1626,6 +1626,12 @@ impl App {
             .agent_session_path
             .clone()
             .filter(|path| !path.trim().is_empty());
+        let model = params
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|model| !model.is_empty())
+            .map(str::to_string);
         let session_ref = crate::agent_resume::session_ref_from_report(
             &params.source,
             &agent_label,
@@ -1647,6 +1653,7 @@ impl App {
         if applied {
             if let Some(session_ref) = session_ref.as_ref() {
                 self.record_agent_transcript(ws_idx, pane_id, session_ref, transcript_path);
+                self.record_agent_model(ws_idx, pane_id, session_ref, model);
             }
         }
         self.report_agent_resume(
@@ -1695,6 +1702,50 @@ impl App {
             terminal.agent_transcript = transcript;
             self.emit_pane_updated(ws_idx, pane_id);
         }
+    }
+
+    /// Remembers the model a session report named and announces a change.
+    /// A report without a model keeps the one already known for this session.
+    fn record_agent_model(
+        &mut self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+        session_ref: &crate::agent_resume::AgentSessionRef,
+        model: Option<String>,
+    ) {
+        let Some(model) = model else {
+            return;
+        };
+        let Some(terminal_id) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.pane_state(pane_id))
+            .map(|pane| pane.attached_terminal_id.clone())
+        else {
+            return;
+        };
+        let Some(terminal) = self.state.terminals.get_mut(&terminal_id) else {
+            return;
+        };
+        let reported = Some((session_ref.value.clone(), model.clone()));
+        if terminal.agent_model == reported {
+            return;
+        }
+        terminal.agent_model = reported;
+        let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) else {
+            return;
+        };
+        self.emit_event(crate::api::schema::EventEnvelope {
+            event: crate::api::schema::EventKind::PaneAgentModelChanged,
+            data: crate::api::schema::EventData::PaneAgentModelChanged {
+                pane_id: public_pane_id,
+                workspace_id: self.public_workspace_id(ws_idx),
+                model: Some(model),
+                effort: None,
+                fast: None,
+            },
+        });
     }
 
     /// A resume command belongs to the session it was reported with, so it is

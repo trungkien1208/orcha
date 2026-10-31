@@ -140,6 +140,8 @@ pub struct TerminalState {
     /// Transcript file a hook reported, with the session id it belongs to.
     /// Runtime only: a restart learns it again from the next session report.
     pub agent_transcript: Option<(String, String)>,
+    /// Model a hook reported, with the session id it belongs to. Runtime only.
+    pub agent_model: Option<(String, String)>,
     reported_resume: Option<crate::agent_resume::ReportedAgentResume>,
     reported_resume_revision: u64,
     pub terminal_title: Option<String>,
@@ -181,6 +183,7 @@ impl TerminalState {
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
             persisted_agent_session: None,
             agent_transcript: None,
+            agent_model: None,
             reported_resume: None,
             reported_resume_revision: 0,
             terminal_title: None,
