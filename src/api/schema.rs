@@ -146,6 +146,7 @@ operations::define_operations! {
     PluginPaneFocus(PluginPaneFocusParams) => "plugin.pane.focus", true, false;
     PluginPaneClose(PluginPaneCloseParams) => "plugin.pane.close", true, false;
     ServerCapabilitiesGet(EmptyParams) => "server.capabilities", false, false;
+    ServerMultiplex(EmptyParams) => "server.multiplex", false, false;
 }
 
 #[cfg(test)]

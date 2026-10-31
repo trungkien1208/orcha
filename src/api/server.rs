@@ -18,8 +18,9 @@ use crate::api::wait::{prompt_agent, wait_for_agent, wait_for_event, wait_for_ou
 use crate::api::{request_changes_ui, socket_path, ApiRequestMessage, ApiRequestSender, EventHub};
 use crate::ipc::{
     bind_local_listener, is_connection_closed_error, local_stream_peer_closed,
-    poll_local_stream_read, remove_socket_file_if_owned, set_local_stream_polling,
-    socket_file_identity, LocalStream, LocalStreamRead, SocketFileIdentity,
+    poll_local_stream_read, poll_local_stream_read_count, remove_socket_file_if_owned,
+    set_local_stream_polling, socket_file_identity, LocalStream, LocalStreamRead,
+    LocalStreamReadCount, SocketFileIdentity,
 };
 use crate::server::shutdown::{ServerStop, ShutdownReason};
 
@@ -33,6 +34,8 @@ const INITIAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_INITIAL_REQUEST_BYTES: usize = 1024 * 1024;
 const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(50);
+/// How long a multiplexed connection waits for outgoing lines before reading again.
+const MULTIPLEX_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 pub struct ServerHandle {
     _thread: std::thread::JoinHandle<()>,
@@ -350,28 +353,10 @@ fn handle_connection_with_stop(
     let request = match serde_json::from_str::<Request>(line) {
         Ok(request) => request,
         Err(request_error) => {
-            // Recover correlation without relaxing typed request validation or accepting
-            // ambiguous duplicate IDs. Invalid JSON and non-string IDs stay uncorrelated.
-            #[derive(serde::Deserialize)]
-            struct RequestId {
-                id: String,
-            }
-            let id = if line.starts_with('{') {
-                serde_json::from_str::<RequestId>(line)
-                    .map(|request| request.id)
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            };
-            let response =
-                retired_pane_graphics_method_error(line, &id).unwrap_or_else(|| ErrorResponse {
-                    id,
-                    error: ErrorBody {
-                        code: "invalid_request".into(),
-                        message: format!("invalid request: {request_error}"),
-                    },
-                });
-            write_json_line_allow_disconnect(&mut stream, &response)?;
+            write_json_line_allow_disconnect(
+                &mut stream,
+                &invalid_request_response(line, request_error),
+            )?;
             return Ok(());
         }
     };
@@ -379,11 +364,11 @@ fn handle_connection_with_stop(
     let request_id = request.id.clone();
     let method = api_method_name(&request.method);
     let changes_ui = request_changes_ui(&request);
-    crate::logging::api_request_started(&request_id, method, changes_ui);
 
     match request.method {
         #[cfg(unix)]
         Method::ServerSshAgentRegister(params) => {
+            crate::logging::api_request_started(&request_id, method, changes_ui);
             let lease = ssh_agents
                 .ok_or_else(|| io::Error::other("SSH agent registration is unavailable"))
                 .and_then(|registry| registry.register(PathBuf::from(params.socket_path)));
@@ -425,9 +410,104 @@ fn handle_connection_with_stop(
             }
             Ok(())
         }
+        Method::ServerMultiplex(_) => {
+            crate::logging::api_request_started(&request_id, method, changes_ui);
+            write_json_line(
+                &mut stream,
+                &SuccessResponse {
+                    id: request_id.clone(),
+                    result: ResponseResult::Ok {},
+                },
+            )?;
+            let context = RequestContext {
+                api_tx: api_tx.clone(),
+                event_hub: event_hub.clone(),
+                running: Arc::clone(running),
+                capabilities,
+                server_stop: server_stop.cloned(),
+                stop_caller: crate::platform::local_stream_peer_description(&stream),
+            };
+            let result = run_multiplex(stream, &context);
+            crate::logging::api_request_completed(&request_id, method, "stream_closed", changes_ui);
+            result
+        }
+        method_body => {
+            let stop_caller = matches!(method_body, Method::ServerStop(_))
+                .then(|| crate::platform::local_stream_peer_description(&stream))
+                .flatten();
+            let context = RequestContext {
+                api_tx: api_tx.clone(),
+                event_hub: event_hub.clone(),
+                running: Arc::clone(running),
+                capabilities,
+                server_stop: server_stop.cloned(),
+                stop_caller,
+            };
+            serve_request(
+                &mut stream,
+                Request {
+                    id: request_id,
+                    method: method_body,
+                },
+                &context,
+            )
+        }
+    }
+}
+
+/// Builds the error for an unparsable request line. Correlation is recovered
+/// without relaxing typed request validation or accepting ambiguous duplicate
+/// IDs; invalid JSON and non-string IDs stay uncorrelated.
+fn invalid_request_response(line: &str, request_error: serde_json::Error) -> ErrorResponse {
+    #[derive(serde::Deserialize)]
+    struct RequestId {
+        id: String,
+    }
+    let id = if line.starts_with('{') {
+        serde_json::from_str::<RequestId>(line)
+            .map(|request| request.id)
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    retired_pane_graphics_method_error(line, &id).unwrap_or_else(|| ErrorResponse {
+        id,
+        error: ErrorBody {
+            code: "invalid_request".into(),
+            message: format!("invalid request: {request_error}"),
+        },
+    })
+}
+
+/// Everything one request needs besides the connection it answers on.
+#[derive(Clone)]
+struct RequestContext {
+    api_tx: ApiRequestSender,
+    event_hub: EventHub,
+    running: Arc<AtomicBool>,
+    capabilities: Option<ServerCapabilities>,
+    server_stop: Option<ServerStop>,
+    stop_caller: Option<String>,
+}
+
+/// Answers one request on `connection`, streaming for subscriptions and waits.
+fn serve_request(
+    connection: &mut dyn ApiConnection,
+    request: Request,
+    context: &RequestContext,
+) -> std::io::Result<()> {
+    let request_id = request.id.clone();
+    let method = api_method_name(&request.method);
+    let changes_ui = request_changes_ui(&request);
+    crate::logging::api_request_started(&request_id, method, changes_ui);
+    let api_tx = &context.api_tx;
+    let event_hub = &context.event_hub;
+    let running = &context.running;
+
+    match request.method {
         Method::EventsSubscribe(params) => {
             let result = stream_subscriptions(
-                stream,
+                connection,
                 request_id.clone(),
                 params,
                 api_tx,
@@ -451,57 +531,54 @@ fn handle_connection_with_stop(
             let response = wait_for_event(
                 request_id.clone(),
                 params,
-                &mut stream,
+                connection,
                 api_tx,
                 event_hub,
                 running,
             )?;
-            finish_wait_response(&mut stream, response, &request_id, method, changes_ui)
+            finish_wait_response(connection, response, &request_id, method, changes_ui)
         }
         Method::AgentPrompt(params) => {
             let response = prompt_agent(
                 request_id.clone(),
                 params,
-                &mut stream,
+                connection,
                 api_tx,
                 event_hub,
                 running,
             )?;
-            finish_wait_response(&mut stream, response, &request_id, method, changes_ui)
+            finish_wait_response(connection, response, &request_id, method, changes_ui)
         }
         Method::AgentWait(params) => {
             let response = wait_for_agent(
                 request_id.clone(),
                 params,
-                &mut stream,
+                connection,
                 api_tx,
                 event_hub,
                 running,
             )?;
-            finish_wait_response(&mut stream, response, &request_id, method, changes_ui)
+            finish_wait_response(connection, response, &request_id, method, changes_ui)
         }
         Method::PaneWaitForOutput(params) => {
             let response =
-                wait_for_output(request_id.clone(), params, &mut stream, api_tx, running)?;
-            finish_wait_response(&mut stream, response, &request_id, method, changes_ui)
+                wait_for_output(request_id.clone(), params, connection, api_tx, running)?;
+            finish_wait_response(connection, response, &request_id, method, changes_ui)
         }
         method_body => {
             let (response_write_tx, response_write_rx) = std::sync::mpsc::channel();
-            let stop_caller = matches!(method_body, Method::ServerStop(_))
-                .then(|| crate::platform::local_stream_peer_description(&stream))
-                .flatten();
             let response = handle_request(
                 Request {
                     id: request_id.clone(),
                     method: method_body,
                 },
                 api_tx,
-                capabilities,
-                server_stop,
-                stop_caller,
+                context.capabilities.clone(),
+                context.server_stop.as_ref(),
+                context.stop_caller.clone(),
                 Some(response_write_rx),
             );
-            let result = write_text_line_allow_disconnect(&mut stream, &response);
+            let result = send_line_allow_disconnect(connection, &response);
             let _ = response_write_tx.send(());
             match &result {
                 Ok(()) => crate::logging::api_request_completed(
@@ -519,8 +596,201 @@ fn handle_connection_with_stop(
     }
 }
 
+/// Where a request writes its response and, for streams, its events.
+pub(super) trait ApiConnection {
+    fn peer_closed(&mut self) -> std::io::Result<bool>;
+    fn send_line(&mut self, line: &str) -> std::io::Result<()>;
+    fn send_event(&mut self, event: serde_json::Value) -> std::io::Result<()> {
+        let encoded = serde_json::to_string(&event)
+            .map_err(|err| std::io::Error::other(format!("failed to encode json: {err}")))?;
+        self.send_line(&encoded)
+    }
+}
+
+impl ApiConnection for LocalStream {
+    fn peer_closed(&mut self) -> std::io::Result<bool> {
+        local_stream_peer_closed(self)
+    }
+
+    fn send_line(&mut self, line: &str) -> std::io::Result<()> {
+        write_text_line(self, line)
+    }
+}
+
+fn send_line_allow_disconnect(
+    connection: &mut dyn ApiConnection,
+    line: &str,
+) -> std::io::Result<()> {
+    match connection.send_line(line) {
+        Err(err) if is_connection_closed_error(&err) => Ok(()),
+        result => result,
+    }
+}
+
+fn send_json_line<T: serde::Serialize>(
+    connection: &mut dyn ApiConnection,
+    value: &T,
+) -> std::io::Result<()> {
+    let encoded = serde_json::to_string(value)
+        .map_err(|err| std::io::Error::other(format!("failed to encode json: {err}")))?;
+    connection.send_line(&encoded)
+}
+
+/// One request's view of a multiplexed connection. Lines go to the connection's
+/// writer; events carry the subscribing request's `id`.
+struct MultiplexedRequest {
+    id: String,
+    outgoing: std::sync::mpsc::Sender<String>,
+    closed: Arc<AtomicBool>,
+}
+
+impl ApiConnection for MultiplexedRequest {
+    fn peer_closed(&mut self) -> std::io::Result<bool> {
+        Ok(self.closed.load(Ordering::Relaxed))
+    }
+
+    fn send_line(&mut self, line: &str) -> std::io::Result<()> {
+        if self.closed.load(Ordering::Relaxed) {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "multiplexed connection closed",
+            ));
+        }
+        self.outgoing
+            .send(line.to_string())
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "multiplexed connection closed"))
+    }
+
+    fn send_event(&mut self, mut event: serde_json::Value) -> std::io::Result<()> {
+        if let Some(object) = event.as_object_mut() {
+            object.insert("id".into(), serde_json::Value::String(self.id.clone()));
+        }
+        let encoded = serde_json::to_string(&event)
+            .map_err(|err| std::io::Error::other(format!("failed to encode json: {err}")))?;
+        self.send_line(&encoded)
+    }
+}
+
+/// Serves newline-delimited requests on one connection until the client closes
+/// it. Each request runs on its own thread, so responses arrive in completion
+/// order and carry their request `id`; subscriptions share the connection.
+fn run_multiplex(mut stream: LocalStream, context: &RequestContext) -> std::io::Result<()> {
+    let closed = Arc::new(AtomicBool::new(false));
+    let (outgoing_tx, outgoing_rx) = std::sync::mpsc::channel::<String>();
+    let mut pending = Vec::new();
+    let mut buf = [0u8; 8192];
+    set_local_stream_polling(&mut stream, true)?;
+
+    let result = 'serve: loop {
+        if !context.running.load(Ordering::Relaxed) {
+            break Ok(());
+        }
+        match poll_local_stream_read_count(&mut stream, &mut buf) {
+            Ok(LocalStreamReadCount::Data(read)) => {
+                pending.extend_from_slice(&buf[..read]);
+                while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
+                    let line: Vec<u8> = pending.drain(..=end).collect();
+                    let line = String::from_utf8_lossy(&line);
+                    dispatch_multiplexed_line(line.trim(), context, &outgoing_tx, &closed);
+                }
+                if pending.len() > MAX_INITIAL_REQUEST_BYTES {
+                    break Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "api request line is too large",
+                    ));
+                }
+            }
+            Ok(LocalStreamReadCount::Pending) => {}
+            Ok(LocalStreamReadCount::Closed) => break Ok(()),
+            Err(err) => break Err(err),
+        }
+
+        let mut first = outgoing_rx.recv_timeout(MULTIPLEX_POLL_INTERVAL).ok();
+        if first.is_some() {
+            if let Err(err) = set_local_stream_polling(&mut stream, false) {
+                break Err(err);
+            }
+            while let Some(line) = first.take().or_else(|| outgoing_rx.try_recv().ok()) {
+                if let Err(err) = write_text_line(&mut stream, &line) {
+                    break 'serve if is_connection_closed_error(&err) {
+                        Ok(())
+                    } else {
+                        Err(err)
+                    };
+                }
+            }
+            if let Err(err) = set_local_stream_polling(&mut stream, true) {
+                break Err(err);
+            }
+        }
+    };
+    closed.store(true, Ordering::Relaxed);
+    result
+}
+
+fn dispatch_multiplexed_line(
+    line: &str,
+    context: &RequestContext,
+    outgoing: &std::sync::mpsc::Sender<String>,
+    closed: &Arc<AtomicBool>,
+) {
+    if line.is_empty() {
+        return;
+    }
+    let reply = |response: &ErrorResponse| {
+        if let Ok(encoded) = serde_json::to_string(response) {
+            let _ = outgoing.send(encoded);
+        }
+    };
+    let request = match serde_json::from_str::<Request>(line) {
+        Ok(request) => request,
+        Err(request_error) => {
+            reply(&invalid_request_response(line, request_error));
+            return;
+        }
+    };
+    if matches!(
+        request.method,
+        Method::ServerMultiplex(_) | Method::ServerSshAgentRegister(_)
+    ) {
+        reply(&ErrorResponse {
+            id: request.id,
+            error: ErrorBody {
+                code: "unsupported_in_multiplex".into(),
+                message: format!(
+                    "{} needs its own connection",
+                    api_method_name(&request.method)
+                ),
+            },
+        });
+        return;
+    }
+
+    let mut connection = MultiplexedRequest {
+        id: request.id.clone(),
+        outgoing: outgoing.clone(),
+        closed: Arc::clone(closed),
+    };
+    let context = context.clone();
+    let request_id = request.id.clone();
+    if let Err(err) = crate::thread_spawn::spawn_named("herdr-api-mux", move || {
+        if let Err(err) = serve_request(&mut connection, request, &context) {
+            debug!(err = %err, "multiplexed api request failed");
+        }
+    }) {
+        warn!(err = %err, "failed to spawn multiplexed api request thread");
+        reply(&ErrorResponse {
+            id: request_id,
+            error: ErrorBody {
+                code: "server_unavailable".into(),
+                message: "failed to start request".into(),
+            },
+        });
+    }
+}
+
 fn finish_wait_response(
-    stream: &mut LocalStream,
+    stream: &mut dyn ApiConnection,
     response: Option<String>,
     request_id: &str,
     method: &'static str,
@@ -535,7 +805,7 @@ fn finish_wait_response(
         );
         return Ok(());
     };
-    let result = write_text_line_allow_disconnect(stream, &response);
+    let result = send_line_allow_disconnect(stream, &response);
     match &result {
         Ok(()) => crate::logging::api_request_completed(
             request_id,
@@ -853,7 +1123,7 @@ mod windows_tests {
 }
 
 fn stream_subscriptions(
-    mut stream: LocalStream,
+    stream: &mut dyn ApiConnection,
     request_id: String,
     params: crate::api::schema::EventsSubscribeParams,
     api_tx: &ApiRequestSender,
@@ -876,7 +1146,7 @@ fn stream_subscriptions(
             Ok(active) => active,
             Err(mut response) => {
                 response.id = request_id;
-                if let Err(err) = write_json_line(&mut stream, &response) {
+                if let Err(err) = send_json_line(stream, &response) {
                     if is_connection_closed_error(&err) {
                         return Ok(());
                     }
@@ -888,8 +1158,8 @@ fn stream_subscriptions(
         subscriptions.push(active);
     }
 
-    if let Err(err) = write_json_line(
-        &mut stream,
+    if let Err(err) = send_json_line(
+        stream,
         &SuccessResponse {
             id: request_id.clone(),
             result: ResponseResult::SubscriptionStarted { warnings },
@@ -902,7 +1172,7 @@ fn stream_subscriptions(
     }
 
     loop {
-        if should_stop_connection(&mut stream, running)? {
+        if should_stop_connection(stream, running)? {
             return Ok(());
         }
 
@@ -910,8 +1180,8 @@ fn stream_subscriptions(
             let events = match subscription.poll_batch(api_tx, event_hub) {
                 Ok(events) => events,
                 Err(error) => {
-                    write_json_line_allow_disconnect(
-                        &mut stream,
+                    send_json_line_allow_disconnect(
+                        stream,
                         &ErrorResponse {
                             id: request_id,
                             error,
@@ -921,10 +1191,10 @@ fn stream_subscriptions(
                 }
             };
             for event in events {
-                if should_stop_connection(&mut stream, running)? {
+                if should_stop_connection(stream, running)? {
                     return Ok(());
                 }
-                if let Err(err) = write_json_line(&mut stream, &event) {
+                if let Err(err) = stream.send_event(event) {
                     if is_connection_closed_error(&err) {
                         return Ok(());
                     }
@@ -968,14 +1238,24 @@ fn write_json_line_allow_disconnect<T: serde::Serialize>(
 }
 
 pub(super) fn should_stop_connection(
-    stream: &mut LocalStream,
+    stream: &mut dyn ApiConnection,
     running: &Arc<AtomicBool>,
 ) -> std::io::Result<bool> {
     if !running.load(Ordering::Relaxed) {
         return Ok(true);
     }
 
-    local_stream_peer_closed(stream)
+    stream.peer_closed()
+}
+
+fn send_json_line_allow_disconnect<T: serde::Serialize>(
+    connection: &mut dyn ApiConnection,
+    value: &T,
+) -> std::io::Result<()> {
+    match send_json_line(connection, value) {
+        Err(err) if is_connection_closed_error(&err) => Ok(()),
+        result => result,
+    }
 }
 
 pub(super) fn dispatch_to_app_with_timeout(
@@ -1573,6 +1853,124 @@ mod tests {
         let response = thread.join().unwrap();
         let parsed: SuccessResponse = serde_json::from_str(&response).unwrap();
         assert_eq!(parsed.id, "req_2");
+    }
+
+    fn spawn_multiplex_connection(
+        name: &str,
+        api_tx: ApiRequestSender,
+        event_hub: EventHub,
+    ) -> (
+        BufReader<LocalStream>,
+        Arc<AtomicBool>,
+        std::thread::JoinHandle<std::io::Result<()>>,
+    ) {
+        let (client, server, _path) = local_stream_pair(name);
+        let running = Arc::new(AtomicBool::new(true));
+        let server_running = Arc::clone(&running);
+        let thread = std::thread::spawn(move || {
+            handle_connection(server, &api_tx, &event_hub, &server_running, None)
+        });
+        let mut reader = BufReader::new(client);
+        reader
+            .get_mut()
+            .write_all(b"{\"id\":\"mux\",\"method\":\"server.multiplex\",\"params\":{}}\n")
+            .unwrap();
+        let started: serde_json::Value = serde_json::from_str(&next_line(&mut reader)).unwrap();
+        assert_eq!(started["id"], "mux");
+        assert_eq!(started["result"]["type"], "ok");
+        (reader, running, thread)
+    }
+
+    fn next_line(reader: &mut BufReader<LocalStream>) -> String {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        line
+    }
+
+    #[test]
+    fn multiplexed_connection_answers_requests_by_id_in_completion_order() {
+        let (api_tx, mut api_rx) = mpsc::unbounded_channel();
+        let (mut reader, _running, thread) =
+            spawn_multiplex_connection("mux-order", api_tx, EventHub::default());
+
+        reader
+            .get_mut()
+            .write_all(
+                b"{\"id\":\"slow\",\"method\":\"workspace.list\",\"params\":{}}\n\
+                  {\"id\":\"fast\",\"method\":\"ping\",\"params\":{}}\n",
+            )
+            .unwrap();
+        let slow = api_rx.blocking_recv().unwrap();
+        assert_eq!(slow.request.id, "slow");
+
+        let fast: serde_json::Value = serde_json::from_str(&next_line(&mut reader)).unwrap();
+        assert_eq!(fast["id"], "fast");
+        assert_eq!(fast["result"]["type"], "pong");
+
+        slow.respond_to
+            .send(
+                serde_json::to_string(&SuccessResponse {
+                    id: "slow".into(),
+                    result: ResponseResult::Ok {},
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        let slow: serde_json::Value = serde_json::from_str(&next_line(&mut reader)).unwrap();
+        assert_eq!(slow["id"], "slow");
+
+        reader
+            .get_mut()
+            .write_all(
+                b"{\"id\":\"again\",\"method\":\"server.multiplex\",\"params\":{}}\nnot json\n",
+            )
+            .unwrap();
+        let nested: serde_json::Value = serde_json::from_str(&next_line(&mut reader)).unwrap();
+        assert_eq!(nested["id"], "again");
+        assert_eq!(nested["error"]["code"], "unsupported_in_multiplex");
+        let invalid: serde_json::Value = serde_json::from_str(&next_line(&mut reader)).unwrap();
+        assert_eq!(invalid["error"]["code"], "invalid_request");
+
+        drop(reader);
+        thread.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn multiplexed_subscription_events_carry_the_request_id() {
+        let (api_tx, _api_rx) = mpsc::unbounded_channel();
+        let event_hub = EventHub::default();
+        let (mut reader, _running, thread) =
+            spawn_multiplex_connection("mux-events", api_tx, event_hub.clone());
+
+        reader
+            .get_mut()
+            .write_all(
+                b"{\"id\":\"sub\",\"method\":\"events.subscribe\",\"params\":{\"subscriptions\":[{\"type\":\"workspace.focused\"}]}}\n",
+            )
+            .unwrap();
+        let started: serde_json::Value = serde_json::from_str(&next_line(&mut reader)).unwrap();
+        assert_eq!(started["id"], "sub");
+        assert_eq!(started["result"]["type"], "subscription_started");
+
+        event_hub.push(crate::api::schema::EventEnvelope {
+            event: crate::api::schema::EventKind::WorkspaceFocused,
+            data: crate::api::schema::EventData::WorkspaceFocused {
+                workspace_id: "w1".into(),
+            },
+        });
+        let event: serde_json::Value = serde_json::from_str(&next_line(&mut reader)).unwrap();
+        assert_eq!(event["id"], "sub");
+        assert_eq!(event["event"], "workspace_focused");
+
+        reader
+            .get_mut()
+            .write_all(b"{\"id\":\"p\",\"method\":\"ping\",\"params\":{}}\n")
+            .unwrap();
+        let pong: serde_json::Value = serde_json::from_str(&next_line(&mut reader)).unwrap();
+        assert_eq!(pong["id"], "p");
+
+        drop(reader);
+        thread.join().unwrap().unwrap();
     }
 
     #[test]

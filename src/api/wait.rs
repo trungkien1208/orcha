@@ -10,19 +10,18 @@ use crate::api::schema::{
 };
 use crate::api::server::{
     dispatch_to_app_with_caller_timeout, dispatch_to_app_with_timeout, should_stop_connection,
-    APP_RESPONSE_TIMEOUT, CONNECTION_POLL_INTERVAL,
+    ApiConnection, APP_RESPONSE_TIMEOUT, CONNECTION_POLL_INTERVAL,
 };
 use crate::api::subscriptions::ActiveSubscription;
 use crate::api::subscriptions::{match_output, output_match_read_source};
 use crate::api::{ApiRequestSender, EventHub};
-use crate::ipc::LocalStream;
 
 const AGENT_PROMPT_EFFECT_TIMEOUT_MS: u64 = 5_000;
 
 pub(super) fn wait_for_output(
     request_id: String,
     params: crate::api::schema::PaneWaitForOutputParams,
-    stream: &mut LocalStream,
+    stream: &mut dyn ApiConnection,
     api_tx: &ApiRequestSender,
     running: &Arc<AtomicBool>,
 ) -> std::io::Result<Option<String>> {
@@ -132,7 +131,7 @@ pub(super) fn wait_for_output(
 pub(super) fn wait_for_agent(
     request_id: String,
     params: crate::api::schema::AgentWaitParams,
-    stream: &mut LocalStream,
+    stream: &mut dyn ApiConnection,
     api_tx: &ApiRequestSender,
     event_hub: &EventHub,
     running: &Arc<AtomicBool>,
@@ -177,7 +176,7 @@ pub(super) fn wait_for_agent(
 pub(super) fn prompt_agent(
     request_id: String,
     mut params: crate::api::schema::AgentPromptParams,
-    stream: &mut LocalStream,
+    stream: &mut dyn ApiConnection,
     api_tx: &ApiRequestSender,
     event_hub: &EventHub,
     running: &Arc<AtomicBool>,
@@ -364,7 +363,7 @@ enum AgentWaitOutcome {
 fn wait_for_resolved_agent(
     request_id: String,
     wait: ResolvedAgentWait,
-    stream: &mut LocalStream,
+    stream: &mut dyn ApiConnection,
     api_tx: &ApiRequestSender,
     event_hub: &EventHub,
     running: &Arc<AtomicBool>,
@@ -697,7 +696,7 @@ fn agent_wait_probe_error(response: ErrorResponse) -> std::io::Result<String> {
 pub(super) fn wait_for_event(
     request_id: String,
     params: EventsWaitParams,
-    stream: &mut LocalStream,
+    stream: &mut dyn ApiConnection,
     api_tx: &ApiRequestSender,
     event_hub: &EventHub,
     running: &Arc<AtomicBool>,

@@ -96,7 +96,7 @@ Raw socket method names use dot notation:
 
 | Area | Methods |
 | --- | --- |
-| Server | `ping`, `server.capabilities`, `server.stop`, `server.reload_config`, `server.agent_manifests`, `server.reload_agent_manifests` |
+| Server | `ping`, `server.capabilities`, `server.multiplex`, `server.stop`, `server.reload_config`, `server.agent_manifests`, `server.reload_agent_manifests` |
 | Notification | `notification.show` |
 | Client | `client.window_title.set`, `client.window_title.clear` |
 | Session | `session.snapshot` |
@@ -991,6 +991,33 @@ old behavior and still rejects an unknown pane. `agent_status` filters as before
 ```
 
 Feature flag: `events.subscribe.agent_status_all_panes`.
+
+### server.multiplex
+
+A normal connection answers one request and closes. Send `server.multiplex`
+first to keep the connection open for many requests:
+
+```json
+{"id":"m","method":"server.multiplex","params":{}}
+{"id":"m","result":{"type":"ok"}}
+```
+
+After that, write one request per line at any time. Each request runs on its
+own, so responses arrive in completion order; match them by `id`. Use a unique
+`id` per request. `events.subscribe`, `events.wait`, `agent.wait` and
+`pane.wait_for_output` work on the same connection; every event line from a
+subscription carries the subscribing request's `id`. Closing the connection
+ends all of its subscriptions and waits. `server.multiplex` and
+`server.ssh_agent.register` need their own connection and return
+`unsupported_in_multiplex` inside one.
+
+```json
+{"id":"a","method":"events.subscribe","params":{"subscriptions":[{"type":"pane.agent_status_changed"}]}}
+{"id":"b","method":"agent.list","params":{}}
+{"id":"a","result":{"type":"subscription_started"}}
+{"id":"b","result":{"type":"agent_list","agents":[]}}
+{"id":"a","event":"pane.agent_status_changed","data":{"pane_id":"w1:p1","workspace_id":"w1","agent_status":"working"}}
+```
 
 ## Protocol stability
 
