@@ -182,14 +182,7 @@ pub(super) fn prompt_agent(
     running: &Arc<AtomicBool>,
 ) -> std::io::Result<Option<String>> {
     let Some(wait) = params.wait.clone() else {
-        return Ok(Some(dispatch_to_app_with_timeout(
-            Request {
-                id: request_id,
-                method: Method::AgentPrompt(params),
-            },
-            api_tx,
-            None,
-        )));
+        return prompt_agent_and_confirm(request_id, params, stream, api_tx, running);
     };
 
     let wait_started = std::time::Instant::now();
@@ -557,6 +550,150 @@ fn agent_wait_matches(
         && after_state_change_seq.is_none_or(|baseline| agent.state_change_seq > baseline)
 }
 
+/// How long a prompt may take to leave the composer before Enter is sent again.
+#[cfg(not(test))]
+const AGENT_PROMPT_SUBMIT_CONFIRM: std::time::Duration = std::time::Duration::from_secs(3);
+#[cfg(test)]
+const AGENT_PROMPT_SUBMIT_CONFIRM: std::time::Duration = std::time::Duration::from_millis(400);
+/// How long `agent.prompt` waits for a just-answered question to clear.
+const AGENT_PROMPT_BLOCKED_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
+/// How long `agent.prompt` waits for a starting agent to accept input.
+const AGENT_PROMPT_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// `agent.prompt` without `wait`: waits for a starting agent to be ready,
+/// submits, and succeeds only once the agent reacts. If the text stayed in the
+/// composer (an agent still mounting its input after a trust prompt drops the
+/// first Enter), Enter is sent once more; if that also has no effect the call
+/// fails with `agent_prompt_not_submitted` instead of reporting success.
+fn prompt_agent_and_confirm(
+    request_id: String,
+    params: crate::api::schema::AgentPromptParams,
+    stream: &mut dyn ApiConnection,
+    api_tx: &ApiRequestSender,
+    running: &Arc<AtomicBool>,
+) -> std::io::Result<Option<String>> {
+    let target = params.target.clone();
+    let encode = |response: &ErrorResponse| {
+        serde_json::to_string(response)
+            .map(Some)
+            .map_err(std::io::Error::other)
+    };
+    let started = std::time::Instant::now();
+    let ready_deadline = started + AGENT_PROMPT_READY_TIMEOUT;
+    let before = loop {
+        let agent = match agent_get(&request_id, &target, api_tx) {
+            Ok(agent) => agent,
+            Err(response) => return encode(&response),
+        };
+        let now = std::time::Instant::now();
+        // A question that was just answered can still read as blocked, and an
+        // agent loading after it reads as unknown; give both a moment.
+        let settling = match agent.agent_status {
+            crate::api::schema::AgentStatus::Blocked => now < started + AGENT_PROMPT_BLOCKED_GRACE,
+            crate::api::schema::AgentStatus::Unknown => {
+                agent.agent.is_some() && now < ready_deadline
+            }
+            _ => false,
+        };
+        if !agent.launch_pending && !settling {
+            break agent;
+        }
+        if !agent.launch_pending {
+            if should_stop_connection(stream, running)? {
+                return Ok(None);
+            }
+            std::thread::sleep(CONNECTION_POLL_INTERVAL);
+            continue;
+        }
+        if now >= ready_deadline {
+            return encode(&ErrorResponse {
+                id: request_id,
+                error: ErrorBody {
+                    code: "agent_not_ready".into(),
+                    message: format!("agent {target} did not become ready for input"),
+                },
+            });
+        }
+        if should_stop_connection(stream, running)? {
+            return Ok(None);
+        }
+        std::thread::sleep(CONNECTION_POLL_INTERVAL);
+    };
+
+    let response = dispatch_to_app_with_timeout(
+        Request {
+            id: request_id.clone(),
+            method: Method::AgentPrompt(params),
+        },
+        api_tx,
+        None,
+    );
+    let Ok(prompted) = agent_from_response(&request_id, &response) else {
+        return Ok(Some(response));
+    };
+    // Without status detection there is nothing to confirm against, and a
+    // working agent queues the prompt without a visible change.
+    if matches!(
+        before.agent_status,
+        crate::api::schema::AgentStatus::Unknown | crate::api::schema::AgentStatus::Working
+    ) {
+        return Ok(Some(response));
+    }
+    let reacted = |agent: &crate::api::schema::AgentInfo| {
+        agent.state_change_seq > before.state_change_seq
+            || matches!(
+                agent.agent_status,
+                crate::api::schema::AgentStatus::Working | crate::api::schema::AgentStatus::Blocked
+            ) && before.agent_status != agent.agent_status
+    };
+    if reacted(&prompted) {
+        return Ok(Some(response));
+    }
+    for attempt in 0..2 {
+        if attempt == 1 {
+            let _ = dispatch_to_app_with_timeout(
+                Request {
+                    id: format!("{request_id}:enter"),
+                    method: Method::AgentSendKeys(crate::api::schema::AgentSendKeysParams {
+                        target: target.clone(),
+                        keys: vec!["enter".into()],
+                    }),
+                },
+                api_tx,
+                Some(APP_RESPONSE_TIMEOUT),
+            );
+        }
+        let deadline = std::time::Instant::now() + AGENT_PROMPT_SUBMIT_CONFIRM;
+        while std::time::Instant::now() < deadline {
+            if should_stop_connection(stream, running)? {
+                return Ok(None);
+            }
+            std::thread::sleep(CONNECTION_POLL_INTERVAL);
+            match agent_get(&request_id, &target, api_tx) {
+                Ok(agent) if reacted(&agent) => {
+                    return serde_json::to_string(&SuccessResponse {
+                        id: request_id,
+                        result: ResponseResult::AgentPrompted { agent },
+                    })
+                    .map(Some)
+                    .map_err(std::io::Error::other);
+                }
+                Ok(_) => {}
+                Err(response) => return encode(&response),
+            }
+        }
+    }
+    encode(&ErrorResponse {
+        id: request_id,
+        error: ErrorBody {
+            code: "agent_prompt_not_submitted".into(),
+            message: format!(
+                "agent {target} did not react to the prompt; the text may still be in its input"
+            ),
+        },
+    })
+}
+
 fn agent_get(
     request_id: &str,
     target: &str,
@@ -853,5 +990,128 @@ mod tests {
         let unavailable: ErrorResponse = serde_json::from_str(&unavailable).unwrap();
         assert_eq!(unavailable.id, "wait");
         assert_eq!(unavailable.error.code, "server_unavailable");
+    }
+}
+
+#[cfg(test)]
+mod prompt_confirm_tests {
+    use super::*;
+
+    fn agent(status: crate::api::schema::AgentStatus, seq: u64) -> crate::api::schema::AgentInfo {
+        crate::api::schema::AgentInfo {
+            terminal_id: "t1".into(),
+            name: None,
+            agent: Some("claude".into()),
+            title: None,
+            terminal_title: None,
+            terminal_title_stripped: None,
+            display_agent: None,
+            agent_status: status,
+            screen_detection_skipped: false,
+            state_labels: Default::default(),
+            tokens: Default::default(),
+            agent_session: None,
+            workspace_id: "w1".into(),
+            tab_id: "w1:t1".into(),
+            pane_id: "w1:p1".into(),
+            focused: false,
+            launch_pending: false,
+            interactive_ready: true,
+            state_change_seq: seq,
+            completion_seq: None,
+            cwd: None,
+            foreground_cwd: None,
+            revision: 0,
+            model: None,
+            effort: None,
+            fast: None,
+        }
+    }
+
+    /// Answers like an agent whose first Enter is lost: it reacts only after
+    /// `reacts_after_enters` extra Enter keys. Returns how many Enters it saw.
+    fn spawn_agent(
+        reacts_after_enters: usize,
+    ) -> (ApiRequestSender, std::thread::JoinHandle<usize>) {
+        use crate::api::schema::{AgentStatus, ResponseResult, SuccessResponse};
+        let (api_tx, mut api_rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::api::ApiRequestMessage>();
+        let thread = std::thread::spawn(move || {
+            let mut enters = 0;
+            while let Some(message) = api_rx.blocking_recv() {
+                let reacted = enters >= reacts_after_enters && reacts_after_enters > 0;
+                let current = if reacted {
+                    agent(AgentStatus::Working, 6)
+                } else {
+                    agent(AgentStatus::Idle, 5)
+                };
+                let result = match message.request.method {
+                    Method::AgentGet(_) => ResponseResult::AgentInfo { agent: current },
+                    Method::AgentPrompt(_) => ResponseResult::AgentPrompted { agent: current },
+                    Method::AgentSendKeys(_) => {
+                        enters += 1;
+                        ResponseResult::Ok {}
+                    }
+                    other => panic!("unexpected {other:?}"),
+                };
+                let _ = message.respond_to.send(
+                    serde_json::to_string(&SuccessResponse {
+                        id: message.request.id,
+                        result,
+                    })
+                    .unwrap(),
+                );
+            }
+            enters
+        });
+        (api_tx, thread)
+    }
+
+    struct OpenConnection;
+
+    impl ApiConnection for OpenConnection {
+        fn peer_closed(&mut self) -> std::io::Result<bool> {
+            Ok(false)
+        }
+
+        fn send_line(&mut self, _line: &str) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn prompt(api_tx: &ApiRequestSender) -> serde_json::Value {
+        let response = prompt_agent_and_confirm(
+            "p".into(),
+            crate::api::schema::AgentPromptParams {
+                target: "w1:p1".into(),
+                text: "hello".into(),
+                wait: None,
+            },
+            &mut OpenConnection,
+            api_tx,
+            &Arc::new(AtomicBool::new(true)),
+        )
+        .unwrap()
+        .unwrap();
+        serde_json::from_str(&response).unwrap()
+    }
+
+    #[test]
+    fn prompt_that_stays_in_the_composer_gets_one_more_enter() {
+        let (api_tx, agent) = spawn_agent(1);
+        let response = prompt(&api_tx);
+        assert_eq!(response["result"]["type"], "agent_prompted");
+        assert_eq!(response["result"]["agent"]["agent_status"], "working");
+        drop(api_tx);
+        assert_eq!(agent.join().unwrap(), 1);
+    }
+
+    #[test]
+    fn prompt_without_any_reaction_fails_instead_of_reporting_success() {
+        let (api_tx, agent) = spawn_agent(0);
+        let response = prompt(&api_tx);
+        assert_eq!(response["error"]["code"], "agent_prompt_not_submitted");
+        drop(api_tx);
+        assert_eq!(agent.join().unwrap(), 1, "Enter is retried only once");
     }
 }
