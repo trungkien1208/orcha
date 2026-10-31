@@ -18,9 +18,8 @@ use crate::api::wait::{prompt_agent, wait_for_agent, wait_for_event, wait_for_ou
 use crate::api::{request_changes_ui, socket_path, ApiRequestMessage, ApiRequestSender, EventHub};
 use crate::ipc::{
     bind_local_listener, is_connection_closed_error, local_stream_peer_closed,
-    poll_local_stream_read, poll_local_stream_read_count, remove_socket_file_if_owned,
-    set_local_stream_polling, socket_file_identity, LocalStream, LocalStreamRead,
-    LocalStreamReadCount, SocketFileIdentity,
+    poll_local_stream_read, remove_socket_file_if_owned, set_local_stream_polling,
+    socket_file_identity, LocalStream, LocalStreamRead, SocketFileIdentity,
 };
 use crate::server::shutdown::{ServerStop, ShutdownReason};
 
@@ -31,11 +30,10 @@ const SOCKET_PERMISSION_MODE: u32 = 0o600;
 pub(super) const CONNECTION_POLL_INTERVAL: Duration = Duration::from_millis(100);
 pub(super) const APP_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 const INITIAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const INITIAL_REQUEST_FIRST_POLL: Duration = Duration::from_millis(1);
 const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_INITIAL_REQUEST_BYTES: usize = 1024 * 1024;
 const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(50);
-/// How long a multiplexed connection waits for outgoing lines before reading again.
-const MULTIPLEX_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 pub struct ServerHandle {
     _thread: std::thread::JoinHandle<()>,
@@ -674,57 +672,58 @@ impl ApiConnection for MultiplexedRequest {
 /// Serves newline-delimited requests on one connection until the client closes
 /// it. Each request runs on its own thread, so responses arrive in completion
 /// order and carry their request `id`; subscriptions share the connection.
-fn run_multiplex(mut stream: LocalStream, context: &RequestContext) -> std::io::Result<()> {
+/// Reads and writes block on their own halves, so neither waits for a poll tick.
+fn run_multiplex(stream: LocalStream, context: &RequestContext) -> std::io::Result<()> {
+    use std::io::BufRead;
+
     let closed = Arc::new(AtomicBool::new(false));
     let (outgoing_tx, outgoing_rx) = std::sync::mpsc::channel::<String>();
-    let mut pending = Vec::new();
-    let mut buf = [0u8; 8192];
-    set_local_stream_polling(&mut stream, true)?;
+    let (receive, mut send) = stream.split();
 
-    let result = 'serve: loop {
-        if !context.running.load(Ordering::Relaxed) {
+    let writer_closed = Arc::clone(&closed);
+    let writer = crate::thread_spawn::spawn_named("herdr-api-mux-write", move || {
+        for line in outgoing_rx {
+            let written = send
+                .write_all(line.as_bytes())
+                .and_then(|()| send.write_all(b"\n"))
+                .and_then(|()| send.flush());
+            if written.is_err() {
+                break;
+            }
+        }
+        writer_closed.store(true, Ordering::Relaxed);
+    })?;
+
+    let mut reader = std::io::BufReader::new(receive);
+    let mut line = Vec::new();
+    let result = loop {
+        if !context.running.load(Ordering::Relaxed) || closed.load(Ordering::Relaxed) {
             break Ok(());
         }
-        match poll_local_stream_read_count(&mut stream, &mut buf) {
-            Ok(LocalStreamReadCount::Data(read)) => {
-                pending.extend_from_slice(&buf[..read]);
-                while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
-                    let line: Vec<u8> = pending.drain(..=end).collect();
-                    let line = String::from_utf8_lossy(&line);
-                    dispatch_multiplexed_line(line.trim(), context, &outgoing_tx, &closed);
-                }
-                if pending.len() > MAX_INITIAL_REQUEST_BYTES {
-                    break Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "api request line is too large",
-                    ));
-                }
+        line.clear();
+        match std::io::Read::take(&mut reader, MAX_INITIAL_REQUEST_BYTES as u64 + 1)
+            .read_until(b'\n', &mut line)
+        {
+            Ok(0) => break Ok(()),
+            Ok(_) if line.last() != Some(&b'\n') && line.len() > MAX_INITIAL_REQUEST_BYTES => {
+                break Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "api request line is too large",
+                ));
             }
-            Ok(LocalStreamReadCount::Pending) => {}
-            Ok(LocalStreamReadCount::Closed) => break Ok(()),
+            Ok(_) => {
+                let text = String::from_utf8_lossy(&line);
+                dispatch_multiplexed_line(text.trim(), context, &outgoing_tx, &closed);
+            }
+            Err(err) if is_connection_closed_error(&err) => break Ok(()),
             Err(err) => break Err(err),
-        }
-
-        let mut first = outgoing_rx.recv_timeout(MULTIPLEX_POLL_INTERVAL).ok();
-        if first.is_some() {
-            if let Err(err) = set_local_stream_polling(&mut stream, false) {
-                break Err(err);
-            }
-            while let Some(line) = first.take().or_else(|| outgoing_rx.try_recv().ok()) {
-                if let Err(err) = write_text_line(&mut stream, &line) {
-                    break 'serve if is_connection_closed_error(&err) {
-                        Ok(())
-                    } else {
-                        Err(err)
-                    };
-                }
-            }
-            if let Err(err) = set_local_stream_polling(&mut stream, true) {
-                break Err(err);
-            }
         }
     };
     closed.store(true, Ordering::Relaxed);
+    // Request threads still holding a sender stop once they see `closed`;
+    // the writer exits when the last sender is gone.
+    drop(outgoing_tx);
+    drop(writer);
     result
 }
 
@@ -961,6 +960,9 @@ fn read_initial_request_line_with_limits(
     let deadline = Instant::now() + timeout;
     let mut bytes = Vec::new();
     let mut byte = [0u8; 1];
+    // Most clients write their request right after connecting; start polling
+    // fast and back off so an idle connection still costs little.
+    let mut wait = INITIAL_REQUEST_FIRST_POLL;
 
     let result = loop {
         let read = match poll_local_stream_read(stream, &mut byte) {
@@ -970,6 +972,7 @@ fn read_initial_request_line_with_limits(
         match read {
             LocalStreamRead::Closed => break Ok(None),
             LocalStreamRead::Data => {
+                wait = INITIAL_REQUEST_FIRST_POLL;
                 bytes.push(byte[0]);
                 if byte[0] == b'\n' {
                     break String::from_utf8(bytes)
@@ -990,7 +993,8 @@ fn read_initial_request_line_with_limits(
                         "timed out reading api request",
                     ));
                 }
-                std::thread::sleep(CONNECTION_POLL_INTERVAL);
+                std::thread::sleep(wait);
+                wait = (wait * 2).min(CONNECTION_POLL_INTERVAL);
             }
         }
     };
