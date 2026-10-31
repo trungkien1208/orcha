@@ -882,6 +882,8 @@ const API_FEATURES: &[&str] = &[
     "events.subscribe.agent_status_all_panes",
     // `session.snapshot { since, epoch }` answers with a `session_delta`.
     "session.snapshot.since",
+    // `agent_session` carries `id` and `transcript_path`.
+    "agent_session.transcript_path",
 ];
 
 fn server_capabilities_response(id: String) -> String {

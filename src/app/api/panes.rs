@@ -1568,6 +1568,10 @@ impl App {
         let report_is_newer = self
             .pane_terminal(ws_idx, pane_id)
             .is_some_and(|terminal| terminal.hook_report_is_newer(&params.source, params.seq));
+        let transcript_path = params
+            .agent_session_path
+            .clone()
+            .filter(|path| !path.trim().is_empty());
         let session_ref = crate::agent_resume::session_ref_from_report(
             &params.source,
             &agent_label,
@@ -1585,6 +1589,11 @@ impl App {
         });
         let applied =
             report_is_newer && self.session_report_applied(ws_idx, pane_id, session_ref.as_ref());
+        if applied {
+            if let Some(session_ref) = session_ref.as_ref() {
+                self.record_agent_transcript(ws_idx, pane_id, session_ref, transcript_path);
+            }
+        }
         self.report_agent_resume(
             id,
             ws_idx,
@@ -1613,6 +1622,10 @@ impl App {
         let report_is_newer = self
             .pane_terminal(ws_idx, pane_id)
             .is_some_and(|terminal| terminal.hook_report_is_newer(&params.source, params.seq));
+        let transcript_path = params
+            .agent_session_path
+            .clone()
+            .filter(|path| !path.trim().is_empty());
         let session_ref = crate::agent_resume::session_ref_from_report(
             &params.source,
             &agent_label,
@@ -1631,6 +1644,11 @@ impl App {
         });
         let applied =
             report_is_newer && self.session_report_applied(ws_idx, pane_id, session_ref.as_ref());
+        if applied {
+            if let Some(session_ref) = session_ref.as_ref() {
+                self.record_agent_transcript(ws_idx, pane_id, session_ref, transcript_path);
+            }
+        }
         self.report_agent_resume(
             id,
             ws_idx,
@@ -1640,6 +1658,43 @@ impl App {
             params.seq.filter(|_| applied),
             applied.then_some(params.resume_argv).flatten(),
         )
+    }
+
+    /// Remembers the transcript a session report named, so API clients can open
+    /// it without searching the agent's folders.
+    fn record_agent_transcript(
+        &mut self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+        session_ref: &crate::agent_resume::AgentSessionRef,
+        transcript_path: Option<String>,
+    ) {
+        let Some(terminal_id) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.pane_state(pane_id))
+            .map(|pane| pane.attached_terminal_id.clone())
+        else {
+            return;
+        };
+        let Some(terminal) = self.state.terminals.get_mut(&terminal_id) else {
+            return;
+        };
+        let same_session = terminal
+            .agent_transcript
+            .as_ref()
+            .is_some_and(|(session, _)| *session == session_ref.value);
+        // A report without a path keeps the one already known for this session.
+        let transcript = match transcript_path {
+            Some(path) => Some((session_ref.value.clone(), path)),
+            None if same_session => return,
+            None => None,
+        };
+        if terminal.agent_transcript != transcript {
+            terminal.agent_transcript = transcript;
+            self.emit_pane_updated(ws_idx, pane_id);
+        }
     }
 
     /// A resume command belongs to the session it was reported with, so it is

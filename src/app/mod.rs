@@ -3064,6 +3064,7 @@ mod tests {
                 "agent": "codex",
                 "kind": "id",
                 "value": "codex-session",
+                "id": "codex-session",
             })
         );
         assert_eq!(

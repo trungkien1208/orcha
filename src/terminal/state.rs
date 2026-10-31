@@ -137,6 +137,9 @@ pub struct TerminalState {
     pub agent_metadata: HashMap<String, AgentMetadata>,
     pub metadata_tokens: crate::metadata_tokens::MetadataTokens,
     pub persisted_agent_session: Option<crate::agent_resume::PersistedAgentSession>,
+    /// Transcript file a hook reported, with the session id it belongs to.
+    /// Runtime only: a restart learns it again from the next session report.
+    pub agent_transcript: Option<(String, String)>,
     reported_resume: Option<crate::agent_resume::ReportedAgentResume>,
     reported_resume_revision: u64,
     pub terminal_title: Option<String>,
@@ -177,6 +180,7 @@ impl TerminalState {
             agent_metadata: HashMap::new(),
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
             persisted_agent_session: None,
+            agent_transcript: None,
             reported_resume: None,
             reported_resume_revision: 0,
             terminal_title: None,

@@ -2,7 +2,7 @@
 # managed by herdr; reinstalling or updating the integration overwrites this file.
 # add custom hooks beside this file instead of editing it.
 # HERDR_INTEGRATION_ID=codex
-# HERDR_INTEGRATION_VERSION=10
+# HERDR_INTEGRATION_VERSION=11
 
 param([string]$Action = "")
 
@@ -24,7 +24,6 @@ if ($payload.hook_event_name -and $payload.hook_event_name -ne "SessionStart") {
 
 $sessionId = $payload.session_id
 if ([string]::IsNullOrWhiteSpace($sessionId)) { exit 0 }
-if ([string]::IsNullOrWhiteSpace($payload.transcript_path)) { exit 0 }
 if (-not [string]::IsNullOrWhiteSpace($env:CODEX_THREAD_ID) -and $env:CODEX_THREAD_ID -ne $sessionId) { exit 0 }
 
 $seq = [DateTimeOffset]::UtcNow.Ticks
@@ -43,6 +42,9 @@ try {
         "--agent-session-id",
         "$sessionId"
     )
+    if ($payload.transcript_path -is [string] -and -not [string]::IsNullOrWhiteSpace($payload.transcript_path)) {
+        $args += @("--agent-session-path", "$($payload.transcript_path)")
+    }
     if ($payload.hook_event_name -eq "SessionStart" -and $payload.source -is [string] -and -not [string]::IsNullOrWhiteSpace($payload.source)) {
         $args += @("--session-start-source", "$($payload.source)")
     }

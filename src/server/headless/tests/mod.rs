@@ -8428,3 +8428,59 @@ fn no_handle_internal_event_bypass_in_module() {
         bypass_lines.join("\n  ")
     );
 }
+
+#[test]
+fn reported_session_exposes_its_id_and_transcript_path() {
+    use crate::api::schema::{Method, PaneReportAgentSessionParams};
+    use crate::detect::{Agent, AgentState};
+    let (writer, _control_rx, _render_rx) = test_client_writer();
+    let (mut server, pane_id) = completion_guard_server(writer);
+    let terminal_id = server.app.state.workspaces[0].panes[&pane_id]
+        .attached_terminal_id
+        .clone();
+    server
+        .app
+        .state
+        .terminals
+        .get_mut(&terminal_id)
+        .unwrap()
+        .set_detected_state(Some(Agent::Claude), AgentState::Idle);
+    let public_pane_id = server.app.public_pane_id(0, pane_id).unwrap();
+    let report = |seq, path: Option<&str>| {
+        Method::PaneReportAgentSession(PaneReportAgentSessionParams {
+            pane_id: public_pane_id.clone(),
+            source: "herdr:claude".into(),
+            agent: "claude".into(),
+            seq: Some(seq),
+            agent_session_id: Some("session-1".into()),
+            agent_session_path: path.map(str::to_string),
+            resume_argv: None,
+            session_start_source: Some("startup".into()),
+        })
+    };
+    let session = |server: &HeadlessServer| {
+        server
+            .app
+            .session_snapshot()
+            .panes
+            .into_iter()
+            .find(|pane| pane.pane_id == public_pane_id)
+            .and_then(|pane| pane.agent_session)
+            .expect("reported session")
+    };
+
+    completion_guard_api_report(&mut server, report(1, Some("/t/session-1.jsonl")));
+    let reported = session(&server);
+    assert_eq!(reported.id.as_deref(), Some("session-1"));
+    assert_eq!(
+        reported.transcript_path.as_deref(),
+        Some("/t/session-1.jsonl")
+    );
+
+    completion_guard_api_report(&mut server, report(2, None));
+    assert_eq!(
+        session(&server).transcript_path.as_deref(),
+        Some("/t/session-1.jsonl"),
+        "a later report without a path keeps the known transcript"
+    );
+}

@@ -60,7 +60,7 @@ const CODEX_HOOK_ASSET: &str = if cfg!(windows) {
 } else {
     include_str!("assets/codex/herdr-agent-state.sh")
 };
-const CODEX_INTEGRATION_VERSION: u32 = 10;
+const CODEX_INTEGRATION_VERSION: u32 = 11;
 const KIMI_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
     "herdr-agent-state.ps1"
 } else {
@@ -254,7 +254,7 @@ const CURSOR_HOOK_ASSET: &str = if cfg!(windows) {
 } else {
     include_str!("assets/cursor/herdr-agent-state.sh")
 };
-const CURSOR_INTEGRATION_VERSION: u32 = 2;
+const CURSOR_INTEGRATION_VERSION: u32 = 3;
 #[cfg(windows)]
 const ANTIGRAVITY_CLI_HOOK_INSTALL_NAME: &str = "herdr-agent-state.ps1";
 #[cfg(not(windows))]

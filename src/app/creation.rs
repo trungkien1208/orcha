@@ -416,24 +416,33 @@ impl App {
 fn terminal_agent_session_info(
     terminal: &crate::terminal::TerminalState,
 ) -> Option<crate::api::schema::AgentSessionInfo> {
-    if let Some(authority) = terminal.hook_authority.as_ref() {
-        if let Some(session_ref) = authority.session_ref.as_ref() {
-            return Some(crate::api::schema::AgentSessionInfo {
-                source: authority.source.clone(),
-                agent: authority.agent_label.clone(),
-                kind: session_ref.kind,
-                value: session_ref.value.clone(),
-            });
-        }
-    }
-
-    terminal
-        .persisted_agent_session
+    let (source, agent, session_ref) = match terminal
+        .hook_authority
         .as_ref()
-        .map(|session| crate::api::schema::AgentSessionInfo {
-            source: session.source.clone(),
-            agent: session.agent.clone(),
-            kind: session.session_ref.kind,
-            value: session.session_ref.value.clone(),
-        })
+        .and_then(|authority| Some((authority, authority.session_ref.as_ref()?)))
+    {
+        Some((authority, session_ref)) => (&authority.source, &authority.agent_label, session_ref),
+        None => {
+            let session = terminal.persisted_agent_session.as_ref()?;
+            (&session.source, &session.agent, &session.session_ref)
+        }
+    };
+    let is_path = session_ref.kind == crate::agent_resume::AgentSessionRefKind::Path;
+    let transcript_path = if is_path {
+        Some(session_ref.value.clone())
+    } else {
+        terminal
+            .agent_transcript
+            .as_ref()
+            .filter(|(session, _)| *session == session_ref.value)
+            .map(|(_, path)| path.clone())
+    };
+    Some(crate::api::schema::AgentSessionInfo {
+        source: source.clone(),
+        agent: agent.clone(),
+        kind: session_ref.kind,
+        value: session_ref.value.clone(),
+        id: (!is_path).then(|| session_ref.value.clone()),
+        transcript_path,
+    })
 }

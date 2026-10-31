@@ -44,11 +44,25 @@
             "agent": {
               "type": "string"
             },
+            "id": {
+              "description": "The agent's own session id, when the session is identified by id.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "kind": {
               "$ref": "#/schemas/event/$defs/AgentSessionRefKind"
             },
             "source": {
               "type": "string"
+            },
+            "transcript_path": {
+              "description": "The agent's transcript file for this session, when known.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "value": {
               "type": "string"
@@ -6891,11 +6905,25 @@
             "agent": {
               "type": "string"
             },
+            "id": {
+              "description": "The agent's own session id, when the session is identified by id.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "kind": {
               "$ref": "#/schemas/success_response/$defs/AgentSessionRefKind"
             },
             "source": {
               "type": "string"
+            },
+            "transcript_path": {
+              "description": "The agent's transcript file for this session, when known.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "value": {
               "type": "string"

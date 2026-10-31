@@ -1068,6 +1068,31 @@ in `version` (or `events_lost`) means call `session.snapshot { since }` again.
 
 Feature flag: `session.snapshot.since`.
 
+### Session identity
+
+`agent_session` on pane and agent records now also carries `id` (the agent's
+own session id, when the session is identified by id) and `transcript_path`
+(the agent's transcript file, when the agent's hook reported one). `kind`
+still means how `value` identifies the session (`id` or `path`); the agent kind
+is in `agent`.
+
+```json
+"agent_session": {
+  "source": "herdr:codex", "agent": "codex", "kind": "id", "value": "0199…",
+  "id": "0199…", "transcript_path": "/Users/me/.codex/sessions/2026/11/01/rollout-…-0199….jsonl"
+}
+```
+
+Integration hooks report it on session start: Claude and Codex send their
+`session_id` and `transcript_path`; Codex now reports a new session even
+before its rollout file exists and adds the path on the next report; Cursor
+reports its `conversation_id` (the chat id) and `transcript_path` when Cursor
+supplies one. Reinstall the Codex and Cursor integrations to get this. The
+transcript path is kept in memory only and returns with the next session report
+after a server restart.
+
+Feature flag: `agent_session.transcript_path`.
+
 ## Protocol stability
 
 The client-rendered Herdr UI uses a stable endpoint generation for local and SSH

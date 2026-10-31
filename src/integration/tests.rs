@@ -1435,7 +1435,7 @@ fn codex_v2_integration_status_is_outdated() {
 
     assert_eq!(codex.path, hook_path);
     assert_eq!(codex.installed_version, Some(2));
-    assert_eq!(codex.expected_version, 10);
+    assert_eq!(codex.expected_version, 11);
     assert_eq!(codex.state, IntegrationStatusKind::Outdated);
 
     std::env::remove_var("HOME");
@@ -5324,6 +5324,150 @@ fn grok_dir_honors_grok_home_after_config_dir_seam() {
     );
 
     std::env::remove_var(GROK_HOME_ENV_VAR);
+    clear_integration_path_env();
+    let _ = fs::remove_dir_all(base);
+}
+
+/// Runs an installed hook that writes straight to the API socket and returns
+/// the one request it sent, or `None` when it sent nothing.
+#[cfg(unix)]
+fn socket_hook_request(hook_path: &Path, payload: &str, env: &[(&str, &str)]) -> Option<Value> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+    use std::process::{Command, Stdio};
+
+    let socket_dir = PathBuf::from("/tmp").join(format!(
+        "hh-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&socket_dir).unwrap();
+    let socket_path = socket_dir.join("s");
+    let listener = UnixListener::bind(&socket_path).unwrap();
+    listener.set_nonblocking(true).unwrap();
+
+    let mut command = Command::new("sh");
+    command
+        .arg(hook_path)
+        .arg("session")
+        .env("HERDR_ENV", "1")
+        .env("HERDR_PANE_ID", "w1:p2")
+        .env("HERDR_SOCKET_PATH", &socket_path)
+        .env_remove("CODEX_THREAD_ID")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    let mut child = command.spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(payload.as_bytes())
+        .unwrap();
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut request = None;
+    while std::time::Instant::now() < deadline {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                stream.set_nonblocking(false).unwrap();
+                let mut line = String::new();
+                BufReader::new(&stream).read_line(&mut line).unwrap();
+                let _ = stream.write_all(b"{\"id\":\"\",\"result\":{\"type\":\"ok\"}}\n");
+                request = Some(serde_json::from_str(&line).unwrap());
+                break;
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                if child.try_wait().unwrap().is_some() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(err) => panic!("accept failed: {err}"),
+        }
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "hook failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let _ = fs::remove_dir_all(socket_dir);
+    request
+}
+
+#[cfg(unix)]
+#[test]
+fn codex_hook_reports_new_sessions_before_the_rollout_exists() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let codex_dir = base.join("codex");
+    fs::create_dir_all(&codex_dir).unwrap();
+    std::env::set_var(CODEX_HOME_ENV_VAR, &codex_dir);
+    let installed = install_codex().unwrap();
+
+    let without_rollout = socket_hook_request(
+        &installed.hook_path,
+        r#"{"hook_event_name":"SessionStart","session_id":"thread-1","source":"startup"}"#,
+        &[],
+    )
+    .expect("a session without a rollout is still reported");
+    assert_eq!(without_rollout["method"], "pane.report_agent_session");
+    assert_eq!(without_rollout["params"]["agent_session_id"], "thread-1");
+    assert!(without_rollout["params"]
+        .get("agent_session_path")
+        .is_none());
+
+    let with_rollout = socket_hook_request(
+        &installed.hook_path,
+        r#"{"hook_event_name":"SessionStart","session_id":"thread-1","transcript_path":"/r/rollout-thread-1.jsonl"}"#,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        with_rollout["params"]["agent_session_path"],
+        "/r/rollout-thread-1.jsonl"
+    );
+
+    assert!(socket_hook_request(
+        &installed.hook_path,
+        r#"{"hook_event_name":"SessionStart","session_id":"child"}"#,
+        &[("CODEX_THREAD_ID", "parent")],
+    )
+    .is_none());
+
+    clear_integration_path_env();
+    let _ = fs::remove_dir_all(base);
+}
+
+#[cfg(unix)]
+#[test]
+fn cursor_hook_reports_the_conversation_id_and_transcript() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let cursor_dir = base.join("cursor");
+    fs::create_dir_all(&cursor_dir).unwrap();
+    std::env::set_var(CURSOR_CONFIG_DIR_ENV_VAR, &cursor_dir);
+    let installed = install_cursor().unwrap();
+
+    let request = socket_hook_request(
+        &installed.hook_path,
+        r#"{"hook_event_name":"sessionStart","session_id":"cli-1","conversation_id":"chat-1","transcript_path":"/c/chat-1/chat-1.jsonl"}"#,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(request["params"]["agent_session_id"], "chat-1");
+    assert_eq!(
+        request["params"]["agent_session_path"],
+        "/c/chat-1/chat-1.jsonl"
+    );
+
     clear_integration_path_env();
     let _ = fs::remove_dir_all(base);
 }

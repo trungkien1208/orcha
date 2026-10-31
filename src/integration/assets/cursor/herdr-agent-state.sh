@@ -1,7 +1,7 @@
 #!/bin/sh
 # managed by herdr; reinstalling the integration replaces this file.
 # HERDR_INTEGRATION_ID=cursor
-# HERDR_INTEGRATION_VERSION=2
+# HERDR_INTEGRATION_VERSION=3
 
 [ "${1:-}" = "session" ] || exit 0
 [ "${HERDR_ENV:-}" = "1" ] || exit 0
@@ -32,21 +32,26 @@ event = first_text("hook_event_name", "hookEventName")
 if event not in (None, "sessionStart"):
     raise SystemExit(0)
 
-session_id = first_text("session_id", "sessionId", "conversation_id", "conversationId")
+# The conversation id names the chat and its transcript; session_id can be the CLI session.
+session_id = first_text("conversation_id", "conversationId", "session_id", "sessionId")
 if session_id is None:
     raise SystemExit(0)
+transcript_path = first_text("transcript_path", "transcriptPath")
 
 seq = time.time_ns()
+params = {
+    "pane_id": os.environ["HERDR_PANE_ID"],
+    "source": "herdr:cursor",
+    "agent": "cursor",
+    "seq": seq,
+    "agent_session_id": session_id,
+}
+if transcript_path is not None:
+    params["agent_session_path"] = transcript_path
 request = json.dumps({
     "id": f"herdr:cursor:{seq}",
     "method": "pane.report_agent_session",
-    "params": {
-        "pane_id": os.environ["HERDR_PANE_ID"],
-        "source": "herdr:cursor",
-        "agent": "cursor",
-        "seq": seq,
-        "agent_session_id": session_id,
-    },
+    "params": params,
 })
 try:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:

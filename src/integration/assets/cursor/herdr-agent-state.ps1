@@ -1,6 +1,6 @@
 # managed by herdr; reinstalling the integration replaces this file.
 # HERDR_INTEGRATION_ID=cursor
-# HERDR_INTEGRATION_VERSION=2
+# HERDR_INTEGRATION_VERSION=3
 
 param([string]$Action = "")
 
@@ -32,7 +32,8 @@ $event = if ($payload.hook_event_name -is [string]) { $payload.hook_event_name }
 if (-not [string]::IsNullOrWhiteSpace($event) -and $event -ne "sessionStart") { Exit-Hook }
 
 $sessionId = $null
-foreach ($name in @("session_id", "sessionId", "conversation_id", "conversationId")) {
+# The conversation id names the chat and its transcript; session_id can be the CLI session.
+foreach ($name in @("conversation_id", "conversationId", "session_id", "sessionId")) {
     $value = $payload.$name
     if ($value -is [string] -and -not [string]::IsNullOrWhiteSpace($value)) {
         $sessionId = $value
@@ -41,10 +42,21 @@ foreach ($name in @("session_id", "sessionId", "conversation_id", "conversationI
 }
 if ([string]::IsNullOrWhiteSpace($sessionId)) { Exit-Hook }
 
+$transcriptPath = $null
+foreach ($name in @("transcript_path", "transcriptPath")) {
+    $value = $payload.$name
+    if ($value -is [string] -and -not [string]::IsNullOrWhiteSpace($value)) {
+        $transcriptPath = $value
+        break
+    }
+}
+
 $seq = [DateTime]::UtcNow.Ticks
 $herdr = if ([string]::IsNullOrWhiteSpace($env:HERDR_BIN_PATH)) { "herdr" } else { $env:HERDR_BIN_PATH }
 try {
-    & $herdr pane report-agent-session $env:HERDR_PANE_ID --source herdr:cursor --agent cursor --seq $seq --agent-session-id $sessionId 2>$null | Out-Null
+    $args = @("pane", "report-agent-session", $env:HERDR_PANE_ID, "--source", "herdr:cursor", "--agent", "cursor", "--seq", "$seq", "--agent-session-id", "$sessionId")
+    if ($transcriptPath) { $args += @("--agent-session-path", "$transcriptPath") }
+    & $herdr @args 2>$null | Out-Null
 } catch {
 }
 
