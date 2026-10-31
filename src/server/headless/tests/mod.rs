@@ -8477,6 +8477,7 @@ fn reported_session_exposes_its_id_and_transcript_path() {
         &mut server,
         report(1, Some("/t/session-1.jsonl"), Some("claude-opus-5-5")),
     );
+    server.app.sync_agent_model_events();
     let reported = session(&server);
     assert_eq!(reported.id.as_deref(), Some("session-1"));
     assert_eq!(
@@ -8485,6 +8486,7 @@ fn reported_session_exposes_its_id_and_transcript_path() {
     );
 
     completion_guard_api_report(&mut server, report(2, None, None));
+    server.app.sync_agent_model_events();
     assert_eq!(
         session(&server).transcript_path.as_deref(),
         Some("/t/session-1.jsonl"),
@@ -8573,4 +8575,86 @@ fn agent_status_events_carry_state_change_seq_and_session_version() {
         "the next session.changed reflects the status change"
     );
     drop(watch);
+}
+
+#[test]
+fn model_changed_fires_when_the_agent_record_model_changes() {
+    use api::schema::{EventData, EventKind, Method, PaneReportAgentSessionParams};
+
+    let (writer, _control_rx, _render_rx) = test_client_writer();
+    let (mut server, pane_id) = completion_guard_server(writer);
+    let terminal_id = server.app.state.workspaces[0].panes[&pane_id]
+        .attached_terminal_id
+        .clone();
+    server
+        .app
+        .state
+        .terminals
+        .get_mut(&terminal_id)
+        .unwrap()
+        .set_detected_state(
+            Some(crate::detect::Agent::Claude),
+            crate::detect::AgentState::Idle,
+        );
+    let public_pane_id = server.app.public_pane_id(0, pane_id).unwrap();
+    let report = |seq, session: &str, start: &str, model: Option<&str>| {
+        Method::PaneReportAgentSession(PaneReportAgentSessionParams {
+            pane_id: public_pane_id.clone(),
+            source: "herdr:claude".into(),
+            agent: "claude".into(),
+            seq: Some(seq),
+            agent_session_id: Some(session.into()),
+            agent_session_path: None,
+            resume_argv: None,
+            session_start_source: Some(start.into()),
+            model: model.map(str::to_string),
+        })
+    };
+    let models = |server: &HeadlessServer| {
+        server
+            .app
+            .event_hub
+            .events_after(0)
+            .into_iter()
+            .filter_map(|(_, event)| match event.data {
+                EventData::PaneAgentModelChanged { pane_id, model, .. }
+                    if event.event == EventKind::PaneAgentModelChanged =>
+                {
+                    Some((pane_id, model))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+
+    server.app.sync_agent_model_events();
+    assert!(
+        models(&server).is_empty(),
+        "unknown model on start is not a change"
+    );
+
+    completion_guard_api_report(&mut server, report(1, "s1", "startup", None));
+    server.app.sync_agent_model_events();
+    assert!(models(&server).is_empty());
+
+    completion_guard_api_report(
+        &mut server,
+        report(2, "s1", "startup", Some("claude-opus-5-5")),
+    );
+    server.app.sync_agent_model_events();
+    assert_eq!(
+        models(&server),
+        vec![(public_pane_id.clone(), Some("claude-opus-5-5".to_string()))]
+    );
+
+    completion_guard_api_report(
+        &mut server,
+        report(3, "s1", "startup", Some("claude-opus-5-5")),
+    );
+    server.app.sync_agent_model_events();
+    assert_eq!(
+        models(&server).len(),
+        1,
+        "an unchanged model does not fire again"
+    );
 }

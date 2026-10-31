@@ -375,6 +375,7 @@ impl ActiveSubscription {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn poll_batch(
         &mut self,
         api_tx: &ApiRequestSender,

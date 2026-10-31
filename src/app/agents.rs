@@ -19,7 +19,96 @@ fn valid_agent_name(name: &str) -> bool {
         && chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_'))
 }
 
+/// Model settings of an agent's current session, each `None` when unknown.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AgentModelState {
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub fast: Option<bool>,
+}
+
+fn current_session_value(terminal: &crate::terminal::TerminalState) -> Option<&str> {
+    terminal
+        .hook_authority
+        .as_ref()
+        .and_then(|authority| authority.session_ref.as_ref())
+        .or_else(|| {
+            terminal
+                .persisted_agent_session
+                .as_ref()
+                .map(|session| &session.session_ref)
+        })
+        .map(|session_ref| session_ref.value.as_str())
+}
+
+/// What a hook reported for the terminal's current session; reports for an
+/// earlier session no longer apply.
+pub(crate) fn agent_model_state(terminal: &crate::terminal::TerminalState) -> AgentModelState {
+    let session = current_session_value(terminal);
+    AgentModelState {
+        model: terminal
+            .agent_model
+            .as_ref()
+            .filter(|(reported, _)| Some(reported.as_str()) == session)
+            .map(|(_, model)| model.clone()),
+        effort: None,
+        fast: None,
+    }
+}
+
 impl App {
+    /// Emits `pane.agent_model_changed` when an agent record's model state
+    /// changes, whatever changed it. Checked only after new events.
+    pub(crate) fn sync_agent_model_events(&mut self) {
+        let sequence = self.event_hub.current_sequence();
+        if sequence == self.agent_model_events_sequence {
+            return;
+        }
+        let mut changes = Vec::new();
+        let mut live = std::collections::HashSet::new();
+        for (ws_idx, ws) in self.state.workspaces.iter().enumerate() {
+            for tab in &ws.tabs {
+                for pane_id in tab.layout.pane_ids() {
+                    let Some(pane) = ws.pane_state(pane_id) else {
+                        continue;
+                    };
+                    let Some(terminal) = self.state.terminals.get(&pane.attached_terminal_id)
+                    else {
+                        continue;
+                    };
+                    if !terminal.is_agent_terminal() {
+                        continue;
+                    }
+                    let key = terminal.id.to_string();
+                    live.insert(key.clone());
+                    let state = agent_model_state(terminal);
+                    let previous = self.agent_model_states.get(&key);
+                    if previous.unwrap_or(&AgentModelState::default()) != &state {
+                        changes.push((ws_idx, pane_id, key, state));
+                    }
+                }
+            }
+        }
+        self.agent_model_states.retain(|key, _| live.contains(key));
+        for (ws_idx, pane_id, key, state) in changes {
+            self.agent_model_states.insert(key, state.clone());
+            let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) else {
+                continue;
+            };
+            self.emit_event(crate::api::schema::EventEnvelope {
+                event: crate::api::schema::EventKind::PaneAgentModelChanged,
+                data: crate::api::schema::EventData::PaneAgentModelChanged {
+                    pane_id: public_pane_id,
+                    workspace_id: self.public_workspace_id(ws_idx),
+                    model: state.model,
+                    effort: state.effort,
+                    fast: state.fast,
+                },
+            });
+        }
+        self.agent_model_events_sequence = self.event_hub.current_sequence();
+    }
+
     pub(super) fn collect_agent_infos(&self) -> Vec<crate::api::schema::AgentInfo> {
         self.state
             .workspaces
@@ -379,10 +468,7 @@ impl App {
             return None;
         }
         let pane = self.pane_metadata(ws_idx, pane_id)?;
-        let session_value = pane
-            .agent_session
-            .as_ref()
-            .map(|session| session.value.clone());
+        let model_state = agent_model_state(terminal);
         Some(crate::api::schema::AgentInfo {
             terminal_id: pane.terminal_id,
             name: terminal.agent_name.clone(),
@@ -405,17 +491,9 @@ impl App {
             state_change_seq: terminal.last_agent_state_change_seq.unwrap_or(0),
             completion_seq: terminal.last_agent_completion_seq,
             cwd: pane.cwd,
-            model: session_value
-                .as_ref()
-                .and_then(|session_value| {
-                    terminal
-                        .agent_model
-                        .as_ref()
-                        .filter(|(reported, _)| reported == session_value)
-                })
-                .map(|(_, model)| model.clone()),
-            effort: None,
-            fast: None,
+            model: model_state.model,
+            effort: model_state.effort,
+            fast: model_state.fast,
             foreground_cwd: pane.foreground_cwd,
             revision: pane.revision,
         })

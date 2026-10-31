@@ -170,6 +170,8 @@ pub struct App {
     client_shell_keybindings_profile: Option<String>,
     endpoint_commands: custom_commands::EndpointCommandRegistry,
     pub(crate) session_journal: session_journal::SessionJournal,
+    pub(crate) agent_model_states: HashMap<String, agents::AgentModelState>,
+    pub(crate) agent_model_events_sequence: u64,
     // Drop after terminal runtimes have shut down their processes. Command
     // workers retain their own references until completion.
     // ponytail: server-lifetime pins defer reclamation until restart; use
@@ -701,6 +703,8 @@ impl App {
             client_shell_keybindings_profile,
             endpoint_commands,
             session_journal: session_journal::SessionJournal::new(),
+            agent_model_states: HashMap::new(),
+            agent_model_events_sequence: 0,
         };
         app.configure_tab_bar_status(&config.ui.tab_bar_right, &config.ui.tab_bar_right_separator);
         app.configure_window_title(&config.ui.window_title);

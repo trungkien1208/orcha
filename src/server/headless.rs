@@ -492,6 +492,7 @@ impl HeadlessServer {
 
             self.app.sync_focus_events();
             self.app.sync_session_save_schedule();
+            self.app.sync_agent_model_events();
             self.app.sync_session_journal();
 
             // 4. Accept new client connections.

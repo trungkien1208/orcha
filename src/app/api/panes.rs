@@ -1704,7 +1704,7 @@ impl App {
         }
     }
 
-    /// Remembers the model a session report named and announces a change.
+    /// Remembers the model a session report named.
     /// A report without a model keeps the one already known for this session.
     fn record_agent_model(
         &mut self,
@@ -1733,19 +1733,9 @@ impl App {
             return;
         }
         terminal.agent_model = reported;
-        let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) else {
-            return;
-        };
-        self.emit_event(crate::api::schema::EventEnvelope {
-            event: crate::api::schema::EventKind::PaneAgentModelChanged,
-            data: crate::api::schema::EventData::PaneAgentModelChanged {
-                pane_id: public_pane_id,
-                workspace_id: self.public_workspace_id(ws_idx),
-                model: Some(model),
-                effort: None,
-                fast: None,
-            },
-        });
+        // `sync_agent_model_events` announces the change with the rest of the
+        // agent record's model state.
+        self.emit_pane_updated(ws_idx, pane_id);
     }
 
     /// A resume command belongs to the session it was reported with, so it is
