@@ -725,6 +725,13 @@ impl App {
             || update.previous_presentation != update.presentation
         {
             let presentation = update.presentation.clone();
+            let state_change_seq = self
+                .state
+                .workspaces
+                .get(update.ws_idx)
+                .and_then(|ws| ws.pane_state(update.pane_id))
+                .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id))
+                .map(|terminal| terminal.last_agent_state_change_seq.unwrap_or(0));
             self.emit_event(crate::api::schema::EventEnvelope {
                 event: crate::api::schema::EventKind::PaneAgentStatusChanged,
                 data: crate::api::schema::EventData::PaneAgentStatusChanged {
@@ -735,6 +742,8 @@ impl App {
                     title: presentation.title,
                     display_agent: presentation.display_agent,
                     state_labels: presentation.state_labels,
+                    state_change_seq,
+                    session_version: Some(self.session_journal.version()),
                 },
             });
         }

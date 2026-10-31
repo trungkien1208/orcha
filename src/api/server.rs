@@ -885,6 +885,10 @@ const API_FEATURES: &[&str] = &[
     "agent_session.transcript_path",
     // Agent records carry `model`, `effort` and `fast`.
     "agent.model_state",
+    // Subscriptions in one `events.subscribe` request are written in event order.
+    "events.subscribe.ordered",
+    // `pane.agent_status_changed` carries `state_change_seq` and `session_version`.
+    "pane.agent_status_changed.order_keys",
 ];
 
 fn server_capabilities_response(id: String) -> String {
@@ -1186,9 +1190,13 @@ fn stream_subscriptions(
             return Ok(());
         }
 
+        // Several subscriptions on one request share one timeline: write their
+        // events in the order they reached the event hub.
+        let upto = event_hub.current_sequence();
+        let mut batch = Vec::new();
         for subscription in &mut subscriptions {
-            let events = match subscription.poll_batch(api_tx, event_hub) {
-                Ok(events) => events,
+            match subscription.poll_ordered_batch(api_tx, event_hub, upto) {
+                Ok(events) => batch.extend(events),
                 Err(error) => {
                     send_json_line_allow_disconnect(
                         stream,
@@ -1199,17 +1207,18 @@ fn stream_subscriptions(
                     )?;
                     return Ok(());
                 }
-            };
-            for event in events {
-                if should_stop_connection(stream, running)? {
+            }
+        }
+        batch.sort_by_key(|(sequence, _)| *sequence);
+        for (_, event) in batch {
+            if should_stop_connection(stream, running)? {
+                return Ok(());
+            }
+            if let Err(err) = stream.send_event(event) {
+                if is_connection_closed_error(&err) {
                     return Ok(());
                 }
-                if let Err(err) = stream.send_event(event) {
-                    if is_connection_closed_error(&err) {
-                        return Ok(());
-                    }
-                    return Err(err);
-                }
+                return Err(err);
             }
         }
         std::thread::sleep(CONNECTION_POLL_INTERVAL);
@@ -1941,6 +1950,54 @@ mod tests {
         let invalid: serde_json::Value = serde_json::from_str(&next_line(&mut reader)).unwrap();
         assert_eq!(invalid["error"]["code"], "invalid_request");
 
+        drop(reader);
+        thread.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn one_subscribe_request_writes_events_in_event_hub_order() {
+        let (api_tx, _api_rx) = mpsc::unbounded_channel();
+        let event_hub = EventHub::default();
+        let (mut reader, _running, thread) =
+            spawn_multiplex_connection("mux-order-events", api_tx, event_hub.clone());
+        reader
+            .get_mut()
+            .write_all(
+                b"{\"id\":\"sub\",\"method\":\"events.subscribe\",\"params\":{\"subscriptions\":[{\"type\":\"workspace.focused\"},{\"type\":\"session.changed\"}]}}\n",
+            )
+            .unwrap();
+        let started: serde_json::Value = serde_json::from_str(&next_line(&mut reader)).unwrap();
+        assert_eq!(started["result"]["type"], "subscription_started");
+
+        let session_changed = |version| crate::api::schema::EventEnvelope {
+            event: crate::api::schema::EventKind::SessionChanged,
+            data: crate::api::schema::EventData::SessionChanged {
+                version,
+                epoch: "e".into(),
+                changes: Vec::new(),
+            },
+        };
+        let focused = |workspace_id: &str| crate::api::schema::EventEnvelope {
+            event: crate::api::schema::EventKind::WorkspaceFocused,
+            data: crate::api::schema::EventData::WorkspaceFocused {
+                workspace_id: workspace_id.into(),
+            },
+        };
+        event_hub.push(session_changed(1));
+        event_hub.push(focused("w1"));
+        event_hub.push(session_changed(2));
+
+        let order: Vec<String> = (0..3)
+            .map(|_| {
+                let event: serde_json::Value =
+                    serde_json::from_str(&next_line(&mut reader)).unwrap();
+                event["event"].as_str().unwrap().to_string()
+            })
+            .collect();
+        assert_eq!(
+            order,
+            ["session_changed", "workspace_focused", "session_changed"]
+        );
         drop(reader);
         thread.join().unwrap().unwrap();
     }

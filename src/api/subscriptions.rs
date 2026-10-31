@@ -309,6 +309,8 @@ impl ActiveSubscription {
                         title: probe.title,
                         display_agent: probe.display_agent,
                         state_labels: probe.state_labels,
+                        state_change_seq: None,
+                        session_version: None,
                     });
 
                 Ok(Self::AgentStatusChanged(Box::new(
@@ -353,7 +355,7 @@ impl ActiveSubscription {
                 .ok()?
                 .into_iter()
                 .next()
-                .and_then(|event| serde_json::to_value(event).ok()),
+                .and_then(|(_, event)| serde_json::to_value(event).ok()),
             Self::ScrollChanged(subscription) => {
                 serde_json::to_value(subscription.poll(api_tx)?).ok()
             }
@@ -378,14 +380,38 @@ impl ActiveSubscription {
         api_tx: &ApiRequestSender,
         event_hub: &EventHub,
     ) -> Result<Vec<serde_json::Value>, ErrorBody> {
+        Ok(self
+            .poll_ordered_batch(api_tx, event_hub, u64::MAX)?
+            .into_iter()
+            .map(|(_, event)| event)
+            .collect())
+    }
+
+    /// Like `poll_batch`, with each event's event-hub sequence so a stream with
+    /// several subscriptions can write them in the order they happened. Events
+    /// sampled from current state use the current sequence; initial-state events
+    /// use 0 so they come first. History after `upto` waits for the next batch,
+    /// so events pushed while a stream polls its subscriptions are not split.
+    pub(super) fn poll_ordered_batch(
+        &mut self,
+        api_tx: &ApiRequestSender,
+        event_hub: &EventHub,
+        upto: u64,
+    ) -> Result<Vec<(u64, serde_json::Value)>, ErrorBody> {
         match self {
             Self::Event(subscription) => {
                 let events = subscription_events_after(event_hub, subscription.last_sequence)?;
                 let mut matching = Vec::new();
                 for (sequence, event) in events {
+                    if sequence > upto {
+                        break;
+                    }
                     subscription.last_sequence = sequence;
                     if event.event == subscription.event_kind {
-                        matching.push(serde_json::to_value(event).map_err(event_encoding_error)?);
+                        matching.push((
+                            sequence,
+                            serde_json::to_value(event).map_err(event_encoding_error)?,
+                        ));
                     }
                 }
                 Ok(matching)
@@ -394,29 +420,54 @@ impl ActiveSubscription {
                 let events = subscription_events_after(event_hub, subscription.last_sequence)?;
                 let mut matching = Vec::new();
                 for (sequence, event) in events {
+                    if sequence > upto {
+                        break;
+                    }
                     subscription.last_sequence = sequence;
                     if let Some(event) = subscription.event_from_history(event) {
-                        matching.push(serde_json::to_value(event).map_err(event_encoding_error)?);
+                        matching.push((
+                            sequence,
+                            serde_json::to_value(event).map_err(event_encoding_error)?,
+                        ));
                     }
                 }
                 if matching.is_empty() {
+                    let initial = subscription.initial_event.is_some();
                     if let Some(event) =
                         subscription.poll_snapshot(api_tx, event_hub).ok().flatten()
                     {
-                        matching.push(serde_json::to_value(event).map_err(event_encoding_error)?);
+                        let sequence = if initial {
+                            0
+                        } else {
+                            event_hub.current_sequence()
+                        };
+                        matching.push((
+                            sequence,
+                            serde_json::to_value(event).map_err(event_encoding_error)?,
+                        ));
                     }
                 }
                 Ok(matching)
             }
             Self::AgentStatusSet(subscription) => subscription
-                .poll_batch(api_tx, event_hub)?
+                .poll_batch_upto(api_tx, event_hub, upto)?
                 .into_iter()
-                .map(|event| serde_json::to_value(event).map_err(event_encoding_error))
+                .map(|(sequence, event)| {
+                    Ok((
+                        sequence,
+                        serde_json::to_value(event).map_err(event_encoding_error)?,
+                    ))
+                })
                 .collect(),
             // These subscriptions sample current state, not retained event history.
             // Keep their existing cadence even when a lifecycle batch was nonempty.
             Self::OutputMatched(_) | Self::ScrollChanged(_) => {
-                Ok(self.poll(api_tx, event_hub).into_iter().collect())
+                let sequence = event_hub.current_sequence();
+                Ok(self
+                    .poll(api_tx, event_hub)
+                    .into_iter()
+                    .map(|event| (sequence, event))
+                    .collect())
             }
         }
     }
@@ -532,6 +583,8 @@ impl ActiveAgentStatusChangedSubscription {
             title,
             display_agent,
             state_labels,
+            state_change_seq,
+            session_version,
         } = event.data
         else {
             return None;
@@ -563,6 +616,8 @@ impl ActiveAgentStatusChangedSubscription {
                 title,
                 display_agent,
                 state_labels,
+                state_change_seq,
+                session_version,
             }),
         })
     }
@@ -632,6 +687,8 @@ impl ActiveAgentStatusChangedSubscription {
                 title: pane.title,
                 display_agent: pane.display_agent,
                 state_labels: pane.state_labels,
+                state_change_seq: None,
+                session_version: None,
             }),
         })
     }
@@ -705,9 +762,25 @@ impl ActiveAgentStatusSetSubscription {
         &mut self,
         api_tx: &ApiRequestSender,
         event_hub: &EventHub,
-    ) -> Result<Vec<SubscriptionEventEnvelope>, ErrorBody> {
-        let mut matching: Vec<_> = self.initial_events.drain(..).map(status_envelope).collect();
+    ) -> Result<Vec<(u64, SubscriptionEventEnvelope)>, ErrorBody> {
+        self.poll_batch_upto(api_tx, event_hub, u64::MAX)
+    }
+
+    fn poll_batch_upto(
+        &mut self,
+        api_tx: &ApiRequestSender,
+        event_hub: &EventHub,
+        upto: u64,
+    ) -> Result<Vec<(u64, SubscriptionEventEnvelope)>, ErrorBody> {
+        let mut matching: Vec<_> = self
+            .initial_events
+            .drain(..)
+            .map(|event| (0, status_envelope(event)))
+            .collect();
         for (sequence, event) in subscription_events_after(event_hub, self.last_sequence)? {
+            if sequence > upto {
+                break;
+            }
             self.last_sequence = sequence;
             match event.data {
                 crate::api::schema::EventData::PaneAgentStatusChanged {
@@ -718,6 +791,8 @@ impl ActiveAgentStatusSetSubscription {
                     title,
                     display_agent,
                     state_labels,
+                    state_change_seq,
+                    session_version,
                 } => {
                     if !self.in_scope(&pane_id, &workspace_id) {
                         continue;
@@ -739,15 +814,20 @@ impl ActiveAgentStatusSetSubscription {
                     {
                         continue;
                     }
-                    matching.push(status_envelope(PaneAgentStatusChangedEvent {
-                        pane_id,
-                        workspace_id,
-                        agent_status,
-                        agent,
-                        title,
-                        display_agent,
-                        state_labels,
-                    }));
+                    matching.push((
+                        sequence,
+                        status_envelope(PaneAgentStatusChangedEvent {
+                            pane_id,
+                            workspace_id,
+                            agent_status,
+                            agent,
+                            title,
+                            display_agent,
+                            state_labels,
+                            state_change_seq,
+                            session_version,
+                        }),
+                    ));
                 }
                 crate::api::schema::EventData::PaneClosed { pane_id, .. } => {
                     self.known.remove(&pane_id);
@@ -759,7 +839,12 @@ impl ActiveAgentStatusSetSubscription {
             && self.last_reconcile.elapsed() >= AGENT_STATUS_SET_RECONCILE_INTERVAL
         {
             self.last_reconcile = std::time::Instant::now();
-            matching.extend(self.reconcile(api_tx, event_hub));
+            let sequence = event_hub.current_sequence();
+            matching.extend(
+                self.reconcile(api_tx, event_hub)
+                    .into_iter()
+                    .map(|event| (sequence, event)),
+            );
         }
         Ok(matching)
     }
@@ -817,6 +902,8 @@ fn status_event_from_pane(pane: crate::api::schema::PaneInfo) -> PaneAgentStatus
         title: pane.title,
         display_agent: pane.display_agent,
         state_labels: pane.state_labels,
+        state_change_seq: None,
+        session_version: None,
     }
 }
 
@@ -1000,6 +1087,8 @@ mod tests {
                 title: title.map(str::to_string),
                 display_agent: None,
                 state_labels: HashMap::new(),
+                state_change_seq: None,
+                session_version: None,
             },
         }
     }
@@ -1133,6 +1222,8 @@ mod tests {
                 title: None,
                 display_agent: None,
                 state_labels: HashMap::new(),
+                state_change_seq: None,
+                session_version: None,
             },
         }
     }
@@ -1350,6 +1441,8 @@ mod tests {
                         title: Some("stale initial snapshot".into()),
                         display_agent: None,
                         state_labels: HashMap::new(),
+                        state_change_seq: None,
+                        session_version: None,
                     }),
                     request_prefix: "batch".into(),
                 },
@@ -1481,6 +1574,8 @@ mod tests {
                 title: None,
                 display_agent: None,
                 state_labels: HashMap::new(),
+                state_change_seq: None,
+                session_version: None,
             }),
             request_prefix: "test".into(),
         };
@@ -1526,6 +1621,8 @@ mod tests {
                 title: Some("short lived".into()),
                 display_agent: None,
                 state_labels: HashMap::new(),
+                state_change_seq: None,
+                session_version: None,
             }),
             request_prefix: "test".into(),
         };

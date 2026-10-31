@@ -429,6 +429,13 @@ pub struct PaneAgentStatusChangedEvent {
     pub display_agent: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub state_labels: HashMap<String, String>,
+    /// The agent record's `state_change_seq` after this change; larger is newer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_change_seq: Option<u64>,
+    /// Session journal version when this change happened. A `session.changed`
+    /// record with this version or lower predates it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_version: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -570,6 +577,10 @@ pub enum EventData {
         display_agent: Option<String>,
         #[serde(default, skip_serializing_if = "HashMap::is_empty")]
         state_labels: HashMap<String, String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        state_change_seq: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_version: Option<u64>,
     },
     LayoutUpdated {
         layout: super::panes::PaneLayoutSnapshot,

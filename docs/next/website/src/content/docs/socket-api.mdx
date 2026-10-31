@@ -990,7 +990,26 @@ old behavior and still rejects an unknown pane. `agent_status` filters as before
 {"event":"pane.agent_status_changed","data":{"pane_id":"w1:p1","workspace_id":"w1","agent_status":"working","agent":"claude"}}
 ```
 
-Feature flag: `events.subscribe.agent_status_all_panes`.
+Status events carry two ordering keys:
+
+- `state_change_seq`: the agent record's `state_change_seq` after this change.
+  A larger value is newer; compare it with `state_change_seq` in agent records.
+- `session_version`: the session journal version when the change happened. A
+  `session.changed` record for the same pane whose `version` is this value or
+  lower was computed before the change; ignore its status. Records with a higher
+  version already include it.
+
+```json
+{"event":"pane.agent_status_changed","data":{"pane_id":"w1:p1","workspace_id":"w1","agent_status":"working","state_change_seq":118,"session_version":41}}
+```
+
+All subscriptions in one `events.subscribe` request share one timeline: their
+events are written in the order they happened. Subscribe to
+`pane.agent_status_changed` and `session.changed` in the same request to get
+that ordering for free; separate requests are separate streams.
+
+Feature flags: `events.subscribe.agent_status_all_panes`, `events.subscribe.ordered`,
+`pane.agent_status_changed.order_keys`.
 
 ### server.multiplex
 

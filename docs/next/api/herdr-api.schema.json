@@ -694,6 +694,22 @@
                 "pane_id": {
                   "type": "string"
                 },
+                "session_version": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "state_change_seq": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
                 "state_labels": {
                   "additionalProperties": {
                     "type": "string"
@@ -6579,6 +6595,24 @@
             "pane_id": {
               "type": "string"
             },
+            "session_version": {
+              "description": "Session journal version when this change happened. A `session.changed`\nrecord with this version or lower predates it.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "state_change_seq": {
+              "description": "The agent record's `state_change_seq` after this change; larger is newer.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "state_labels": {
               "additionalProperties": {
                 "type": "string"
@@ -7652,6 +7686,22 @@
                 },
                 "pane_id": {
                   "type": "string"
+                },
+                "session_version": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "state_change_seq": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
                 },
                 "state_labels": {
                   "additionalProperties": {

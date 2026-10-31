@@ -8514,3 +8514,63 @@ fn reported_session_exposes_its_id_and_transcript_path() {
         "unchanged reports do not repeat the event"
     );
 }
+
+#[test]
+fn agent_status_events_carry_state_change_seq_and_session_version() {
+    use api::schema::{EventData, EventKind, Method, PaneAgentState, PaneReportAgentParams};
+
+    let (writer, _control_rx, _render_rx) = test_client_writer();
+    let (mut server, pane_id) = completion_guard_server(writer);
+    let public_pane_id = server.app.public_pane_id(0, pane_id).unwrap();
+    let report = |seq, state| {
+        Method::PaneReportAgent(PaneReportAgentParams {
+            pane_id: public_pane_id.clone(),
+            source: "prime-agent".into(),
+            agent: "prime-agent".into(),
+            state,
+            message: None,
+            seq: Some(seq),
+            agent_session_id: None,
+            agent_session_path: None,
+            resume_argv: None,
+        })
+    };
+    completion_guard_api_report(&mut server, report(1, PaneAgentState::Working));
+    server.app.sync_session_journal();
+    let watch = server.app.event_hub.watch_session();
+    server.app.sync_session_journal();
+    completion_guard_api_report(&mut server, report(2, PaneAgentState::Idle));
+
+    let last_status = server
+        .app
+        .event_hub
+        .events_after(0)
+        .into_iter()
+        .rev()
+        .find(|(_, event)| event.event == EventKind::PaneAgentStatusChanged)
+        .expect("status event");
+    let EventData::PaneAgentStatusChanged {
+        state_change_seq,
+        session_version,
+        ..
+    } = last_status.1.data
+    else {
+        panic!("expected status data");
+    };
+    let agent = server
+        .app
+        .session_snapshot()
+        .agents
+        .into_iter()
+        .find(|agent| agent.pane_id == public_pane_id)
+        .unwrap();
+    assert_eq!(state_change_seq, Some(agent.state_change_seq));
+    assert_eq!(session_version, Some(server.app.session_journal.version()));
+
+    server.app.sync_session_journal();
+    assert!(
+        server.app.session_journal.version() > session_version.unwrap(),
+        "the next session.changed reflects the status change"
+    );
+    drop(watch);
+}
