@@ -571,6 +571,10 @@ fn handle_request(
         });
     }
 
+    if matches!(&request.method, Method::ServerCapabilitiesGet(_)) {
+        return server_capabilities_response(request.id);
+    }
+
     if matches!(&request.method, Method::ClientShellSurfaceSet(_)) {
         return error_response_json(
             request.id,
@@ -599,6 +603,43 @@ fn handle_request(
     }
 
     dispatch_to_app(request, api_tx, None, response_write_complete, None)
+}
+
+/// Optional behaviors of existing methods. Method and event names are listed
+/// separately; a feature names a capability that a method name alone cannot show.
+const API_FEATURES: &[&str] = &[];
+
+fn server_capabilities_response(id: String) -> String {
+    let mut methods: Vec<String> = Method::OPERATIONS
+        .iter()
+        .map(|operation| operation.name.to_string())
+        .collect();
+    methods.sort_unstable();
+    let mut events: Vec<String> = crate::api::schema::KNOWN_EVENT_KINDS
+        .iter()
+        .map(|kind| kind.dot_name().to_string())
+        .chain(
+            crate::api::schema::SUBSCRIPTION_ONLY_EVENT_NAMES
+                .iter()
+                .map(|name| name.to_string()),
+        )
+        .collect();
+    events.sort_unstable();
+    events.dedup();
+    serde_json::to_string(&SuccessResponse {
+        id,
+        result: ResponseResult::ServerCapabilities {
+            version: crate::build_info::version(),
+            protocol: crate::protocol::PROTOCOL_VERSION,
+            methods,
+            events,
+            features: API_FEATURES.iter().map(|name| name.to_string()).collect(),
+        },
+    })
+    .unwrap_or_else(|_| {
+        r#"{"id":"","error":{"code":"internal_error","message":"failed to encode response"}}"#
+            .to_string()
+    })
 }
 
 pub(crate) fn api_method_name(method: &Method) -> &'static str {
@@ -1406,6 +1447,54 @@ mod tests {
         let parsed: SuccessResponse = serde_json::from_str(&response).unwrap();
         assert_eq!(parsed.id, "req_1");
         assert!(matches!(parsed.result, ResponseResult::Pong { .. }));
+    }
+
+    #[test]
+    fn server_capabilities_lists_methods_and_events_without_the_app() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let response = handle_request(
+            Request {
+                id: "caps".into(),
+                method: Method::ServerCapabilitiesGet(crate::api::schema::EmptyParams::default()),
+            },
+            &tx,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        assert!(
+            rx.try_recv().is_err(),
+            "capabilities must not reach the app"
+        );
+        let parsed: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(parsed.id, "caps");
+        let ResponseResult::ServerCapabilities {
+            protocol,
+            methods,
+            events,
+            ..
+        } = parsed.result
+        else {
+            panic!("expected server capabilities");
+        };
+        assert_eq!(protocol, crate::protocol::PROTOCOL_VERSION);
+        for method in [
+            "server.capabilities",
+            "session.snapshot",
+            "events.subscribe",
+        ] {
+            assert!(methods.iter().any(|name| name == method), "{method}");
+        }
+        for event in [
+            "pane.agent_status_changed",
+            "pane.created",
+            "pane.output_matched",
+        ] {
+            assert!(events.iter().any(|name| name == event), "{event}");
+        }
+        assert!(methods.windows(2).all(|pair| pair[0] < pair[1]));
     }
 
     #[test]

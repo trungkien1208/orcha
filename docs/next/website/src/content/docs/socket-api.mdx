@@ -96,7 +96,7 @@ Raw socket method names use dot notation:
 
 | Area | Methods |
 | --- | --- |
-| Server | `ping`, `server.stop`, `server.reload_config`, `server.agent_manifests`, `server.reload_agent_manifests` |
+| Server | `ping`, `server.capabilities`, `server.stop`, `server.reload_config`, `server.agent_manifests`, `server.reload_agent_manifests` |
 | Notification | `notification.show` |
 | Client | `client.window_title.set`, `client.window_title.clear` |
 | Session | `session.snapshot` |
@@ -938,6 +938,39 @@ Errors look like this:
   }
 }
 ```
+
+## Sync API
+
+Protocol 23 adds methods for clients that mirror Herdr's state, such as a
+local web dashboard. Every addition is optional: older servers reject the new
+methods with `invalid_request`, and older clients never see the new shapes.
+
+### server.capabilities
+
+Feature detection without trial and error. The server answers directly, so it
+works even while the UI is busy.
+
+```json
+{"id":"c1","method":"server.capabilities","params":{}}
+```
+
+```json
+{
+  "id": "c1",
+  "result": {
+    "type": "server_capabilities",
+    "version": "0.9.13",
+    "protocol": 23,
+    "methods": ["agent.focus", "agent.get", "...", "workspace.rename"],
+    "events": ["layout.updated", "pane.agent_status_changed", "..."],
+    "features": []
+  }
+}
+```
+
+`methods` lists every request method, `events` every event name that
+`events.subscribe` can deliver, and `features` optional behaviors of existing
+methods that a method name alone cannot show.
 
 ## Protocol stability
 

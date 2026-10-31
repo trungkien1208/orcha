@@ -253,7 +253,6 @@ impl EventKind {
     }
 }
 
-#[cfg(test)]
 pub const KNOWN_EVENT_KINDS: &[EventKind] = &[
     EventKind::WorkspaceCreated,
     EventKind::WorkspaceUpdated,
@@ -363,6 +362,9 @@ pub struct EventEnvelope {
     pub event: EventKind,
     pub data: EventData,
 }
+
+/// Events that exist only as `events.subscribe` streams, not in the lifecycle history.
+pub const SUBSCRIPTION_ONLY_EVENT_NAMES: &[&str] = &["pane.output_matched", "pane.scroll_changed"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum SubscriptionEventKind {

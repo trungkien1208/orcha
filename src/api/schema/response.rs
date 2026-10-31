@@ -51,6 +51,17 @@ pub enum ResponseResult {
     SessionSnapshot {
         snapshot: Box<SessionSnapshot>,
     },
+    ServerCapabilities {
+        version: String,
+        protocol: u32,
+        /// Every request method this server accepts.
+        methods: Vec<String>,
+        /// Every event name `events.subscribe` can deliver.
+        events: Vec<String>,
+        /// Optional behaviors of existing methods, for feature detection.
+        #[serde(default)]
+        features: Vec<String>,
+    },
     WorkspaceInfo {
         workspace: WorkspaceInfo,
     },

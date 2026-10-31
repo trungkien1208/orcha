@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "protocol": 22,
+  "protocol": 23,
   "schema_version": 1,
   "schemas": {
     "error_response": {
@@ -6312,6 +6312,22 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "server.capabilities",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -9213,6 +9229,52 @@
               "required": [
                 "type",
                 "snapshot"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "events": {
+                  "description": "Every event name `events.subscribe` can deliver.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "features": {
+                  "default": [],
+                  "description": "Optional behaviors of existing methods, for feature detection.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "methods": {
+                  "description": "Every request method this server accepts.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "protocol": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "server_capabilities",
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "version",
+                "protocol",
+                "methods",
+                "events"
               ],
               "type": "object"
             },
