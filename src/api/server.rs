@@ -880,6 +880,8 @@ fn handle_request(
 const API_FEATURES: &[&str] = &[
     // `pane.agent_status_changed` without `pane_id` follows every pane.
     "events.subscribe.agent_status_all_panes",
+    // `session.snapshot { since, epoch }` answers with a `session_delta`.
+    "session.snapshot.since",
 ];
 
 fn server_capabilities_response(id: String) -> String {

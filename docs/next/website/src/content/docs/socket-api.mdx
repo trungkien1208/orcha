@@ -1019,6 +1019,55 @@ ends all of its subscriptions and waits. `server.multiplex` and
 {"id":"a","event":"pane.agent_status_changed","data":{"pane_id":"w1:p1","workspace_id":"w1","agent_status":"working"}}
 ```
 
+### Session deltas
+
+`session.snapshot` now also returns `session_version`, a number that grows each
+time a workspace, tab, pane or agent record changes, and `session_epoch`, which
+changes when the server restarts. Pass both back to get only what changed:
+
+```json
+{"id":"d1","method":"session.snapshot","params":{"since":41,"epoch":"18c2f…-4d2"}}
+```
+
+```json
+{
+  "id": "d1",
+  "result": {
+    "type": "session_delta",
+    "session_version": 43,
+    "session_epoch": "18c2f…-4d2",
+    "changes": [
+      {"entity": "pane", "op": "updated", "id": "w1:p1", "record": {"pane_id": "w1:p1", "agent_status": "working"}},
+      {"entity": "agent", "op": "removed", "id": "w1:p2"}
+    ]
+  }
+}
+```
+
+`entity` is `workspace`, `tab`, `pane` or `agent` (agents use their pane id).
+`op` is `added`, `updated` or `removed`; `record` is the whole new record, as in
+the snapshot, and is absent on removal. Pane records leave out `scroll`. When
+`since` is too old, from the future, or from another `epoch`, the server answers
+with a full `session_snapshot` instead, so always check `result.type`.
+
+Subscribe to `session.changed` to receive the same changes as they happen:
+
+```json
+{"id":"s2","method":"events.subscribe","params":{"subscriptions":[{"type":"session.changed"}]}}
+```
+
+```json
+{"event":"session_changed","data":{"type":"session_changed","version":43,"epoch":"18c2f…-4d2","changes":[…]}}
+```
+
+The server compares records after lifecycle events and every two seconds while
+at least one `session.changed` subscription is open, and does no work when
+none is. Recommended order: subscribe, call `session.snapshot`, then apply
+events whose `version` is greater than the snapshot's `session_version`. A gap
+in `version` (or `events_lost`) means call `session.snapshot { since }` again.
+
+Feature flag: `session.snapshot.since`.
+
 ## Protocol stability
 
 The client-rendered Herdr UI uses a stable endpoint generation for local and SSH

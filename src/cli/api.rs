@@ -1,6 +1,6 @@
 const API_SCHEMA_JSON: &str = include_str!("../../docs/next/api/herdr-api.schema.json");
 
-use crate::api::schema::{EmptyParams, Method, Request};
+use crate::api::schema::{Method, Request};
 
 pub(super) fn run_api_command(args: &[String]) -> std::io::Result<i32> {
     let Some(subcommand) = args.first().map(String::as_str) else {
@@ -61,7 +61,7 @@ fn api_snapshot(args: &[String]) -> std::io::Result<i32> {
 
     super::print_response(&super::send_request(&Request {
         id: "cli:api:snapshot".into(),
-        method: Method::SessionSnapshot(EmptyParams::default()),
+        method: Method::SessionSnapshot(Default::default()),
     })?)
 }
 

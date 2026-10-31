@@ -57,7 +57,7 @@ operations::define_operations! {
     ClientWindowTitleSet(ClientWindowTitleSetParams) => "client.window_title.set", false, false;
     ClientWindowTitleClear(EmptyParams) => "client.window_title.clear", false, false;
     ClientShellSurfaceSet(ClientShellSurfaceSetParams) => "client_shell.surface.set", false, true;
-    SessionSnapshot(EmptyParams) => "session.snapshot", false, false;
+    SessionSnapshot(SessionSnapshotParams) => "session.snapshot", false, false;
     WorkspaceCreate(WorkspaceCreateParams) => "workspace.create", true, true;
     WorkspaceList(EmptyParams) => "workspace.list", false, false;
     WorkspaceGet(WorkspaceTarget) => "workspace.get", false, false;

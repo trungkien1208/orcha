@@ -741,7 +741,7 @@ fn success_response_round_trips() {
 fn session_snapshot_request_and_response_round_trip() {
     let request = Request {
         id: "req_snapshot".into(),
-        method: Method::SessionSnapshot(EmptyParams::default()),
+        method: Method::SessionSnapshot(Default::default()),
     };
     let json = serde_json::to_string(&request).unwrap();
     assert!(json.contains("\"method\":\"session.snapshot\""));
@@ -762,6 +762,8 @@ fn session_snapshot_request_and_response_round_trip() {
                 panes: Vec::new(),
                 layouts: Vec::new(),
                 agents: Vec::new(),
+                session_version: None,
+                session_epoch: None,
             }),
         },
     };

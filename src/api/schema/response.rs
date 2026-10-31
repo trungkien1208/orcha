@@ -51,6 +51,12 @@ pub enum ResponseResult {
     SessionSnapshot {
         snapshot: Box<SessionSnapshot>,
     },
+    /// `session.snapshot { since }` when the changes after `since` are retained.
+    SessionDelta {
+        session_version: u64,
+        session_epoch: String,
+        changes: Vec<super::session::SessionChange>,
+    },
     ServerCapabilities {
         version: String,
         protocol: u32,

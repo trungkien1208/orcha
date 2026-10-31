@@ -90,6 +90,8 @@ pub enum Subscription {
     PaneScrollChanged { pane_id: String },
     #[serde(rename = "layout.updated")]
     LayoutUpdated {},
+    #[serde(rename = "session.changed")]
+    SessionChanged {},
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -226,6 +228,7 @@ pub enum EventKind {
     PaneAgentDetected,
     PaneAgentStatusChanged,
     LayoutUpdated,
+    SessionChanged,
 }
 
 impl EventKind {
@@ -257,6 +260,7 @@ impl EventKind {
             EventKind::PaneAgentDetected => "pane.agent_detected",
             EventKind::PaneAgentStatusChanged => "pane.agent_status_changed",
             EventKind::LayoutUpdated => "layout.updated",
+            EventKind::SessionChanged => "session.changed",
         }
     }
 }
@@ -288,6 +292,7 @@ pub const KNOWN_EVENT_KINDS: &[EventKind] = &[
     EventKind::PaneAgentDetected,
     EventKind::PaneAgentStatusChanged,
     EventKind::LayoutUpdated,
+    EventKind::SessionChanged,
 ];
 
 pub const PLUGIN_HOOK_EVENT_KINDS: &[EventKind] = &[
@@ -361,6 +366,7 @@ mod known_event_name_tests {
         assert!(!names.contains(&"layout.updated"));
         assert!(!names.contains(&"workspace.metadata_updated"));
         assert!(!names.contains(&"pane.updated"));
+        assert!(!names.contains(&"session.changed"));
         assert!(names.contains(&"pane.moved"));
     }
 }
@@ -562,5 +568,10 @@ pub enum EventData {
     },
     LayoutUpdated {
         layout: super::panes::PaneLayoutSnapshot,
+    },
+    SessionChanged {
+        version: u64,
+        epoch: String,
+        changes: Vec<super::session::SessionChange>,
     },
 }

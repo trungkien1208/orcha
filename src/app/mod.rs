@@ -22,6 +22,7 @@ mod ids;
 mod popup;
 mod runtime;
 mod session;
+mod session_journal;
 pub mod state;
 mod tab_bar_status;
 mod terminal_targets;
@@ -168,6 +169,7 @@ pub struct App {
     pub(crate) config_reloaded_from_disk: bool,
     client_shell_keybindings_profile: Option<String>,
     endpoint_commands: custom_commands::EndpointCommandRegistry,
+    pub(crate) session_journal: session_journal::SessionJournal,
     // Drop after terminal runtimes have shut down their processes. Command
     // workers retain their own references until completion.
     // ponytail: server-lifetime pins defer reclamation until restart; use
@@ -698,6 +700,7 @@ impl App {
             config_reloaded_from_disk: false,
             client_shell_keybindings_profile,
             endpoint_commands,
+            session_journal: session_journal::SessionJournal::new(),
         };
         app.configure_tab_bar_status(&config.ui.tab_bar_right, &config.ui.tab_bar_right_separator);
         app.configure_window_title(&config.ui.window_title);

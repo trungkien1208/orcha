@@ -115,6 +115,7 @@ impl PanePresentationSnapshot {
 pub(super) struct ActiveEventSubscription {
     event_kind: crate::api::schema::EventKind,
     last_sequence: u64,
+    _session_watch: Option<crate::api::event_hub::SessionWatch>,
 }
 
 pub(super) enum ActiveSubscription {
@@ -158,6 +159,7 @@ impl ActiveSubscription {
             Self::Event(ActiveEventSubscription {
                 event_kind,
                 last_sequence: event_start_sequence,
+                _session_watch: None,
             })
         };
 
@@ -200,6 +202,11 @@ impl ActiveSubscription {
                 Ok(event_subscription(EventKind::PaneAgentDetected))
             }
             Subscription::LayoutUpdated {} => Ok(event_subscription(EventKind::LayoutUpdated)),
+            Subscription::SessionChanged {} => Ok(Self::Event(ActiveEventSubscription {
+                event_kind: EventKind::SessionChanged,
+                last_sequence: event_start_sequence,
+                _session_watch: Some(event_hub.watch_session()),
+            })),
             Subscription::PaneOutputMatched {
                 pane_id,
                 source,
@@ -1183,6 +1190,39 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn session_changed_subscription_watches_the_session_while_held() {
+        let event_hub = EventHub::default();
+        let (api_tx, _api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut subscription = ActiveSubscription::new(
+            Subscription::SessionChanged {},
+            "session",
+            0,
+            &api_tx,
+            &event_hub,
+            event_hub.current_sequence(),
+        )
+        .unwrap();
+        assert!(event_hub.session_watched());
+
+        event_hub.push(EventEnvelope {
+            event: EventKind::SessionChanged,
+            data: EventData::SessionChanged {
+                version: 1,
+                epoch: "e".into(),
+                changes: Vec::new(),
+            },
+        });
+        event_hub.push(workspace_focused_event("ignored"));
+        let events = subscription.poll_batch(&api_tx, &event_hub).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["event"], "session_changed");
+        assert_eq!(events[0]["data"]["version"], 1);
+
+        drop(subscription);
+        assert!(!event_hub.session_watched());
     }
 
     #[test]

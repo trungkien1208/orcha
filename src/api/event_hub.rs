@@ -1,6 +1,19 @@
 #[derive(Clone, Default)]
 pub struct EventHub {
     inner: std::sync::Arc<std::sync::Mutex<EventHubState>>,
+    session_watchers: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+/// Keeps the session journal publishing `session.changed` while held.
+pub(crate) struct SessionWatch {
+    watchers: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl Drop for SessionWatch {
+    fn drop(&mut self) {
+        self.watchers
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 #[derive(Default)]
@@ -64,6 +77,20 @@ impl EventHub {
             .filter(|(event_sequence, _)| *event_sequence > sequence)
             .cloned()
             .collect())
+    }
+
+    pub(crate) fn watch_session(&self) -> SessionWatch {
+        self.session_watchers
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        SessionWatch {
+            watchers: std::sync::Arc::clone(&self.session_watchers),
+        }
+    }
+
+    pub(crate) fn session_watched(&self) -> bool {
+        self.session_watchers
+            .load(std::sync::atomic::Ordering::Relaxed)
+            > 0
     }
 
     pub fn current_sequence(&self) -> u64 {

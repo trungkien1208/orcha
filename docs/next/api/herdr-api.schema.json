@@ -723,6 +723,35 @@
                 "layout"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "changes": {
+                  "items": {
+                    "$ref": "#/schemas/event/$defs/SessionChange"
+                  },
+                  "type": "array"
+                },
+                "epoch": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "session_changed",
+                  "type": "string"
+                },
+                "version": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "version",
+                "epoch",
+                "changes"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -753,7 +782,8 @@
             "pane_exited",
             "pane_agent_detected",
             "pane_agent_status_changed",
-            "layout_updated"
+            "layout_updated",
+            "session_changed"
           ],
           "type": "string"
         },
@@ -1027,6 +1057,46 @@
             "viewport_rows"
           ],
           "type": "object"
+        },
+        "SessionChange": {
+          "properties": {
+            "entity": {
+              "$ref": "#/schemas/event/$defs/SessionEntity"
+            },
+            "id": {
+              "description": "Workspace, tab or pane id. Agents use their pane id.",
+              "type": "string"
+            },
+            "op": {
+              "$ref": "#/schemas/event/$defs/SessionChangeOp"
+            },
+            "record": {
+              "description": "The new record, as in `session.snapshot`; absent when removed."
+            }
+          },
+          "required": [
+            "entity",
+            "op",
+            "id"
+          ],
+          "type": "object"
+        },
+        "SessionChangeOp": {
+          "enum": [
+            "added",
+            "updated",
+            "removed"
+          ],
+          "type": "string"
+        },
+        "SessionEntity": {
+          "enum": [
+            "workspace",
+            "tab",
+            "pane",
+            "agent"
+          ],
+          "type": "string"
         },
         "SplitDirection": {
           "enum": [
@@ -3893,6 +3963,27 @@
           ],
           "type": "object"
         },
+        "SessionSnapshotParams": {
+          "properties": {
+            "epoch": {
+              "description": "The `session_epoch` that `since` came from. A different epoch returns a full snapshot.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "since": {
+              "description": "Return only the changes after this `session_version` when they are retained.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
         "SplitDirection": {
           "enum": [
             "right",
@@ -4275,6 +4366,18 @@
               "properties": {
                 "type": {
                   "const": "layout.updated",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "session.changed",
                   "type": "string"
                 }
               },
@@ -4927,7 +5030,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/schemas/request/$defs/EmptyParams"
+              "$ref": "#/schemas/request/$defs/SessionSnapshotParams"
             }
           },
           "required": [
@@ -7483,6 +7586,35 @@
                 "layout"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "changes": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/SessionChange"
+                  },
+                  "type": "array"
+                },
+                "epoch": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "session_changed",
+                  "type": "string"
+                },
+                "version": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "type",
+                "version",
+                "epoch",
+                "changes"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -7528,7 +7660,8 @@
             "pane_exited",
             "pane_agent_detected",
             "pane_agent_status_changed",
-            "layout_updated"
+            "layout_updated",
+            "session_changed"
           ],
           "type": "string"
         },
@@ -9264,6 +9397,36 @@
               "type": "object"
             },
             {
+              "description": "`session.snapshot { since }` when the changes after `since` are retained.",
+              "properties": {
+                "changes": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/SessionChange"
+                  },
+                  "type": "array"
+                },
+                "session_epoch": {
+                  "type": "string"
+                },
+                "session_version": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "session_delta",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "session_version",
+                "session_epoch",
+                "changes"
+              ],
+              "type": "object"
+            },
+            {
               "properties": {
                 "events": {
                   "description": "Every event name `events.subscribe` can deliver.",
@@ -10557,6 +10720,46 @@
           ],
           "type": "object"
         },
+        "SessionChange": {
+          "properties": {
+            "entity": {
+              "$ref": "#/schemas/success_response/$defs/SessionEntity"
+            },
+            "id": {
+              "description": "Workspace, tab or pane id. Agents use their pane id.",
+              "type": "string"
+            },
+            "op": {
+              "$ref": "#/schemas/success_response/$defs/SessionChangeOp"
+            },
+            "record": {
+              "description": "The new record, as in `session.snapshot`; absent when removed."
+            }
+          },
+          "required": [
+            "entity",
+            "op",
+            "id"
+          ],
+          "type": "object"
+        },
+        "SessionChangeOp": {
+          "enum": [
+            "added",
+            "updated",
+            "removed"
+          ],
+          "type": "string"
+        },
+        "SessionEntity": {
+          "enum": [
+            "workspace",
+            "tab",
+            "pane",
+            "agent"
+          ],
+          "type": "string"
+        },
         "SessionSnapshot": {
           "properties": {
             "agents": {
@@ -10599,6 +10802,22 @@
               "format": "uint32",
               "minimum": 0,
               "type": "integer"
+            },
+            "session_epoch": {
+              "description": "Changes when the server restarts; versions from another epoch are void.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "session_version": {
+              "description": "Journal version this snapshot reflects. Pass it as `since` later.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "tabs": {
               "items": {
