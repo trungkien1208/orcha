@@ -50,6 +50,12 @@ pub enum ResponseResult {
     },
     SessionSnapshot {
         snapshot: Box<SessionSnapshot>,
+        /// Same as `snapshot.session_version`, at the level a `session_delta` uses.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_version: Option<u64>,
+        /// Same as `snapshot.session_epoch`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_epoch: Option<String>,
     },
     /// `session.snapshot { since }` when the changes after `since` are retained.
     SessionDelta {

@@ -9531,6 +9531,22 @@
             },
             {
               "properties": {
+                "session_epoch": {
+                  "description": "Same as `snapshot.session_epoch`.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "session_version": {
+                  "description": "Same as `snapshot.session_version`, at the level a `session_delta` uses.",
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
                 "snapshot": {
                   "$ref": "#/schemas/success_response/$defs/SessionSnapshot"
                 },

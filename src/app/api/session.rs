@@ -38,6 +38,8 @@ impl App {
         encode_success(
             id,
             ResponseResult::SessionSnapshot {
+                session_version: snapshot.session_version,
+                session_epoch: snapshot.session_epoch.clone(),
                 snapshot: Box::new(snapshot),
             },
         )
@@ -171,7 +173,7 @@ mod tests {
         });
 
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();
-        let ResponseResult::SessionSnapshot { snapshot } = success.result else {
+        let ResponseResult::SessionSnapshot { snapshot, .. } = success.result else {
             panic!("expected session snapshot response");
         };
         assert_eq!(success.id, "req_snapshot");
@@ -225,10 +227,16 @@ mod tests {
     #[test]
     fn session_snapshot_since_returns_only_the_changes_after_that_version() {
         let mut app = app_with_two_tabs();
-        let ResponseResult::SessionSnapshot { snapshot } = snapshot_request(&mut app, None, None)
+        let ResponseResult::SessionSnapshot {
+            snapshot,
+            session_version,
+            session_epoch,
+        } = snapshot_request(&mut app, None, None)
         else {
             panic!("expected a full snapshot first");
         };
+        assert_eq!(session_version, snapshot.session_version);
+        assert_eq!(session_epoch, snapshot.session_epoch);
         let version = snapshot.session_version.unwrap();
         let epoch = snapshot.session_epoch.clone().unwrap();
 

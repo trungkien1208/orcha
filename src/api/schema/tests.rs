@@ -751,6 +751,8 @@ fn session_snapshot_request_and_response_round_trip() {
     let response = SuccessResponse {
         id: "req_snapshot".into(),
         result: ResponseResult::SessionSnapshot {
+            session_version: None,
+            session_epoch: None,
             snapshot: Box::new(SessionSnapshot {
                 version: "0.1.2".into(),
                 protocol: 16,
