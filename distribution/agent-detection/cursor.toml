@@ -1,8 +1,20 @@
 id = "cursor"
-version = "2026.08.03.1"
+version = "2026.11.01.1"
 min_engine_version = 1
-updated_at = "2026-08-03T01:08:04Z"
+updated_at = "2026-11-01T12:00:00Z"
 aliases = ["cursor-agent"]
+
+# First run in a folder: "Workspace Trust Required" box with [a] Trust / [q] Quit.
+[[rules]]
+id = "workspace_trust_prompt"
+state = "blocked"
+priority = 330
+region = "bottom_non_empty_lines(24)"
+visible_blocker = true
+contains = ["do you trust the contents of this directory?", "trust this workspace", "[q] quit"]
+# The box must still be the last thing on screen: after trusting, the old box
+# stays above the composer and must not keep the pane blocked.
+regex = ['(?i)enter to select[^\n]*\n[^\n]*\n[ \t]*╰─+╯[ \t]*\n?\z']
 
 [[rules]]
 id = "write_file_approval"
