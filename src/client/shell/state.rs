@@ -109,6 +109,8 @@ pub(super) struct OrchaHits {
     pub(super) settings: Rect,
     /// orcha: the header's COMMANDS button.
     pub(super) commands: Rect,
+    /// orcha: the header's office chip (Easy Job); a click opens it.
+    pub(super) office: Rect,
     /// orcha: the header's "N need you" chip; a click goes to the first.
     pub(super) needs_you: Rect,
     pub(super) fuel: Rect,
@@ -179,8 +181,14 @@ pub(crate) struct OrchaUiState {
     pub(super) plugin_update_check:
         Option<std::sync::mpsc::Receiver<crate::orcha_plugin_updates::PluginNews>>,
     pub(super) plugin_updates: Vec<crate::orcha_plugin_updates::PluginUpdate>,
+    /// Easy Job in the header: None when not added, else whether it runs.
+    pub(super) office: Option<bool>,
+    pub(super) office_check: Option<std::sync::mpsc::Receiver<Option<bool>>>,
+    pub(super) office_checked_at: Option<std::time::Instant>,
     /// A plugin update to announce once the screen is free.
     pub(super) plugin_update_notice: Option<(crate::orcha_plugin_updates::PluginUpdate, String)>,
+    /// A plugin removal running; its message for the notice.
+    pub(super) plugin_remove_run: Option<std::sync::mpsc::Receiver<String>>,
     /// A plugin update running: the plugin's name and its new version or log.
     pub(super) plugin_update_run: Option<std::sync::mpsc::Receiver<PluginUpdateResult>>,
     /// `orcha update` running behind the UI; true when it worked.

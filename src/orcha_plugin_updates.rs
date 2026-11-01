@@ -343,9 +343,13 @@ pub(crate) fn restart_running_panes(id: &str) {
     else {
         return;
     };
-    for pane_id in plugin_pane_ids(&listed, id) {
+    let panes = plugin_pane_ids(&listed, id);
+    for pane_id in &panes {
         let params = serde_json::json!({ "pane_id": pane_id }).to_string();
         let _ = crate::orcha_handoff::herdr_json(&["api", "call", "plugin.pane.restart", &params]);
+    }
+    if panes.is_empty() && id == crate::orcha_office::PLUGIN_ID {
+        crate::orcha_office::restart_detached_office();
     }
 }
 

@@ -108,6 +108,23 @@ pub(super) fn render_header(
         hits.orcha.commands = commands;
         left_of = commands.x;
     }
+    // Easy Job: shown once added, ● while its server runs; a click opens it
+    if let Some(running) = ui.office {
+        let text = if running { "● office" } else { "○ office" };
+        let chip = Rect::new(
+            left_of.saturating_sub(display_width(text) + 5),
+            area.y,
+            display_width(text) + 4,
+            1,
+        );
+        if chip.x > counts_end + 4 {
+            let fill = if running { t.green } else { t.card };
+            let ink = if running { t.chip_text } else { t.muted };
+            brutal::pill(buffer, chip, text, ink, fill, true, &t);
+            hits.orcha.office = chip;
+            left_of = chip.x;
+        }
+    }
     // a newer orcha: a green button left of the buttons, a click installs it
     if let Some(note) = &ui.update_note {
         let text = format!(" {note} ");

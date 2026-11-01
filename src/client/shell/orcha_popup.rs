@@ -90,6 +90,12 @@ pub(crate) enum OrchaPopup {
         selected: usize,
         plugin: crate::orcha_app::OfferedPlugin,
     },
+    /// Remove a plugin? Keep is preselected.
+    PluginRemove {
+        selected: usize,
+        plugin_id: String,
+        name: String,
+    },
     /// A newer version of a GitHub plugin, shown once per version.
     PluginUpdate {
         selected: usize,
@@ -1537,6 +1543,82 @@ pub(super) fn plugin_offer_rows(
     rows
 }
 
+/// Remove, or keep it (the safe default).
+pub(super) fn plugin_remove_rows(name: &str) -> [(String, String, &'static str); 2] {
+    [
+        (
+            format!("Remove {name}"),
+            "stops it and removes it from Orcha; its own data stays".to_owned(),
+            "REMOVE",
+        ),
+        ("Keep it".to_owned(), "nothing changes".to_owned(), "KEEP"),
+    ]
+}
+
+/// A small popup of choices: a title line and one row per choice.
+fn render_choice_rows(
+    buffer: &mut Buffer,
+    selected: usize,
+    title: &str,
+    rows: &[(String, String, &'static str)],
+    t: &Brutal,
+    hits: &mut PopupHits,
+) -> Option<()> {
+    let frame = popup_frame(
+        buffer,
+        72,
+        rows_height(rows.len()),
+        "PLUGIN",
+        title,
+        &[("↵", "choose"), ("↑↓", "move")],
+        "esc keep",
+        t,
+        hits,
+    )?;
+    let mut y = frame.body.y;
+    for (index, (row_title, detail, label)) in rows.iter().enumerate() {
+        if y + ROW > frame.body.bottom() {
+            break;
+        }
+        let rect = Rect::new(frame.body.x, y, frame.body.width, ROW);
+        let fill = row_box(buffer, rect, false, index == selected, t);
+        put_text(
+            buffer,
+            rect.x + 2,
+            y,
+            rect.width.saturating_sub(16),
+            row_title,
+            Style::default()
+                .fg(t.ink)
+                .bg(fill)
+                .add_modifier(Modifier::BOLD),
+        );
+        put_text(
+            buffer,
+            rect.x + 2,
+            y + 1,
+            rect.width.saturating_sub(16),
+            detail,
+            Style::default().fg(t.muted).bg(fill),
+        );
+        if index == selected {
+            let action = button(
+                buffer,
+                rect.right() - 1,
+                y,
+                label,
+                ButtonKind::Primary,
+                fill,
+                t,
+            );
+            hits.actions.push((action, index));
+        }
+        hits.rows.push((rect, index));
+        y += ROW;
+    }
+    Some(())
+}
+
 /// Update now, or later from COMMANDS.
 pub(super) fn plugin_update_rows(
     update: &crate::orcha_plugin_updates::PluginUpdate,
@@ -2104,6 +2186,17 @@ pub(super) fn render_popup(
             name,
         } => {
             let _ = render_plugin_update(buffer, *selected, update, name, &t, &mut hits);
+        }
+        OrchaPopup::PluginRemove { selected, name, .. } => {
+            let rows = plugin_remove_rows(name);
+            let _ = render_choice_rows(
+                buffer,
+                *selected,
+                &format!("Remove {name}?"),
+                &rows,
+                &t,
+                &mut hits,
+            );
         }
         OrchaPopup::WhatsNew { release } => {
             let _ = render_whats_new(buffer, release, &t, &mut hits);

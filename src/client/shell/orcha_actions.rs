@@ -246,6 +246,11 @@ impl ClientShellState {
             outcome.repaint = true;
             return true;
         }
+        if super::contains(hits.office, point) {
+            self.open_office();
+            outcome.repaint = true;
+            return true;
+        }
         if super::contains(hits.needs_you, point) {
             self.jump_to_needs_you(outcome);
             outcome.repaint = true;
@@ -718,6 +723,7 @@ impl ClientShellState {
             Some(super::orcha_popup::OrchaPopup::FoundAccounts { chosen, .. }) => chosen.len(),
             Some(super::orcha_popup::OrchaPopup::Update { .. }) => 3,
             Some(super::orcha_popup::OrchaPopup::PluginUpdate { .. }) => 2,
+            Some(super::orcha_popup::OrchaPopup::PluginRemove { .. }) => 2,
             Some(super::orcha_popup::OrchaPopup::SwitchAccount { .. }) => 3,
             Some(super::orcha_popup::OrchaPopup::PluginOffer { plugin, .. }) => {
                 if plugin.autostart.is_some() {
@@ -749,6 +755,7 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::FoundAccounts { selected, .. }
                 | super::orcha_popup::OrchaPopup::Update { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginUpdate { selected, .. }
+                | super::orcha_popup::OrchaPopup::PluginRemove { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginOffer { selected, .. }
                 | super::orcha_popup::OrchaPopup::SwitchAccount { selected, .. }
                 | super::orcha_popup::OrchaPopup::Palette { selected, .. }
@@ -778,6 +785,7 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::FoundAccounts { selected, .. }
                 | super::orcha_popup::OrchaPopup::Update { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginUpdate { selected, .. }
+                | super::orcha_popup::OrchaPopup::PluginRemove { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginOffer { selected, .. }
                 | super::orcha_popup::OrchaPopup::SwitchAccount { selected, .. }
                 | super::orcha_popup::OrchaPopup::Palette { selected, .. }
@@ -932,6 +940,15 @@ impl ClientShellState {
                         crate::orcha_app::answer_plugin_offer(plugin.id, true);
                     }
                     None => {}
+                }
+                return;
+            }
+            super::orcha_popup::OrchaPopup::PluginRemove {
+                plugin_id, name, ..
+            } => {
+                self.orcha_ui.popup = None;
+                if index == 0 {
+                    self.start_plugin_remove(plugin_id, name);
                 }
                 return;
             }
@@ -2118,6 +2135,66 @@ impl ClientShellState {
         }
     }
 
+    /// Removes a plugin off the input path; the popup's Remove was the consent.
+    fn start_plugin_remove(&mut self, id: String, name: String) {
+        self.show_notice(format!("removing {name}…"));
+        let (tx, rx) = std::sync::mpsc::channel();
+        if crate::thread_spawn::spawn_named("orcha-plugin-remove", move || {
+            let result = if id == crate::orcha_office::PLUGIN_ID {
+                crate::orcha_office::remove_quietly()
+            } else {
+                crate::orcha_app::run_self_quietly(&["plugin", "uninstall", &id])
+            };
+            let _ = tx.send(match result {
+                Ok(()) => format!("{name} removed"),
+                Err(message) => format!("{name} was not removed: {message}"),
+            });
+        })
+        .is_ok()
+        {
+            self.orcha_ui.plugin_remove_run = Some(rx);
+            self.orcha_ui.office_checked_at = None;
+        }
+    }
+
+    /// Opens Easy Job in the browser (starting it when needed), off the input path.
+    pub(super) fn open_office(&mut self) {
+        self.show_notice("opening Easy Job…".to_owned());
+        let _ = crate::thread_spawn::spawn_named("orcha-office-open", || {
+            if let Err(message) = crate::orcha_office::open_quietly() {
+                tracing::warn!(%message, "Easy Job did not open");
+            }
+        });
+        // look again soon: it is starting
+        self.orcha_ui.office_checked_at = None;
+    }
+
+    /// Looks every few seconds, off the input path, whether Easy Job is
+    /// added and running, for the header chip.
+    fn poll_office(&mut self) -> bool {
+        const EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+        let ui = &mut self.orcha_ui;
+        let mut changed = false;
+        if let Some(Ok(state)) = ui.office_check.as_ref().map(|rx| rx.try_recv()) {
+            ui.office_check = None;
+            changed = ui.office != state;
+            ui.office = state;
+        }
+        let due = ui.office_checked_at.is_none_or(|at| at.elapsed() >= EVERY);
+        if due && ui.office_check.is_none() {
+            ui.office_checked_at = Some(std::time::Instant::now());
+            let (tx, rx) = std::sync::mpsc::channel();
+            if crate::thread_spawn::spawn_named("orcha-office-check", move || {
+                let _ = tx.send(crate::orcha_office::office_state());
+            })
+            .is_ok()
+            {
+                ui.office_check = Some(rx);
+            }
+        }
+        changed
+    }
+
     /// Asks (at most daily, off the input path) whether a newer orcha is out.
     fn start_update_check(&mut self) {
         let (tx, rx) = std::sync::mpsc::channel();
@@ -2142,6 +2219,20 @@ impl ClientShellState {
     /// The header's update button: shows a newer release, then the update
     /// running, then what to do next. Returns true when it changed.
     pub(super) fn poll_update(&mut self) -> bool {
+        if self.poll_office() {
+            return true;
+        }
+        if let Some(Ok(message)) = self
+            .orcha_ui
+            .plugin_remove_run
+            .as_ref()
+            .map(|rx| rx.try_recv())
+        {
+            self.orcha_ui.plugin_remove_run = None;
+            self.orcha_ui.office_checked_at = None;
+            self.show_notice(message);
+            return true;
+        }
         if let Some(Ok((id, name, result))) = self
             .orcha_ui
             .plugin_add_run

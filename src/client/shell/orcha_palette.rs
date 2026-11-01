@@ -216,6 +216,11 @@ pub(super) enum PluginRun {
         plugin_id: String,
         name: String,
     },
+    /// Remove an installed plugin (asks first).
+    Uninstall {
+        plugin_id: String,
+        name: String,
+    },
 }
 
 /// Plugin rows from the last refresh; read when COMMANDS opens.
@@ -259,6 +264,7 @@ fn refresh_plugin_actions() {
             &crate::orcha_plugin_updates::cached(),
             &names,
         ));
+        rows.extend(plugin_uninstall_rows(&names));
         if let Ok(mut known) = PLUGIN_ACTIONS.lock() {
             *known = rows;
         }
@@ -307,6 +313,27 @@ fn plugin_update_rows(
                 ),
                 run: PluginRun::Update {
                     plugin_id: update.id.clone(),
+                    name,
+                },
+            }
+        })
+        .collect()
+}
+
+/// An Uninstall row for each installed plugin, Easy Job first.
+fn plugin_uninstall_rows(
+    names: &std::collections::HashMap<String, String>,
+) -> Vec<PluginPaletteAction> {
+    let mut ids: Vec<&String> = names.keys().collect();
+    ids.sort_by_key(|id| (id.as_str() != crate::orcha_office::PLUGIN_ID, id.to_owned()));
+    ids.into_iter()
+        .map(|id| {
+            let name = names[id].clone();
+            PluginPaletteAction {
+                title: format!("Uninstall {name}"),
+                detail: "stops it and removes it from Orcha (asks first)".to_owned(),
+                run: PluginRun::Uninstall {
+                    plugin_id: id.clone(),
                     name,
                 },
             }
@@ -761,14 +788,28 @@ impl ClientShellState {
         };
         if let Some(action) = plugin_action(index) {
             self.orcha_ui.popup = None;
-            if let PluginRun::Update { plugin_id, name } = action.run {
-                self.start_plugin_update(plugin_id, name);
-                return;
+            match action.run {
+                PluginRun::Update { plugin_id, name } => {
+                    self.start_plugin_update(plugin_id, name);
+                    return;
+                }
+                PluginRun::Uninstall { plugin_id, name } => {
+                    self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::PluginRemove {
+                        selected: 1,
+                        plugin_id,
+                        name,
+                    });
+                    return;
+                }
+                _ => {}
             }
             self.show_notice(match &action.run {
                 PluginRun::Invoke { .. } => format!("running {}", action.title),
                 PluginRun::OpenUrl { url } => format!("opening {url}"),
-                PluginRun::Restart { .. } | PluginRun::Stop { .. } | PluginRun::Update { .. } => {
+                PluginRun::Restart { .. }
+                | PluginRun::Stop { .. }
+                | PluginRun::Update { .. }
+                | PluginRun::Uninstall { .. } => {
                     format!("{}…", action.title.to_lowercase())
                 }
             });
@@ -805,7 +846,7 @@ impl ClientShellState {
                     PluginRun::OpenUrl { url } => {
                         let _ = crate::platform::open_url(&url);
                     }
-                    PluginRun::Update { .. } => {}
+                    PluginRun::Update { .. } | PluginRun::Uninstall { .. } => {}
                 }
             });
             return;
@@ -926,6 +967,24 @@ mod tests {
 #[cfg(test)]
 mod plugin_palette_tests {
     use super::*;
+
+    #[test]
+    fn every_installed_plugin_can_be_uninstalled_easy_job_first() {
+        let names = std::collections::HashMap::from([
+            ("zeta".to_owned(), "Zeta".to_owned()),
+            ("easy-job".to_owned(), "Easy Job".to_owned()),
+        ]);
+        let rows = plugin_uninstall_rows(&names);
+        let titles: Vec<&str> = rows.iter().map(|row| row.title.as_str()).collect();
+        assert_eq!(titles, ["Uninstall Easy Job", "Uninstall Zeta"]);
+        assert_eq!(
+            rows[0].run,
+            PluginRun::Uninstall {
+                plugin_id: "easy-job".into(),
+                name: "Easy Job".into()
+            }
+        );
+    }
 
     #[test]
     fn only_updates_this_orcha_can_run_get_an_update_row() {

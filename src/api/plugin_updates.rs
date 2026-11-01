@@ -101,10 +101,14 @@ fn restart_panes(id: &str, api_tx: &ApiRequestSender) {
         return;
     };
     let result = listed.get("result").cloned().unwrap_or_default();
-    for pane_id in crate::orcha_plugin_updates::plugin_pane_ids(&result, id) {
-        if let Err((_, message)) = crate::api::plugin_autostart::restart_pane(&pane_id, api_tx) {
+    let panes = crate::orcha_plugin_updates::plugin_pane_ids(&result, id);
+    for pane_id in &panes {
+        if let Err((_, message)) = crate::api::plugin_autostart::restart_pane(pane_id, api_tx) {
             tracing::warn!(%pane_id, %message, "plugin pane was not restarted after its update");
         }
+    }
+    if panes.is_empty() && id == crate::orcha_office::PLUGIN_ID {
+        crate::orcha_office::restart_detached_office();
     }
 }
 

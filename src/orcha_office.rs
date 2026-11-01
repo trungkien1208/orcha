@@ -77,6 +77,108 @@ fn installed() -> bool {
     install_state() == Install::Ready
 }
 
+/// The office as the header shows it: None when it is not added, else
+/// whether its server runs. Blocking (two small file reads): call it off
+/// the input path.
+pub(crate) fn office_state() -> Option<bool> {
+    installed().then(|| bridge_pid().is_some())
+}
+
+/// The server's pid from the state file Easy Job keeps, when it still runs.
+fn bridge_pid() -> Option<u32> {
+    let path = crate::platform::user_home_dir()?
+        .join(".easy-job")
+        .join("bridge.json");
+    let state: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    let pid = u32::try_from(state.get("pid")?.as_u64()?).ok()?;
+    crate::platform::process_exists(pid).then_some(pid)
+}
+
+fn plugin_root() -> Option<PathBuf> {
+    crate::persist::plugin_registry::try_load()
+        .ok()?
+        .into_iter()
+        .find(|plugin| plugin.plugin_id == PLUGIN_ID)
+        .map(|plugin| PathBuf::from(plugin.plugin_root))
+}
+
+/// Opens the office in the browser, starting it when it is not running.
+pub(crate) fn open_quietly() -> Result<(), String> {
+    let output = orcha(&["plugin", "action", "invoke", "open", "--plugin", PLUGIN_ID])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|err| format!("could not open Easy Job: {err}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let text = String::from_utf8_lossy(&output.stderr);
+    Err(text
+        .lines()
+        .rfind(|line| !line.trim().is_empty())
+        .unwrap_or("could not open Easy Job")
+        .trim()
+        .to_owned())
+}
+
+/// Stops the server Easy Job started by itself (`open`), which is not a pane.
+fn stop_bridge() {
+    if bridge_pid().is_none() {
+        return;
+    }
+    if let Some(root) = plugin_root() {
+        let _ = Command::new(root.join("bin").join("easy-job"))
+            .arg("stop")
+            .current_dir(&root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
+/// After an update: a server Easy Job started by itself (not a pane, so
+/// pane restarts miss it) is started again from the new files, in the
+/// background. Its port and token stay, so open pages reconnect.
+pub(crate) fn restart_detached_office() {
+    if bridge_pid().is_none() {
+        return;
+    }
+    stop_bridge();
+    let Some(root) = plugin_root() else {
+        return;
+    };
+    let mut command = crate::noninteractive_process::command(root.join("bin").join("easy-job"));
+    command
+        .args(["serve", "--no-open"])
+        .current_dir(&root)
+        .env(
+            crate::api::SOCKET_PATH_ENV_VAR,
+            crate::session::active_api_socket_path(),
+        )
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Err(err) = command.spawn() {
+        tracing::warn!(%err, "Easy Job did not start again after its update");
+    }
+}
+
+/// Removes Easy Job without questions (the caller asked): stops its server
+/// and panes, then uninstalls it. Its data in ~/.easy-job stays.
+pub(crate) fn remove_quietly() -> Result<(), String> {
+    stop_bridge();
+    stop_panes();
+    let output = orcha(&["plugin", "uninstall", PLUGIN_ID])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|err| format!("could not remove Easy Job: {err}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+    }
+}
+
 fn not_added() -> i32 {
     if install_state() == Install::Broken {
         eprintln!("Easy Job's files are gone. Add it again with: orcha office install");
@@ -174,6 +276,7 @@ fn remove() -> i32 {
         println!("Nothing changed.");
         return 1;
     }
+    stop_bridge();
     stop_panes();
     if !status_of(orcha(&["plugin", "uninstall", PLUGIN_ID]).stdin(Stdio::null())) {
         eprintln!("Easy Job was not removed.");
