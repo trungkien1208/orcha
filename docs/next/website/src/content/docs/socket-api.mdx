@@ -978,6 +978,23 @@ works even while the UI is busy.
 `events.subscribe` can deliver, and `features` optional behaviors of existing
 methods that a method name alone cannot show.
 
+| Feature | Meaning |
+| --- | --- |
+| `events.subscribe.agent_status_all_panes` | `pane.agent_status_changed` without `pane_id` follows every pane. |
+| `events.subscribe.ordered` | Subscriptions in one request are written in event order. |
+| `pane.agent_status_changed.order_keys` | Status events carry `state_change_seq` and `session_version`. |
+| `session.snapshot.since` | `session.snapshot { since, epoch }` returns a `session_delta`. |
+| `session.snapshot.result_version` | A full snapshot has `session_version`/`session_epoch` at result level. |
+| `agent_session.transcript_path` | `agent_session` carries `id` and `transcript_path`. |
+| `agent.model_state` | Agent records carry `model`, `effort`, `fast`. |
+| `agent.model_state.observed` | `effort` and `fast` are observed, not always `null`. |
+| `pane.agent_model_changed.all_sources` | The model event fires for every change, whatever its source. |
+| `agent.stage` | Agent records and status events carry `stage` and `tool`. |
+| `agent.seen_seq` | Agent records carry `seen_seq`. |
+| `agent.prompt.confirmed` | `agent.prompt` waits for readiness and fails if the prompt is not taken. |
+| `agent.start.workspace` | `agent.start` opens its own pane with `workspace_id`, optionally on an account. |
+| `read.source.scrollback` | `agent.read`/`pane.read` accept `source: "scrollback"`. |
+
 ### Agent status for every pane
 
 Omit `pane_id` from a `pane.agent_status_changed` subscription to follow every

@@ -87,6 +87,7 @@ fn print_full_status(json: bool) -> std::io::Result<i32> {
             client: client_status_json(),
             server: server_status_json(&server),
             update: update_status_json(&server),
+            plugins: plugin_statuses(&server),
         })?;
         return Ok(0);
     }
@@ -112,8 +113,51 @@ fn print_full_status(json: bool) -> std::io::Result<i32> {
         "  server_binary_stale: {}",
         server_binary_stale_label(&server)
     );
+    let plugins = plugin_statuses(&server);
+    if !plugins.is_empty() {
+        println!();
+        println!("plugins:");
+        for plugin in plugins {
+            let state = if plugin.enabled {
+                "enabled"
+            } else {
+                "disabled"
+            };
+            println!("  {}: {state}", plugin.id);
+            for (entrypoint, pane) in plugin.autostart {
+                match pane {
+                    Some(pane) => {
+                        println!("    starts with server: {entrypoint} (running in {pane})")
+                    }
+                    None => println!("    starts with server: {entrypoint} (not running)"),
+                }
+            }
+        }
+    }
 
     Ok(0)
+}
+
+#[cfg(test)]
+mod plugin_status_tests {
+    #[test]
+    fn plugin_status_joins_plugins_with_their_autostart_entries() {
+        let plugins = serde_json::json!({"result": {"plugins": [
+            {"plugin_id": "easy-job", "enabled": true},
+            {"plugin_id": "other", "enabled": false}
+        ]}});
+        let autostart = serde_json::json!({"result": {"entries": [
+            {"plugin_id": "easy-job", "entrypoint": "server", "pane_id": "w7:p2"}
+        ]}});
+        let statuses = super::plugin_statuses_from(&plugins, Some(&autostart));
+        assert_eq!(statuses.len(), 2);
+        assert_eq!(
+            statuses[0].autostart,
+            vec![("server".to_string(), Some("w7:p2".to_string()))]
+        );
+        assert!(!statuses[1].enabled);
+        assert!(statuses[1].autostart.is_empty());
+    }
 }
 
 fn print_server_status(json: bool) -> std::io::Result<i32> {
@@ -243,6 +287,74 @@ struct FullStatusJson {
     client: ClientStatusJson,
     server: ServerStatusJson,
     update: UpdateStatusJson,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    plugins: Vec<PluginStatusJson>,
+}
+
+#[derive(Serialize, Debug, PartialEq, Eq)]
+struct PluginStatusJson {
+    id: String,
+    enabled: bool,
+    /// Panes that start with the server, `entrypoint` and its running pane.
+    autostart: Vec<(String, Option<String>)>,
+}
+
+/// Linked plugins and their autostarted panes, when a server is running.
+fn plugin_statuses(server: &ServerRuntimeStatus) -> Vec<PluginStatusJson> {
+    if !matches!(server, ServerRuntimeStatus::Running { .. }) {
+        return Vec::new();
+    }
+    let call = |method: &str| {
+        let request: crate::api::schema::Request = serde_json::from_value(serde_json::json!({
+            "id": "cli:status:plugins", "method": method, "params": {}
+        }))
+        .ok()?;
+        super::send_request_unchecked(&request).ok()
+    };
+    let Some(plugins) = call("plugin.list") else {
+        return Vec::new();
+    };
+    let autostart = call("plugin.autostart.list");
+    plugin_statuses_from(&plugins, autostart.as_ref())
+}
+
+fn plugin_statuses_from(
+    plugins: &serde_json::Value,
+    autostart: Option<&serde_json::Value>,
+) -> Vec<PluginStatusJson> {
+    let entries = autostart
+        .and_then(|value| value.pointer("/result/entries"))
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    plugins
+        .pointer("/result/plugins")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|plugin| {
+            let id = plugin
+                .get("plugin_id")
+                .or(plugin.get("id"))?
+                .as_str()?
+                .to_string();
+            let autostart = entries
+                .iter()
+                .filter(|entry| entry["plugin_id"] == id.as_str())
+                .map(|entry| {
+                    (
+                        entry["entrypoint"].as_str().unwrap_or_default().to_string(),
+                        entry["pane_id"].as_str().map(str::to_string),
+                    )
+                })
+                .collect();
+            Some(PluginStatusJson {
+                enabled: plugin["enabled"].as_bool().unwrap_or(true),
+                id,
+                autostart,
+            })
+        })
+        .collect()
 }
 
 #[derive(Serialize)]

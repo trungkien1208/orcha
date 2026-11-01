@@ -1017,6 +1017,16 @@ const API_FEATURES: &[&str] = &[
     "read.source.scrollback",
     // Agent records and status events carry `stage` and `tool`.
     "agent.stage",
+    // A full `session.snapshot` has `session_version` and `session_epoch` at result level.
+    "session.snapshot.result_version",
+    // `agent.prompt` without `wait` waits for readiness and confirms submission.
+    "agent.prompt.confirmed",
+    // `agent.start` accepts `workspace_id`, `account_id`, `prompt`, `model`, `effort`, `fast`.
+    "agent.start.workspace",
+    // Agent records carry `seen_seq`.
+    "agent.seen_seq",
+    // `pane.agent_model_changed` fires for every change of the record's model state.
+    "pane.agent_model_changed.all_sources",
 ];
 
 fn server_capabilities_response(id: String) -> String {
