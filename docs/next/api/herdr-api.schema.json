@@ -39,6 +39,71 @@
     },
     "event": {
       "$defs": {
+        "AccountInfo": {
+          "description": "An agent account. Profile fields only: never a token or credential.",
+          "properties": {
+            "email": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "error": {
+              "description": "Why fuel could not be read, such as an expired sign-in.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fuel": {
+              "default": [],
+              "items": {
+                "$ref": "#/schemas/event/$defs/FuelWindowInfo"
+              },
+              "type": "array"
+            },
+            "id": {
+              "type": "string"
+            },
+            "is_default": {
+              "description": "New agents of this kind use this account.",
+              "type": "boolean"
+            },
+            "kind": {
+              "description": "`claude`, `codex`, `cursor`, ...",
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "pane_ids": {
+              "default": [],
+              "description": "Panes whose agent runs on this account.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "plan": {
+              "description": "Plan name from the sign-in profile, such as `pro`, `max` or `plus`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "signed_in": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "label",
+            "signed_in",
+            "is_default"
+          ],
+          "type": "object"
+        },
         "AgentSessionInfo": {
           "properties": {
             "agent": {
@@ -820,6 +885,30 @@
                 "workspace_id"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "accounts": {
+                  "items": {
+                    "$ref": "#/schemas/event/$defs/AccountInfo"
+                  },
+                  "type": "array"
+                },
+                "reason": {
+                  "description": "`list_changed`, `signed_in`, `default_changed`, `fuel_refreshed`,\n`added`, `removed`, `renamed`, `switched`, `login_started` or `updated`.",
+                  "type": "string"
+                },
+                "type": {
+                  "const": "accounts_changed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "reason",
+                "accounts"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -852,9 +941,43 @@
             "pane_agent_status_changed",
             "layout_updated",
             "session_changed",
-            "pane_agent_model_changed"
+            "pane_agent_model_changed",
+            "accounts_changed"
           ],
           "type": "string"
+        },
+        "FuelWindowInfo": {
+          "properties": {
+            "key": {
+              "description": "`session`, `weekly` or `monthly`.",
+              "type": "string"
+            },
+            "label": {
+              "description": "`5H`, `WEEK` or `MONTH`.",
+              "type": "string"
+            },
+            "left_percent": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "reset_at": {
+              "description": "When the window refills, Unix seconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "key",
+            "label",
+            "left_percent"
+          ],
+          "type": "object"
         },
         "PaneInfo": {
           "properties": {
@@ -1367,6 +1490,147 @@
     },
     "request": {
       "$defs": {
+        "AccountSwitchMode": {
+          "oneOf": [
+            {
+              "const": "keep",
+              "description": "Swap the sign-in under the running agent; the conversation goes on.",
+              "type": "string"
+            },
+            {
+              "const": "restart",
+              "description": "Stop the agent and continue the same conversation on the account.",
+              "type": "string"
+            },
+            {
+              "const": "handoff",
+              "description": "Start a new agent on the account with a hand-off of the conversation.",
+              "type": "string"
+            }
+          ]
+        },
+        "AccountTarget": {
+          "properties": {
+            "account_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "account_id"
+          ],
+          "type": "object"
+        },
+        "AccountsAddParams": {
+          "properties": {
+            "kind": {
+              "default": "claude",
+              "description": "Only `claude` can have more than one account.",
+              "type": "string"
+            },
+            "name": {
+              "description": "Name such as `work`; the account becomes `claude-work`.",
+              "type": "string"
+            },
+            "pane_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        },
+        "AccountsListParams": {
+          "properties": {
+            "fresh": {
+              "description": "Ask each service for new fuel numbers instead of using ones under two minutes old.",
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "AccountsLoginParams": {
+          "properties": {
+            "account_id": {
+              "type": "string"
+            },
+            "pane_id": {
+              "description": "Open the sign-in beside this pane; default: a new workspace in the background.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "account_id"
+          ],
+          "type": "object"
+        },
+        "AccountsPlanParams": {
+          "properties": {
+            "account_id": {
+              "type": "string"
+            },
+            "mode": {
+              "$ref": "#/schemas/request/$defs/AccountSwitchMode"
+            },
+            "pane_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id",
+            "account_id",
+            "mode"
+          ],
+          "type": "object"
+        },
+        "AccountsRenameParams": {
+          "properties": {
+            "account_id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "account_id",
+            "label"
+          ],
+          "type": "object"
+        },
+        "AccountsSwitchParams": {
+          "properties": {
+            "account_id": {
+              "type": "string"
+            },
+            "mode": {
+              "$ref": "#/schemas/request/$defs/AccountSwitchMode"
+            },
+            "move_all": {
+              "description": "Required when the plan's `also_moves` is not empty: those panes move too.",
+              "type": "boolean"
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "when_idle": {
+              "description": "Wait for a busy agent to become idle instead of failing.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "pane_id",
+            "account_id",
+            "mode"
+          ],
+          "type": "object"
+        },
         "AgentConfigureParams": {
           "properties": {
             "effort": {
@@ -1394,6 +1658,46 @@
           "required": [
             "pane_id"
           ],
+          "type": "object"
+        },
+        "AgentHandoffParams": {
+          "properties": {
+            "notes": {
+              "description": "`full` (default) or `summary`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "to": {
+              "$ref": "#/schemas/request/$defs/AgentHandoffTarget"
+            }
+          },
+          "required": [
+            "pane_id",
+            "to"
+          ],
+          "type": "object"
+        },
+        "AgentHandoffTarget": {
+          "properties": {
+            "account_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "description": "`claude`, `codex` or `cursor`; taken from the account when omitted.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
           "type": "object"
         },
         "AgentModelsParams": {
@@ -1520,20 +1824,64 @@
         },
         "AgentStartParams": {
           "properties": {
+            "account_id": {
+              "description": "Run the agent on this account (with `workspace_id`).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "args": {
               "items": {
                 "type": "string"
               },
               "type": "array"
             },
+            "cwd": {
+              "description": "Folder for the new pane; defaults to the workspace's.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "effort": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fast": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
             "kind": {
               "type": "string"
             },
+            "model": {
+              "description": "Applied with `agent.configure` once the agent is ready.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "name": {
+              "default": "",
+              "description": "Optional with `workspace_id`: a free `<kind>-<n>` name is chosen.",
               "type": "string"
             },
             "pane_id": {
+              "default": "",
+              "description": "The shell pane to start in. Omit it and give `workspace_id` to get a new pane.",
               "type": "string"
+            },
+            "prompt": {
+              "description": "Sent once the agent is ready, confirmed like `agent.prompt`.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "timeout_ms": {
               "description": "Startup timeout in milliseconds. Values must be greater than 3000 and at most 300000.",
@@ -1543,12 +1891,17 @@
                 "integer",
                 "null"
               ]
+            },
+            "workspace_id": {
+              "description": "Start in a new background tab of this workspace (never focused).",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
-            "name",
-            "kind",
-            "pane_id"
+            "kind"
           ],
           "type": "object"
         },
@@ -4548,6 +4901,18 @@
                 "type"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "type": {
+                  "const": "accounts.changed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -6673,6 +7038,166 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "accounts.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AccountsListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "accounts.plan",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AccountsPlanParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "accounts.switch",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AccountsSwitchParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "accounts.login",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AccountsLoginParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "accounts.add",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AccountsAddParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "accounts.remove",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AccountTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "accounts.rename",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AccountsRenameParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "accounts.set_default",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AccountTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.handoff",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentHandoffParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "accounts.env",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AccountTarget"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -6919,6 +7444,125 @@
     },
     "success_response": {
       "$defs": {
+        "AccountEnv": {
+          "properties": {
+            "account_id": {
+              "type": "string"
+            },
+            "env": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Environment that makes an agent run on this account, for\n`workspace.create`, `tab.create` or `pane.split` `env`. Paths only.",
+              "type": "object"
+            }
+          },
+          "required": [
+            "account_id",
+            "env"
+          ],
+          "type": "object"
+        },
+        "AccountInfo": {
+          "description": "An agent account. Profile fields only: never a token or credential.",
+          "properties": {
+            "email": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "error": {
+              "description": "Why fuel could not be read, such as an expired sign-in.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fuel": {
+              "default": [],
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/FuelWindowInfo"
+              },
+              "type": "array"
+            },
+            "id": {
+              "type": "string"
+            },
+            "is_default": {
+              "description": "New agents of this kind use this account.",
+              "type": "boolean"
+            },
+            "kind": {
+              "description": "`claude`, `codex`, `cursor`, ...",
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "pane_ids": {
+              "default": [],
+              "description": "Panes whose agent runs on this account.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "plan": {
+              "description": "Plan name from the sign-in profile, such as `pro`, `max` or `plus`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "signed_in": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "label",
+            "signed_in",
+            "is_default"
+          ],
+          "type": "object"
+        },
+        "AccountPlan": {
+          "properties": {
+            "allowed": {
+              "type": "boolean"
+            },
+            "also_moves": {
+              "default": [],
+              "description": "Other panes that switch too, because they share the sign-in.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "needs_idle": {
+              "description": "The agent must be idle (it is stopped and started again).",
+              "type": "boolean"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "session_linked": {
+              "description": "The conversation continues on the new account.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "allowed",
+            "needs_idle",
+            "session_linked"
+          ],
+          "type": "object"
+        },
         "AgentInfo": {
           "properties": {
             "agent": {
@@ -8010,6 +8654,30 @@
                 "workspace_id"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "accounts": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/AccountInfo"
+                  },
+                  "type": "array"
+                },
+                "reason": {
+                  "description": "`list_changed`, `signed_in`, `default_changed`, `fuel_refreshed`,\n`added`, `removed`, `renamed`, `switched`, `login_started` or `updated`.",
+                  "type": "string"
+                },
+                "type": {
+                  "const": "accounts_changed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "reason",
+                "accounts"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -8057,9 +8725,43 @@
             "pane_agent_status_changed",
             "layout_updated",
             "session_changed",
-            "pane_agent_model_changed"
+            "pane_agent_model_changed",
+            "accounts_changed"
           ],
           "type": "string"
+        },
+        "FuelWindowInfo": {
+          "properties": {
+            "key": {
+              "description": "`session`, `weekly` or `monthly`.",
+              "type": "string"
+            },
+            "label": {
+              "description": "`5H`, `WEEK` or `MONTH`.",
+              "type": "string"
+            },
+            "left_percent": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "reset_at": {
+              "description": "When the window refills, Unix seconds.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "key",
+            "label",
+            "left_percent"
+          ],
+          "type": "object"
         },
         "InstalledPluginInfo": {
           "properties": {
@@ -9835,6 +10537,122 @@
                 "session_version",
                 "session_epoch",
                 "changes"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "pane_id": {
+                  "description": "The new pane the conversation continues in.",
+                  "type": "string"
+                },
+                "type": {
+                  "const": "agent_handed_off",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id",
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "accounts": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/AccountInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "accounts_list",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "accounts"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "plan": {
+                  "$ref": "#/schemas/success_response/$defs/AccountPlan"
+                },
+                "type": {
+                  "const": "account_plan",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "plan"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "outcome": {
+                  "description": "`applied`, or `queued` until the agent is idle.",
+                  "type": "string"
+                },
+                "pane_id": {
+                  "description": "The pane the conversation continues in (a new one for `handoff`).",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "plan": {
+                  "$ref": "#/schemas/success_response/$defs/AccountPlan"
+                },
+                "type": {
+                  "const": "account_switched",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "outcome",
+                "plan"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "env": {
+                  "$ref": "#/schemas/success_response/$defs/AccountEnv"
+                },
+                "type": {
+                  "const": "account_env",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "env"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "account_id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "account_added",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "account_id"
               ],
               "type": "object"
             },

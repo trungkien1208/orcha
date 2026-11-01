@@ -220,6 +220,7 @@ mod tests {
                     label: "5H".into(),
                     left: 40,
                     reset: None,
+                    reset_at: None,
                 }]
             } else {
                 Vec::new()

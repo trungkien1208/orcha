@@ -38,6 +38,14 @@ pub(crate) enum Mode {
 }
 
 impl Mode {
+    pub(crate) fn from_notes(notes: &str) -> Option<Self> {
+        match notes {
+            "full" => Some(Self::Full),
+            "summary" => Some(Self::Summary),
+            _ => None,
+        }
+    }
+
     pub(crate) fn parse(mode: &str) -> Self {
         if mode == "summary" {
             Self::Summary
@@ -632,6 +640,17 @@ pub(crate) fn send_prompt(pane: &str, text: &str) -> bool {
 /// read them. Blocking (runs off the input thread). Ok is a message for the
 /// user; Err says what went wrong.
 pub(crate) fn hand_off(pane: &str, target: &str, mode: Mode) -> Result<String, String> {
+    hand_off_to(pane, target, mode, None).map(|(message, _)| message)
+}
+
+/// Like `hand_off`; `claude_dir` starts a Claude target in that account's
+/// sign-in folder. Ok is (message, the new pane's id).
+pub(crate) fn hand_off_to(
+    pane: &str,
+    target: &str,
+    mode: Mode,
+    claude_dir: Option<&str>,
+) -> Result<(String, String), String> {
     let (command, target_name) = agent(target).ok_or_else(|| format!("unknown agent {target}"))?;
     let home = home().ok_or("no home folder")?;
     let info = herdr_json(&["pane", "get", pane])
@@ -713,7 +732,10 @@ pub(crate) fn hand_off(pane: &str, target: &str, mode: Mode) -> Result<String, S
     let path = folder.join(format!("{stamp}-{target}.md"));
     std::fs::write(&path, notes).map_err(|err| format!("could not save the notes: {err}"))?;
 
-    let split = herdr_json(&[
+    let env = claude_dir
+        .filter(|_| target == "claude")
+        .map(|dir| format!("CLAUDE_CONFIG_DIR={dir}"));
+    let mut split_args = vec![
         "pane",
         "split",
         "--pane",
@@ -722,8 +744,11 @@ pub(crate) fn hand_off(pane: &str, target: &str, mode: Mode) -> Result<String, S
         "right",
         "--cwd",
         &cwd,
-    ])
-    .ok_or("could not open a pane next to it")?;
+    ];
+    if let Some(env) = env.as_deref() {
+        split_args.extend(["--env", env]);
+    }
+    let split = herdr_json(&split_args).ok_or("could not open a pane next to it")?;
     let new_pane = split
         .get("pane")
         .and_then(|pane| pane.get("pane_id"))
@@ -743,7 +768,7 @@ pub(crate) fn hand_off(pane: &str, target: &str, mode: Mode) -> Result<String, S
     if !ran {
         return Err(format!("{target_name} could not be started"));
     }
-    Ok(format!("{target_name} continues in the new pane"))
+    Ok((format!("{target_name} continues in the new pane"), new_pane))
 }
 
 #[cfg(test)]

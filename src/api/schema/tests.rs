@@ -100,6 +100,13 @@ fn agent_start_and_prompt_requests_round_trip() {
             pane_id: "w1:p2".into(),
             args: vec!["--no-session".into()],
             timeout_ms: Some(30_000),
+            workspace_id: None,
+            account_id: None,
+            cwd: None,
+            prompt: None,
+            model: None,
+            effort: None,
+            fast: None,
         }),
     };
     let start_json = serde_json::to_value(&start).unwrap();

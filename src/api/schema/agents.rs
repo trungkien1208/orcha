@@ -184,9 +184,32 @@ pub enum AgentViewSortOrder {
 cli_params! {
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
     pub struct AgentStartParams => AgentStartProjection {
+        /// Optional with `workspace_id`: a free `<kind>-<n>` name is chosen.
+        #[serde(default)]
         pub name: String => Field::new(String::new()).input(bindings::text_position("name", "NAME", 0)),
         pub kind: String => Field::new(String::new()).input(bindings::kind()),
+        /// The shell pane to start in. Omit it and give `workspace_id` to get a new pane.
+        #[serde(default)]
         pub pane_id: String => Field::new(String::new()).input(bindings::pane()),
+        /// Start in a new background tab of this workspace (never focused).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub workspace_id: Option<String> => Field::new(None::<String>),
+        /// Run the agent on this account (with `workspace_id`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub account_id: Option<String> => Field::new(None::<String>),
+        /// Folder for the new pane; defaults to the workspace's.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub cwd: Option<String> => Field::new(None::<String>),
+        /// Sent once the agent is ready, confirmed like `agent.prompt`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub prompt: Option<String> => Field::new(None::<String>),
+        /// Applied with `agent.configure` once the agent is ready.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub model: Option<String> => Field::new(None::<String>),
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub effort: Option<String> => Field::new(None::<String>),
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub fast: Option<bool> => Field::new(None::<bool>),
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub args: Vec<String> => Field::new(Vec::new()).input(bindings::agent_args()),
         /// Startup timeout in milliseconds. Values must be greater than 3000 and at most 300000.
@@ -322,4 +345,22 @@ pub struct AgentConfigureParams {
     pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fast: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentHandoffParams {
+    pub pane_id: String,
+    pub to: AgentHandoffTarget,
+    /// `full` (default) or `summary`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default)]
+pub struct AgentHandoffTarget {
+    /// `claude`, `codex` or `cursor`; taken from the account when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
 }

@@ -257,6 +257,7 @@ fn agent_start(params: AgentStartParams) -> std::io::Result<i32> {
         pane_id,
         args: agent_args,
         timeout_ms,
+        ..
     } = params;
     let Some(expected_kind) = crate::detect::parse_agent_label(&kind) else {
         eprintln!("unsupported interactive agent kind: {kind}");
@@ -288,6 +289,13 @@ fn agent_start(params: AgentStartParams) -> std::io::Result<i32> {
                 pane_id: pane_id.clone(),
                 args: agent_args.clone(),
                 timeout_ms,
+                workspace_id: None,
+                account_id: None,
+                cwd: None,
+                prompt: None,
+                model: None,
+                effort: None,
+                fast: None,
             }),
         })?;
         if response.get("error").is_none() {

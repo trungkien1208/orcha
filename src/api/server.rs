@@ -120,6 +120,7 @@ fn start_server_inner(
 
     let running = Arc::new(AtomicBool::new(true));
     crate::api::model_observer::spawn(api_tx.clone(), Arc::clone(&running));
+    crate::api::accounts::spawn_watcher(api_tx.clone(), event_hub.clone(), Arc::clone(&running));
     let listener_running = Arc::clone(&running);
     let spawned = crate::thread_spawn::spawn_named("herdr-api-accept", move || {
         run_accept_loop(
@@ -563,6 +564,42 @@ fn serve_request(
             let response =
                 wait_for_output(request_id.clone(), params, connection, api_tx, running)?;
             finish_wait_response(connection, response, &request_id, method, changes_ui)
+        }
+        Method::AccountsList(_)
+        | Method::AccountsPlan(_)
+        | Method::AccountsSwitch(_)
+        | Method::AccountsLogin(_)
+        | Method::AccountsAdd(_)
+        | Method::AccountsRemove(_)
+        | Method::AccountsRename(_)
+        | Method::AccountsSetDefault(_)
+        | Method::AccountsEnv(_) => {
+            let response = crate::api::accounts::handle(
+                Request {
+                    id: request_id.clone(),
+                    method: request.method,
+                },
+                api_tx,
+            )
+            .unwrap_or_default();
+            finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
+        }
+        Method::AgentHandoff(params) => {
+            let result = crate::api::handoff::handle(params, api_tx);
+            let response = match result {
+                Ok(result) => serde_json::to_string(&SuccessResponse {
+                    id: request_id.clone(),
+                    result,
+                })
+                .unwrap_or_default(),
+                Err((code, message)) => error_response_json(request_id.clone(), code, message),
+            };
+            finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
+        }
+        Method::AgentStart(params) if crate::api::start::wants_server_start(&params) => {
+            let response =
+                crate::api::start::start(&request_id, params, connection, api_tx, running);
+            finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
         }
         Method::AgentConfigure(params) => {
             let response =

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+pub mod accounts;
 pub mod agents;
 pub mod commands;
 pub mod common;
@@ -15,6 +16,7 @@ pub mod tabs;
 pub mod workspaces;
 pub mod worktrees;
 
+pub use accounts::*;
 pub use agents::*;
 pub use commands::*;
 pub use common::*;
@@ -150,6 +152,16 @@ operations::define_operations! {
     AgentModels(AgentModelsParams) => "agent.models", false, false;
     PaneReportAgentModel(PaneReportAgentModelParams) => "pane.report_agent_model", false, false;
     AgentConfigure(AgentConfigureParams) => "agent.configure", false, false;
+    AccountsList(AccountsListParams) => "accounts.list", false, false;
+    AccountsPlan(AccountsPlanParams) => "accounts.plan", false, false;
+    AccountsSwitch(AccountsSwitchParams) => "accounts.switch", false, false;
+    AccountsLogin(AccountsLoginParams) => "accounts.login", false, false;
+    AccountsAdd(AccountsAddParams) => "accounts.add", false, false;
+    AccountsRemove(AccountTarget) => "accounts.remove", false, false;
+    AccountsRename(AccountsRenameParams) => "accounts.rename", false, false;
+    AccountsSetDefault(AccountTarget) => "accounts.set_default", false, false;
+    AgentHandoff(AgentHandoffParams) => "agent.handoff", false, false;
+    AccountsEnv(AccountTarget) => "accounts.env", false, false;
 }
 
 #[cfg(test)]

@@ -565,7 +565,7 @@ const AGENT_PROMPT_READY_TIMEOUT: std::time::Duration = std::time::Duration::fro
 /// composer (an agent still mounting its input after a trust prompt drops the
 /// first Enter), Enter is sent once more; if that also has no effect the call
 /// fails with `agent_prompt_not_submitted` instead of reporting success.
-fn prompt_agent_and_confirm(
+pub(super) fn prompt_agent_and_confirm(
     request_id: String,
     params: crate::api::schema::AgentPromptParams,
     stream: &mut dyn ApiConnection,

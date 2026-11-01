@@ -2,6 +2,7 @@
 pub struct EventHub {
     inner: std::sync::Arc<std::sync::Mutex<EventHubState>>,
     session_watchers: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    accounts_watchers: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 /// Keeps the session journal publishing `session.changed` while held.
@@ -85,6 +86,21 @@ impl EventHub {
         SessionWatch {
             watchers: std::sync::Arc::clone(&self.session_watchers),
         }
+    }
+
+    /// Keeps the accounts watcher publishing `accounts.changed` while held.
+    pub(crate) fn watch_accounts(&self) -> SessionWatch {
+        self.accounts_watchers
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        SessionWatch {
+            watchers: std::sync::Arc::clone(&self.accounts_watchers),
+        }
+    }
+
+    pub(crate) fn accounts_watched(&self) -> bool {
+        self.accounts_watchers
+            .load(std::sync::atomic::Ordering::Relaxed)
+            > 0
     }
 
     pub(crate) fn session_watched(&self) -> bool {

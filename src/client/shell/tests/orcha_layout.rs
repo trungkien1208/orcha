@@ -392,6 +392,7 @@ fn accounts_popup_lists_fuel() {
         label: label.into(),
         left,
         reset: Some(reset.into()),
+        reset_at: None,
     };
     state.accounts.set_for_test(Some(vec![
         Account {
@@ -836,6 +837,7 @@ fn orcha_preview() {
         label: label.into(),
         left,
         reset: Some(reset.into()),
+        reset_at: None,
     };
     state.accounts.set_for_test(Some(vec![
         Account {

@@ -205,6 +205,11 @@ impl ActiveSubscription {
             Subscription::PaneAgentModelChanged {} => {
                 Ok(event_subscription(EventKind::PaneAgentModelChanged))
             }
+            Subscription::AccountsChanged {} => Ok(Self::Event(ActiveEventSubscription {
+                event_kind: EventKind::AccountsChanged,
+                last_sequence: event_start_sequence,
+                _session_watch: Some(event_hub.watch_accounts()),
+            })),
             Subscription::SessionChanged {} => Ok(Self::Event(ActiveEventSubscription {
                 event_kind: EventKind::SessionChanged,
                 last_sequence: event_start_sequence,

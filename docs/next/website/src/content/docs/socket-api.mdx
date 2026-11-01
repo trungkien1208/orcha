@@ -106,7 +106,8 @@ Raw socket method names use dot notation:
 | Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.close`, `pane.wait_for_output` |
 | Popup | `popup.close` |
 | Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio` |
-| Agent | `agent.models`, `agent.configure`, `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
+| Accounts | `accounts.list`, `accounts.plan`, `accounts.switch`, `accounts.login`, `accounts.add`, `accounts.remove`, `accounts.rename`, `accounts.set_default`, `accounts.env` |
+| Agent | `agent.models`, `agent.configure`, `agent.handoff`, `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
 | Events | `events.subscribe`, `events.wait` |
 | Integrations | `integration.install`, `integration.uninstall` |
 | Plugins | `plugin.link`, `plugin.list`, `plugin.unlink`, `plugin.enable`, `plugin.disable`, `plugin.action.list`, `plugin.action.invoke`, `plugin.log.list`, `plugin.pane.open`, `plugin.pane.focus`, `plugin.pane.close` |
@@ -1208,6 +1209,95 @@ Errors: `invalid_params`, `unsupported_agent`, `models_unavailable`,
 `unknown_model`, `invalid_effort`, `fast_unavailable`, `model_unknown`,
 `fast_state_unknown`, `configure_failed`. CLI:
 `herdr api call agent.configure '{"pane_id":"w1:p2","effort":"high"}'`.
+
+### Accounts and fuel
+
+Account methods answer off the UI thread and return profile fields only:
+label, email, plan and fuel, never a token or credential.
+
+```json
+{"id":"a1","method":"accounts.list","params":{}}
+{"id":"a1","result":{"type":"accounts_list","accounts":[
+  {"id":"claude-personal","kind":"claude","label":"Claude · personal","email":"me@example.com","plan":"pro",
+   "signed_in":true,"is_default":false,"pane_ids":["w1:p2"],
+   "fuel":[{"key":"session","label":"5H","left_percent":40,"reset_at":1793507400},{"key":"weekly","label":"WEEK","left_percent":65,"reset_at":1794042000}]}
+]}}
+```
+
+`fuel` comes from the same cache the FUEL gauges use (refreshed every two
+minutes at most); `{"fresh":true}` asks the services again. `reset_at` is Unix
+seconds. `error` explains a missing reading, such as an expired sign-in.
+
+`accounts.plan` is a dry run of moving a pane to another account:
+
+```json
+{"id":"a2","method":"accounts.plan","params":{"pane_id":"w1:p2","account_id":"claude-work","mode":"keep"}}
+{"id":"a2","result":{"type":"account_plan","plan":{"allowed":true,"also_moves":["w1:p5"],"needs_idle":false,"session_linked":true}}}
+```
+
+| `mode` | What happens | Notes |
+| --- | --- | --- |
+| `keep` | The account's sign-in goes under the running agent; the conversation goes on. | Claude only. Every Claude reading the same sign-in folder moves too (`also_moves`). |
+| `restart` | The agent stops and resumes the same conversation on the account. | Claude, macOS and Linux. `session_linked: false` when no session id is known. |
+| `handoff` | A new agent starts on the account with hand-off notes of this conversation. | Works when the old agent is out of fuel. |
+
+Other agents have one account each, so their plans are `allowed: false`.
+`accounts.switch` takes the same params plus `move_all` (required when
+`also_moves` is not empty) and `when_idle` (wait for a busy agent instead of
+failing with `agent_busy`). It answers `{"type":"account_switched","outcome":"applied"|"queued","plan":{…},"pane_id":"w1:p2"}`;
+for `handoff`, `pane_id` is the new pane.
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `accounts.login` | `account_id`, `pane_id?` | Opens the agent's sign-in beside `pane_id`, or in a new workspace that does not take focus. |
+| `accounts.add` | `name`, `kind: "claude"`, `pane_id?` | `{"type":"account_added","account_id":"claude-work"}`, then signs it in. |
+| `accounts.remove` | `account_id` | `ok` |
+| `accounts.rename` | `account_id`, `label` | `ok` |
+| `accounts.set_default` | `account_id` | `ok`. For Claude, every session on the default `~/.claude` sign-in moves to it. |
+| `accounts.env` | `account_id` | `{"env":{"CLAUDE_CONFIG_DIR":"…"}}` to pass as `env` to `workspace.create`, `tab.create` or `pane.split`. A Claude account without its own folder that is not the default returns `account_not_selectable`. |
+
+Subscribe to `accounts.changed` for the same list whenever it changes:
+
+```json
+{"event":"accounts_changed","data":{"type":"accounts_changed","reason":"fuel_refreshed","accounts":[…]}}
+```
+
+`reason` is `list_changed`, `signed_in`, `default_changed`, `fuel_refreshed`,
+`added`, `removed`, `renamed`, `switched`, `login_started` or `updated`. The
+server re-reads accounts every minute, and at once after a change made through
+the socket, only while a subscription is open.
+
+### agent.start in a workspace
+
+Give `workspace_id` instead of `pane_id` and `agent.start` opens its own tab in
+that workspace without taking focus, starts the agent there and returns it with
+its new `pane_id` and `tab_id`. `name` becomes optional (`claude-1`, `claude-2`,
+…). `account_id` runs the agent on that account, `model`, `effort` and `fast`
+are applied with `agent.configure` once it is ready, and `prompt` is then sent
+and confirmed like `agent.prompt`. If the start fails, the tab is closed again.
+
+```json
+{"id":"s1","method":"agent.start","params":{"workspace_id":"w2","kind":"claude","account_id":"claude-personal","prompt":"Fix the failing test"}}
+{"id":"s1","result":{"type":"agent_started","argv":["claude"],"agent":{"name":"claude-1","pane_id":"w2:p3","tab_id":"w2:t2","agent_status":"working",…}}}
+```
+
+`workspace.create` already accepts `cwd`, `label`, `focus: false` (the default)
+and `env`, and returns the new workspace, tab and root pane. Its shape is frozen
+for older clients, so for an account pass `accounts.env`'s `env` to it.
+
+### agent.handoff
+
+Moves a pane's conversation to a new agent beside it, with notes built from the
+old agent's transcript (or its screen) and the folder's git state. The old agent
+is not asked anything, so this works when it is out of fuel.
+
+```json
+{"id":"h1","method":"agent.handoff","params":{"pane_id":"w1:p2","to":{"kind":"codex"},"notes":"summary"}}
+{"id":"h1","result":{"type":"agent_handed_off","pane_id":"w1:p6","kind":"codex"}}
+```
+
+`to` takes `kind`, `account_id` or both; `notes` is `full` (default) or
+`summary`. The new pane does not take focus.
 
 ## Protocol stability
 

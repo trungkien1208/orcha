@@ -63,6 +63,31 @@ pub enum ResponseResult {
         session_epoch: String,
         changes: Vec<super::session::SessionChange>,
     },
+    AgentHandedOff {
+        /// The new pane the conversation continues in.
+        pane_id: String,
+        kind: String,
+    },
+    AccountsList {
+        accounts: Vec<super::accounts::AccountInfo>,
+    },
+    AccountPlan {
+        plan: super::accounts::AccountPlan,
+    },
+    AccountSwitched {
+        /// `applied`, or `queued` until the agent is idle.
+        outcome: String,
+        plan: super::accounts::AccountPlan,
+        /// The pane the conversation continues in (a new one for `handoff`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pane_id: Option<String>,
+    },
+    AccountEnv {
+        env: super::accounts::AccountEnv,
+    },
+    AccountAdded {
+        account_id: String,
+    },
     AgentConfigured {
         /// `applied` when the commands were sent, `queued` when they wait for
         /// the busy agent to become idle.
