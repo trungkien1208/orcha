@@ -912,13 +912,15 @@ impl ClientShellState {
                     Some(super::orcha_popup::PluginOfferChoice::Add { autostart }) => {
                         crate::orcha_app::answer_plugin_offer(plugin.id, false);
                         self.show_notice(format!("adding {}…", plugin.name));
-                        let _ = crate::thread_spawn::spawn_named("orcha-plugin-add", move || {
-                            if let Err(message) =
-                                crate::orcha_app::add_offered_plugin(&plugin, autostart)
-                            {
-                                tracing::warn!(%message, "offered plugin was not added");
-                            }
-                        });
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        if crate::thread_spawn::spawn_named("orcha-plugin-add", move || {
+                            let result = crate::orcha_app::add_offered_plugin(&plugin, autostart);
+                            let _ = tx.send((plugin.id, plugin.name, result));
+                        })
+                        .is_ok()
+                        {
+                            self.orcha_ui.plugin_add_run = Some(rx);
+                        }
                     }
                     Some(super::orcha_popup::PluginOfferChoice::NotNow) => {
                         crate::orcha_app::answer_plugin_offer(plugin.id, false);
@@ -2096,6 +2098,24 @@ impl ClientShellState {
     /// The header's update button: shows a newer release, then the update
     /// running, then what to do next. Returns true when it changed.
     pub(super) fn poll_update(&mut self) -> bool {
+        if let Some(Ok((id, name, result))) = self
+            .orcha_ui
+            .plugin_add_run
+            .as_ref()
+            .map(|rx| rx.try_recv())
+        {
+            self.orcha_ui.plugin_add_run = None;
+            match result {
+                Ok(()) => self.show_notice(format!("{name} added")),
+                Err(message) => {
+                    tracing::warn!(%message, "offered plugin was not added");
+                    // ask again next time
+                    crate::orcha_app::forget_plugin_offer(id);
+                    self.show_notice(message);
+                }
+            }
+            return true;
+        }
         let ui = &mut self.orcha_ui;
         if let Some(Ok(news)) = ui.whats_new_check.as_ref().map(|rx| rx.try_recv()) {
             ui.whats_new_check = None;

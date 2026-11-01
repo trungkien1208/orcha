@@ -142,6 +142,9 @@ pub(super) struct OrchaHits {
 /// (name, command) of an IDE or Git GUI found on this machine.
 type WelcomeApp = (String, String);
 
+/// An offered plugin's id and name, and how its install went.
+pub(super) type PluginAddResult = (&'static str, &'static str, Result<(), String>);
+
 /// orcha: presentation state of the orcha chrome (client only).
 #[derive(Default)]
 pub(crate) struct OrchaUiState {
@@ -161,6 +164,8 @@ pub(crate) struct OrchaUiState {
     /// Looking for a plugin to offer, off the input path.
     pub(super) plugin_offer_check:
         Option<std::sync::mpsc::Receiver<Option<crate::orcha_app::OfferedPlugin>>>,
+    /// Installing an offered plugin: its id and name, then the error line.
+    pub(super) plugin_add_run: Option<std::sync::mpsc::Receiver<PluginAddResult>>,
     /// A plugin offer waiting for the screen to be free of other popups.
     pub(super) plugin_offer: Option<crate::orcha_app::OfferedPlugin>,
     /// A "what's new" waiting for the screen to be free of other popups.

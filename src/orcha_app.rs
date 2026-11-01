@@ -150,6 +150,34 @@ pub(crate) fn maybe_run_config_tool(args: &[String]) -> Option<i32> {
 
 #[cfg(test)]
 mod plugin_routing_tests {
+    use super::*;
+
+    #[test]
+    fn the_offer_asks_until_installed_or_declined() {
+        assert!(should_offer("easy-job", &[], None));
+        assert!(should_offer("easy-job", &["other"], Some("0.0.1")));
+        assert!(!should_offer("easy-job", &["easy-job"], None));
+        assert!(!should_offer("easy-job", &[], Some("never")));
+        assert!(!should_offer("easy-job", &[], Some(ORCHA_VERSION)));
+    }
+
+    #[test]
+    fn a_failed_install_reports_its_last_line() {
+        assert_eq!(
+            last_line(b"Building...\nfetch.sh: release v0.2.0 not found\n\n").as_deref(),
+            Some("fetch.sh: release v0.2.0 not found")
+        );
+        assert_eq!(last_line(b"  \n"), None);
+    }
+
+    #[test]
+    fn easy_job_installs_from_its_plugin_branch() {
+        assert_eq!(
+            EASY_JOB_INSTALL.join(" "),
+            "plugin install trungkien1208/orcha-plugin-office --ref plugin --yes"
+        );
+    }
+
     #[test]
     fn plugin_subcommands_go_to_herdr_and_bare_plugin_to_orcha_config() {
         for sub in ["link", "unlink", "list", "action", "pane"] {
@@ -339,18 +367,31 @@ pub(crate) fn first_offer(version: &str) -> bool {
 pub(crate) struct OfferedPlugin {
     pub id: &'static str,
     pub name: &'static str,
-    /// The plugin's own installer, which knows where its manifest is.
+    /// Arguments for Orcha's own executable that install the plugin.
     pub install: &'static [&'static str],
     /// The pane that can start with Orcha, and the tokens that hide it.
     pub autostart: Option<(&'static str, &'static [(&'static str, &'static str)])>,
 }
 
+/// Installs Easy Job from its GitHub `plugin` branch.
+pub(crate) const EASY_JOB_INSTALL: &[&str] = &[
+    "plugin",
+    "install",
+    "trungkien1208/orcha-plugin-office",
+    "--ref",
+    "plugin",
+    "--yes",
+];
+
 const OFFERED_PLUGINS: &[OfferedPlugin] = &[OfferedPlugin {
     id: "easy-job",
     name: "Easy Job",
-    install: &["easy-job", "orcha-plugin", "install"],
+    install: EASY_JOB_INSTALL,
     autostart: Some(("server", &[("easy_job", "bridge")])),
 }];
+
+/// Machines the offered plugins publish builds for.
+const PLUGIN_OFFER_PLATFORM: bool = cfg!(any(target_os = "macos", target_os = "linux"));
 
 const PLUGIN_OFFERS: &str = ".plugin-offers.json";
 
@@ -359,6 +400,16 @@ fn plugin_offers() -> std::collections::HashMap<String, String> {
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default()
+}
+
+/// Forgets the answer, so the offer asks again next time (the install failed).
+pub(crate) fn forget_plugin_offer(id: &str) {
+    let mut offers = plugin_offers();
+    if offers.remove(id).is_some() {
+        if let Ok(text) = serde_json::to_string_pretty(&offers) {
+            let _ = std::fs::write(crate::config::config_dir().join(PLUGIN_OFFERS), text);
+        }
+    }
 }
 
 /// Remembers the answer: `never`, or the Orcha version a "not now" was given
@@ -378,8 +429,9 @@ pub(crate) fn answer_plugin_offer(id: &str, never: bool) {
     }
 }
 
-/// A plugin to offer now: installed on this machine, not linked yet, and not
-/// declined (for good, or in this version). Blocking: run off the input path.
+/// A plugin to offer now: not installed yet, not declined (for good, or in
+/// this version), on a machine it has builds for. Blocking: run off the
+/// input path.
 pub(crate) fn plugin_to_offer() -> Option<OfferedPlugin> {
     let offers = plugin_offers();
     let linked = crate::orcha_handoff::herdr_json(&["api", "call", "plugin.list"])?;
@@ -390,36 +442,59 @@ pub(crate) fn plugin_to_offer() -> Option<OfferedPlugin> {
         .flatten()
         .filter_map(|plugin| plugin.get("plugin_id").or(plugin.get("id"))?.as_str())
         .collect();
+    if !PLUGIN_OFFER_PLATFORM {
+        return None;
+    }
     OFFERED_PLUGINS
         .iter()
         .find(|plugin| {
-            let answered = offers.get(plugin.id).map(String::as_str);
-            !linked.contains(&plugin.id)
-                && answered != Some("never")
-                && answered != Some(ORCHA_VERSION)
-                && crate::orcha_handoff::command_installed(plugin.install[0])
+            should_offer(
+                plugin.id,
+                &linked,
+                offers.get(plugin.id).map(String::as_str),
+            )
         })
         .cloned()
 }
 
-/// Adds an offered plugin with its own installer, then (when asked) starts
-/// its pane with Orcha. Blocking: run off the input path.
-pub(crate) fn add_offered_plugin(plugin: &OfferedPlugin, autostart: bool) -> Result<(), String> {
-    let (program, args) = plugin.install.split_first().ok_or("no installer")?;
-    let status = crate::noninteractive_process::command(program)
+fn should_offer(id: &str, installed: &[&str], answered: Option<&str>) -> bool {
+    !installed.contains(&id) && answered != Some("never") && answered != Some(ORCHA_VERSION)
+}
+
+/// Runs Orcha's own executable with `args` and no terminal. On failure,
+/// returns the last line it printed (the plugin log line), else a summary.
+pub(crate) fn run_self_quietly(args: &[&str]) -> Result<(), String> {
+    let me = std::env::current_exe().map_err(|err| format!("could not find orcha: {err}"))?;
+    let output = crate::noninteractive_process::command(&me)
         .args(args)
         .env(
             crate::api::SOCKET_PATH_ENV_VAR,
             crate::session::active_api_socket_path(),
         )
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map_err(|err| format!("could not run {program}: {err}"))?;
-    if !status.success() {
-        return Err(format!("{} could not add its plugin", plugin.name));
+        .output()
+        .map_err(|err| format!("could not run orcha: {err}"))?;
+    if output.status.success() {
+        return Ok(());
     }
+    Err(last_line(&output.stderr)
+        .or_else(|| last_line(&output.stdout))
+        .unwrap_or_else(|| format!("orcha {} failed", args.join(" "))))
+}
+
+fn last_line(bytes: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .map(str::trim)
+        .rfind(|line| !line.is_empty())
+        .map(str::to_owned)
+}
+
+/// Installs an offered plugin, then (when asked) starts its pane with
+/// Orcha. Blocking: run off the input path.
+pub(crate) fn add_offered_plugin(plugin: &OfferedPlugin, autostart: bool) -> Result<(), String> {
+    run_self_quietly(plugin.install)
+        .map_err(|line| format!("{} was not added: {line}", plugin.name))?;
     if let (true, Some((entrypoint, tokens))) = (autostart, plugin.autostart) {
         let tokens: serde_json::Map<String, serde_json::Value> = tokens
             .iter()

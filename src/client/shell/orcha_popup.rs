@@ -2055,7 +2055,7 @@ mod plugin_offer_tests {
         let plugin = crate::orcha_app::OfferedPlugin {
             id: "easy-job",
             name: "Easy Job",
-            install: &["easy-job", "orcha-plugin", "install"],
+            install: crate::orcha_app::EASY_JOB_INSTALL,
             autostart: Some(("server", &[("easy_job", "bridge")])),
         };
         let choices: Vec<_> = super::plugin_offer_rows(&plugin)
