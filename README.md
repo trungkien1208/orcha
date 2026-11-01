@@ -98,6 +98,11 @@ Orca is great, and orcha borrows plenty of its ideas. orcha is for people who wo
 orcha             # open orcha (or come back to it)
 orcha update      # get the latest version
 orcha uninstall   # remove orcha (asks before touching your settings)
+
+orcha office          # open Easy Job, a pixel-art office for your agents
+orcha office install  # add Easy Job
+orcha office update   # get the newest Easy Job
+orcha office remove   # remove Easy Job (asks first, keeps ~/.easy-job unless you say so)
 ```
 
 orcha also shows a green button when an update is ready.

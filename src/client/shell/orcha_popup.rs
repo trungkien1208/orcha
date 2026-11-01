@@ -1525,7 +1525,7 @@ pub(super) fn plugin_offer_rows(
     rows.push((
         PluginOfferChoice::Never,
         "Never".to_owned(),
-        "add it later with orcha plugin link".to_owned(),
+        "add it later with orcha office install".to_owned(),
         "NEVER",
     ));
     rows

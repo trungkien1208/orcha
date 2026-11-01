@@ -122,6 +122,7 @@ pub(crate) fn maybe_run_config_tool(args: &[String]) -> Option<i32> {
         // install.sh's Easy Job question (internal)
         "__offer-easy-job" => return Some(installer_offer(args.get(2).map(String::as_str))),
         "uninstall" => return Some(uninstall()),
+        "office" => return Some(crate::orcha_office::run(&args[2..])),
         "channel" => {
             eprintln!("orcha has one channel: `orcha update` installs the latest release.");
             return Some(2);
