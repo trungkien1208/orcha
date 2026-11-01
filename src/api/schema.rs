@@ -169,6 +169,7 @@ operations::define_operations! {
     PluginRunAction(PluginRunActionParams) => "plugin.run_action", true, false;
     PluginAutostartSet(PluginAutostartSetParams) => "plugin.autostart.set", false, false;
     PluginAutostartList(EmptyParams) => "plugin.autostart.list", false, false;
+    AgentTranscriptSubscribe(AgentTranscriptSubscribeParams) => "agent.transcript.subscribe", false, false;
 }
 
 #[cfg(test)]

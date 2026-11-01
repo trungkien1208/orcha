@@ -77,6 +77,23 @@ pub(super) struct ActiveAgentStatusSetSubscription {
 const AGENT_STATUS_SET_RECONCILE_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(500);
 
+/// Follows an agent's transcript file and sends appended records.
+pub(super) struct ActiveTranscriptSubscription {
+    pane_id: String,
+    path: Option<String>,
+    offset: u64,
+    pending_tail: Option<u32>,
+    last_resolve: std::time::Instant,
+    request_prefix: String,
+}
+
+/// How often the transcript's path is checked again (a new session).
+const TRANSCRIPT_RESOLVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+/// At most this many records per event; more follow in the next ones.
+const TRANSCRIPT_EVENT_ENTRIES: usize = 200;
+/// At most this many new bytes are read per poll.
+const TRANSCRIPT_READ_BYTES: u64 = 4 * 1024 * 1024;
+
 pub(super) struct ActiveScrollChangedSubscription {
     pane_id: String,
     last_scroll: Option<PaneScrollInfo>,
@@ -123,6 +140,7 @@ pub(super) enum ActiveSubscription {
     OutputMatched(ActiveOutputMatchedSubscription),
     AgentStatusChanged(Box<ActiveAgentStatusChangedSubscription>),
     AgentStatusSet(Box<ActiveAgentStatusSetSubscription>),
+    Transcript(Box<ActiveTranscriptSubscription>),
     ScrollChanged(ActiveScrollChangedSubscription),
 }
 
@@ -204,6 +222,24 @@ impl ActiveSubscription {
             Subscription::LayoutUpdated {} => Ok(event_subscription(EventKind::LayoutUpdated)),
             Subscription::PaneAgentModelChanged {} => {
                 Ok(event_subscription(EventKind::PaneAgentModelChanged))
+            }
+            Subscription::AgentTranscript { pane_id, tail } => {
+                let probe = pane_get(format!("{request_id}:sub:{index}:probe"), &pane_id, api_tx)?;
+                let path = probe
+                    .agent_session
+                    .and_then(|session| session.transcript_path);
+                let offset = path
+                    .as_deref()
+                    .and_then(|path| std::fs::metadata(path).ok())
+                    .map_or(0, |metadata| metadata.len());
+                Ok(Self::Transcript(Box::new(ActiveTranscriptSubscription {
+                    pane_id: probe.pane_id,
+                    path,
+                    offset,
+                    pending_tail: tail.filter(|tail| *tail > 0),
+                    last_resolve: std::time::Instant::now(),
+                    request_prefix: format!("{request_id}:sub:{index}"),
+                })))
             }
             Subscription::AccountsChanged {} => Ok(Self::Event(ActiveEventSubscription {
                 event_kind: EventKind::AccountsChanged,
@@ -363,6 +399,11 @@ impl ActiveSubscription {
                 .into_iter()
                 .next()
                 .and_then(|(_, event)| serde_json::to_value(event).ok()),
+            Self::Transcript(subscription) => subscription
+                .poll(api_tx)
+                .into_iter()
+                .next()
+                .and_then(|event| serde_json::to_value(event).ok()),
             Self::ScrollChanged(subscription) => {
                 serde_json::to_value(subscription.poll(api_tx)?).ok()
             }
@@ -467,6 +508,19 @@ impl ActiveSubscription {
                     ))
                 })
                 .collect(),
+            Self::Transcript(subscription) => {
+                let sequence = event_hub.current_sequence();
+                subscription
+                    .poll(api_tx)
+                    .into_iter()
+                    .map(|event| {
+                        Ok((
+                            sequence,
+                            serde_json::to_value(event).map_err(event_encoding_error)?,
+                        ))
+                    })
+                    .collect()
+            }
             // These subscriptions sample current state, not retained event history.
             // Keep their existing cadence even when a lifecycle batch was nonempty.
             Self::OutputMatched(_) | Self::ScrollChanged(_) => {
@@ -934,6 +988,92 @@ fn status_envelope(event: PaneAgentStatusChangedEvent) -> SubscriptionEventEnvel
     }
 }
 
+impl ActiveTranscriptSubscription {
+    fn poll(&mut self, api_tx: &ApiRequestSender) -> Vec<SubscriptionEventEnvelope> {
+        let mut events = Vec::new();
+        if self.last_resolve.elapsed() >= TRANSCRIPT_RESOLVE_INTERVAL || self.path.is_none() {
+            self.last_resolve = std::time::Instant::now();
+            if let Ok(pane) = pane_get(
+                format!("{}:pane", self.request_prefix),
+                &self.pane_id,
+                api_tx,
+            ) {
+                let path = pane
+                    .agent_session
+                    .and_then(|session| session.transcript_path);
+                if path.is_some() && path != self.path {
+                    let first = self.path.is_none();
+                    self.path = path;
+                    self.offset = 0;
+                    if !first {
+                        // A new session: start its transcript from the top.
+                        events.push(self.envelope(Vec::new(), true));
+                    }
+                }
+            }
+        }
+        let Some(path) = self.path.clone() else {
+            return events;
+        };
+        if let Some(tail) = self.pending_tail.take() {
+            let records = read_records(&path, 0, u64::MAX).0;
+            let start = records.len().saturating_sub(tail as usize);
+            for chunk in records[start..].chunks(TRANSCRIPT_EVENT_ENTRIES) {
+                events.push(self.envelope(chunk.to_vec(), false));
+            }
+        }
+        let (records, offset) = read_records(&path, self.offset, TRANSCRIPT_READ_BYTES);
+        self.offset = offset;
+        for chunk in records.chunks(TRANSCRIPT_EVENT_ENTRIES) {
+            events.push(self.envelope(chunk.to_vec(), false));
+        }
+        events
+    }
+
+    fn envelope(&self, entries: Vec<serde_json::Value>, reset: bool) -> SubscriptionEventEnvelope {
+        SubscriptionEventEnvelope {
+            event: SubscriptionEventKind::AgentTranscript,
+            data: SubscriptionEventData::AgentTranscript(
+                crate::api::schema::AgentTranscriptEvent {
+                    pane_id: self.pane_id.clone(),
+                    transcript_path: self.path.clone().unwrap_or_default(),
+                    reset,
+                    entries,
+                },
+            ),
+        }
+    }
+}
+
+/// Complete JSON lines of `path` from `from`, at most `max` bytes, and the
+/// offset after the last complete line. A shorter file starts over.
+fn read_records(path: &str, from: u64, max: u64) -> (Vec<serde_json::Value>, u64) {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return (Vec::new(), from);
+    };
+    let len = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+    let from = if from > len { 0 } else { from };
+    if from == len || file.seek(SeekFrom::Start(from)).is_err() {
+        return (Vec::new(), from);
+    }
+    let mut bytes = Vec::new();
+    if (&mut file).take(max).read_to_end(&mut bytes).is_err() {
+        return (Vec::new(), from);
+    }
+    // Keep a partly written last line for the next read.
+    let complete = bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |end| end + 1);
+    let records = bytes[..complete]
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .filter_map(|line| serde_json::from_slice(line).ok())
+        .collect();
+    (records, from + complete as u64)
+}
+
 impl ActiveScrollChangedSubscription {
     fn poll(&mut self, api_tx: &ApiRequestSender) -> Option<SubscriptionEventEnvelope> {
         let pane = pane_get(
@@ -1341,6 +1481,79 @@ mod tests {
 
         drop(subscription);
         assert!(!event_hub.session_watched());
+    }
+
+    #[test]
+    fn transcript_subscription_sends_appended_records_and_an_optional_tail() {
+        let dir = std::env::temp_dir().join(format!("herdr-transcript-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.jsonl");
+        std::fs::write(&path, "{\"n\":1}\n{\"n\":2}\n").unwrap();
+        let path_text = path.display().to_string();
+        let (api_tx, mut api_rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::api::ApiRequestMessage>();
+        let responder_path = path_text.clone();
+        std::thread::spawn(move || {
+            while let Some(message) = api_rx.blocking_recv() {
+                let mut pane = pane("w1:p1", "w1", AgentStatus::Working);
+                pane.agent_session = Some(crate::api::schema::AgentSessionInfo {
+                    source: "herdr:claude".into(),
+                    agent: "claude".into(),
+                    kind: crate::agent_resume::AgentSessionRefKind::Id,
+                    value: "s".into(),
+                    id: Some("s".into()),
+                    transcript_path: Some(responder_path.clone()),
+                });
+                let _ = message.respond_to.send(
+                    serde_json::to_string(&crate::api::schema::SuccessResponse {
+                        id: message.request.id,
+                        result: crate::api::schema::ResponseResult::PaneInfo { pane },
+                    })
+                    .unwrap(),
+                );
+            }
+        });
+        let event_hub = EventHub::default();
+        let mut subscription = ActiveSubscription::new(
+            Subscription::AgentTranscript {
+                pane_id: "w1:p1".into(),
+                tail: Some(1),
+            },
+            "t",
+            0,
+            &api_tx,
+            &event_hub,
+            0,
+        )
+        .unwrap();
+        let entries = |events: &[serde_json::Value]| {
+            events
+                .iter()
+                .flat_map(|event| {
+                    event["data"]["entries"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default()
+                })
+                .map(|entry| entry["n"].as_i64().unwrap())
+                .collect::<Vec<_>>()
+        };
+        let first = subscription.poll_batch(&api_tx, &event_hub).unwrap();
+        assert_eq!(first[0]["event"], "agent.transcript");
+        assert_eq!(entries(&first), [2], "the tail, then nothing new");
+
+        // A record written in two parts is sent once it is complete.
+        std::fs::write(&path, "{\"n\":1}\n{\"n\":2}\n{\"n\":3}\n{\"n\"").unwrap();
+        assert_eq!(
+            entries(&subscription.poll_batch(&api_tx, &event_hub).unwrap()),
+            [3]
+        );
+        std::fs::write(&path, "{\"n\":1}\n{\"n\":2}\n{\"n\":3}\n{\"n\":4}\n").unwrap();
+        assert_eq!(
+            entries(&subscription.poll_batch(&api_tx, &event_hub).unwrap()),
+            [4]
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

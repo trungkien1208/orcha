@@ -528,6 +528,23 @@ fn serve_request(
             }
             result
         }
+        Method::AgentTranscriptSubscribe(params) => {
+            let result = stream_subscriptions(
+                connection,
+                request_id.clone(),
+                crate::api::schema::EventsSubscribeParams {
+                    subscriptions: vec![crate::api::schema::Subscription::AgentTranscript {
+                        pane_id: params.pane_id,
+                        tail: params.tail,
+                    }],
+                },
+                api_tx,
+                event_hub,
+                running,
+            );
+            crate::logging::api_request_completed(&request_id, method, "stream_closed", changes_ui);
+            result
+        }
         Method::EventsWait(params) => {
             let response = wait_for_event(
                 request_id.clone(),

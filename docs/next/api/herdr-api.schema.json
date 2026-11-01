@@ -2023,6 +2023,26 @@
           ],
           "type": "object"
         },
+        "AgentTranscriptSubscribeParams": {
+          "properties": {
+            "pane_id": {
+              "type": "string"
+            },
+            "tail": {
+              "description": "Also send this many of the newest existing records first.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "pane_id"
+          ],
+          "type": "object"
+        },
         "AgentViewBuiltinField": {
           "enum": [
             "status",
@@ -5080,6 +5100,32 @@
                 "type"
               ],
               "type": "object"
+            },
+            {
+              "description": "New records of the agent's transcript (Claude, Codex) as they are written.",
+              "properties": {
+                "pane_id": {
+                  "type": "string"
+                },
+                "tail": {
+                  "description": "Also send this many of the newest existing records first.",
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "type": {
+                  "const": "agent.transcript",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "pane_id"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -7477,6 +7523,22 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.transcript.subscribe",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentTranscriptSubscribeParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -7511,6 +7573,31 @@
             "unknown"
           ],
           "type": "string"
+        },
+        "AgentTranscriptEvent": {
+          "properties": {
+            "entries": {
+              "description": "Transcript records as the agent wrote them, oldest first.",
+              "items": true,
+              "type": "array"
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "reset": {
+              "description": "The transcript changed (a new session); earlier records belong to the old one.",
+              "type": "boolean"
+            },
+            "transcript_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id",
+            "transcript_path",
+            "entries"
+          ],
+          "type": "object"
         },
         "PaneAgentStatusChangedEvent": {
           "properties": {
@@ -7720,6 +7807,9 @@
             },
             {
               "$ref": "#/schemas/subscription_event/$defs/PaneScrollChangedEvent"
+            },
+            {
+              "$ref": "#/schemas/subscription_event/$defs/AgentTranscriptEvent"
             }
           ]
         },
@@ -7727,7 +7817,8 @@
           "enum": [
             "pane.output_matched",
             "pane.agent_status_changed",
-            "pane.scroll_changed"
+            "pane.scroll_changed",
+            "agent.transcript"
           ],
           "type": "string"
         }

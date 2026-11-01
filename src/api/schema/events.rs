@@ -96,6 +96,14 @@ pub enum Subscription {
     PaneAgentModelChanged {},
     #[serde(rename = "accounts.changed")]
     AccountsChanged {},
+    /// New records of the agent's transcript (Claude, Codex) as they are written.
+    #[serde(rename = "agent.transcript")]
+    AgentTranscript {
+        pane_id: String,
+        /// Also send this many of the newest existing records first.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tail: Option<u32>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -388,7 +396,11 @@ pub struct EventEnvelope {
 }
 
 /// Events that exist only as `events.subscribe` streams, not in the lifecycle history.
-pub const SUBSCRIPTION_ONLY_EVENT_NAMES: &[&str] = &["pane.output_matched", "pane.scroll_changed"];
+pub const SUBSCRIPTION_ONLY_EVENT_NAMES: &[&str] = &[
+    "pane.output_matched",
+    "pane.scroll_changed",
+    "agent.transcript",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum SubscriptionEventKind {
@@ -398,6 +410,8 @@ pub enum SubscriptionEventKind {
     PaneAgentStatusChanged,
     #[serde(rename = "pane.scroll_changed")]
     ScrollChanged,
+    #[serde(rename = "agent.transcript")]
+    AgentTranscript,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -412,6 +426,19 @@ pub enum SubscriptionEventData {
     PaneOutputMatched(PaneOutputMatchedEvent),
     PaneAgentStatusChanged(PaneAgentStatusChangedEvent),
     ScrollChanged(PaneScrollChangedEvent),
+    AgentTranscript(AgentTranscriptEvent),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentTranscriptEvent {
+    pub pane_id: String,
+    pub transcript_path: String,
+    /// The transcript changed (a new session); earlier records belong to the old one.
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub reset: bool,
+    /// Transcript records as the agent wrote them, oldest first.
+    #[schemars(with = "Vec<serde_json::Value>")]
+    pub entries: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

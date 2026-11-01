@@ -431,3 +431,11 @@ pub struct AgentAnswerParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentTranscriptSubscribeParams {
+    pub pane_id: String,
+    /// Also send this many of the newest existing records first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tail: Option<u32>,
+}

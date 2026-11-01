@@ -107,7 +107,7 @@ Raw socket method names use dot notation:
 | Popup | `popup.close` |
 | Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio` |
 | Accounts | `accounts.list`, `accounts.plan`, `accounts.switch`, `accounts.login`, `accounts.add`, `accounts.remove`, `accounts.rename`, `accounts.set_default`, `accounts.env` |
-| Agent | `agent.models`, `agent.configure`, `agent.handoff`, `agent.mark_seen`, `agent.question`, `agent.answer`, `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
+| Agent | `agent.models`, `agent.configure`, `agent.handoff`, `agent.mark_seen`, `agent.question`, `agent.answer`, `agent.transcript.subscribe`, `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
 | Events | `events.subscribe`, `events.wait` |
 | Integrations | `integration.install`, `integration.uninstall` |
 | Plugins | `plugin.link`, `plugin.list`, `plugin.unlink`, `plugin.enable`, `plugin.disable`, `plugin.action.list`, `plugin.action.invoke`, `plugin.run_action`, `plugin.autostart.set`, `plugin.autostart.list`, `plugin.log.list`, `plugin.pane.open`, `plugin.pane.focus`, `plugin.pane.close` |
@@ -1430,6 +1430,25 @@ hide them. Like every pane it has `HERDR_SOCKET_PATH`, `HERDR_PANE_ID` and
 (a running pane is left alone; close it with `plugin.pane.close`).
 `plugin.autostart.list` returns the entries with their running `pane_id`.
 To start a pane once on demand, use `plugin.pane.open` with `"focus": false`.
+
+### Transcript stream
+
+Follow an agent's own transcript (Claude, Codex) without reading files:
+
+```json
+{"id":"t1","method":"agent.transcript.subscribe","params":{"pane_id":"w1:p2","tail":50}}
+{"id":"t1","result":{"type":"subscription_started"}}
+{"event":"agent.transcript","data":{"pane_id":"w1:p2","transcript_path":"/Users/me/.claude/projects/…/9f2c….jsonl","entries":[{"type":"assistant","message":{…}}]}}
+```
+
+`entries` are the transcript's records as the agent wrote them, oldest first,
+up to 200 per event; a record still being written is sent once complete.
+`tail` sends that many existing records first. When the pane starts a new
+session, an event with `reset: true` and the new `transcript_path` comes before
+its records. The same stream is available as an `events.subscribe` type,
+`{"type":"agent.transcript","pane_id":"w1:p2"}`, so it can share a request with
+other subscriptions. It needs `agent_session.transcript_path` (see Session
+identity).
 
 ## Protocol stability
 
