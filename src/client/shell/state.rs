@@ -145,6 +145,9 @@ type WelcomeApp = (String, String);
 /// An offered plugin's id and name, and how its install went.
 pub(super) type PluginAddResult = (&'static str, &'static str, Result<(), String>);
 
+/// A plugin's name, and its new version or the end of the update log.
+pub(super) type PluginUpdateResult = (String, Result<String, String>);
+
 /// orcha: presentation state of the orcha chrome (client only).
 #[derive(Default)]
 pub(crate) struct OrchaUiState {
@@ -174,8 +177,12 @@ pub(crate) struct OrchaUiState {
     /// GitHub plugins and whether a newer version is out (checked with
     /// Orcha's own release, at most daily).
     pub(super) plugin_update_check:
-        Option<std::sync::mpsc::Receiver<Vec<crate::orcha_plugin_updates::PluginUpdate>>>,
+        Option<std::sync::mpsc::Receiver<crate::orcha_plugin_updates::PluginNews>>,
     pub(super) plugin_updates: Vec<crate::orcha_plugin_updates::PluginUpdate>,
+    /// A plugin update to announce once the screen is free.
+    pub(super) plugin_update_notice: Option<(crate::orcha_plugin_updates::PluginUpdate, String)>,
+    /// A plugin update running: the plugin's name and its new version or log.
+    pub(super) plugin_update_run: Option<std::sync::mpsc::Receiver<PluginUpdateResult>>,
     /// `orcha update` running behind the UI; true when it worked.
     pub(super) update_run: Option<std::sync::mpsc::Receiver<bool>>,
     /// The header's update button text, while there is one.

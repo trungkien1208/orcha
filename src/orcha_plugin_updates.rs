@@ -15,6 +15,10 @@ const CACHE: &str = ".plugin-updates.json";
 const CHECK_EVERY_SECS: u64 = 24 * 60 * 60;
 const GIT_TIMEOUT: Duration = Duration::from_secs(15);
 const MANIFEST: &str = "herdr-plugin.toml";
+/// Versions whose notice was shown, per plugin.
+const NOTICES: &str = ".plugin-update-notices.json";
+/// Lines of a failed update's output kept for the error.
+const LOG_TAIL_LINES: usize = 12;
 
 /// What the last check knows about one GitHub plugin.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,6 +48,21 @@ impl PluginUpdate {
         self.latest_commit.is_some() && self.latest_commit != self.installed_commit
     }
 
+    /// A newer commit this Orcha can run.
+    pub(crate) fn installable(&self) -> bool {
+        self.available() && self.compatible
+    }
+
+    /// The notice for this update, in the user's words.
+    pub(crate) fn notice(&self, name: &str) -> String {
+        match &self.needs_herdr_version {
+            Some(required) if !self.compatible => format!(
+                "{name} {} needs a newer Orcha (Herdr core {required}); run `orcha update`",
+                self.latest_version
+            ),
+            _ => format!("{name} {} is out", self.latest_version),
+        }
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -99,6 +118,132 @@ fn github_url(plugin: &InstalledPluginInfo) -> Option<String> {
         plugin.source.owner.as_deref()?,
         plugin.source.repo.as_deref()?
     ))
+}
+
+/// What the client shows after a check: one notice at most, the first
+/// time a version is seen.
+pub(crate) struct PluginNews {
+    pub updates: Vec<PluginUpdate>,
+    /// An update to announce, with the plugin's name.
+    pub notice: Option<(PluginUpdate, String)>,
+}
+
+/// Checks (at most daily) and picks the notice to show. Blocking.
+pub(crate) fn news() -> PluginNews {
+    let (updates, _) = check(false);
+    let names: std::collections::HashMap<String, String> = github_plugins()
+        .into_iter()
+        .map(|plugin| (plugin.plugin_id, plugin.name))
+        .collect();
+    let notice = updates
+        .iter()
+        .filter(|update| update.available())
+        .find(|update| first_notice(update))
+        .map(|update| {
+            let name = names
+                .get(&update.id)
+                .cloned()
+                .unwrap_or_else(|| update.id.clone());
+            (update.clone(), name)
+        });
+    PluginNews { updates, notice }
+}
+
+/// The last answer, matched to what is installed now; no network.
+pub(crate) fn cached() -> Vec<PluginUpdate> {
+    reconcile(&github_plugins(), read_cache().plugins)
+}
+
+/// True the first time the notice for `update` is shown; after that the
+/// plugin list keeps the Update.
+pub(crate) fn first_notice(update: &PluginUpdate) -> bool {
+    let path = crate::config::config_dir().join(NOTICES);
+    let mut shown: std::collections::HashMap<String, String> = std::fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    if shown.get(&update.id) == Some(&update.latest_version) {
+        return false;
+    }
+    shown.insert(update.id.clone(), update.latest_version.clone());
+    if let Ok(text) = serde_json::to_string_pretty(&shown) {
+        let _ = std::fs::write(path, text);
+    }
+    true
+}
+
+/// Updates a GitHub plugin with `orcha plugin update <id> --yes` and returns
+/// its new version, or the tail of the update's output. Running panes keep
+/// the old files until restarted (`restart_running_panes`). Blocking.
+pub(crate) fn update_plugin(id: &str) -> Result<String, String> {
+    let exe = std::env::current_exe().map_err(|err| format!("could not find orcha: {err}"))?;
+    let output = crate::noninteractive_process::command(exe)
+        .args(["plugin", "update", id, "--yes"])
+        .env(
+            crate::api::SOCKET_PATH_ENV_VAR,
+            crate::session::active_api_socket_path(),
+        )
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|err| format!("could not run orcha plugin update: {err}"))?;
+    if !output.status.success() {
+        let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+        text.push_str(&String::from_utf8_lossy(&output.stderr));
+        return Err(log_tail(&text));
+    }
+    forget(id);
+    crate::persist::plugin_registry::try_load()
+        .ok()
+        .and_then(|plugins| plugins.into_iter().find(|plugin| plugin.plugin_id == id))
+        .map(|plugin| plugin.version)
+        .ok_or_else(|| format!("{id} is no longer installed"))
+}
+
+fn log_tail(text: &str) -> String {
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    let tail = lines[lines.len().saturating_sub(LOG_TAIL_LINES)..].join("\n");
+    if tail.is_empty() {
+        "the update failed".to_owned()
+    } else {
+        tail
+    }
+}
+
+/// Restarts `id`'s running panes through the session's API so they run the
+/// updated files. Blocking.
+pub(crate) fn restart_running_panes(id: &str) {
+    let Some(listed) = crate::orcha_handoff::herdr_json(&["api", "call", "plugin.pane.list"])
+    else {
+        return;
+    };
+    for pane_id in plugin_pane_ids(&listed, id) {
+        let params = serde_json::json!({ "pane_id": pane_id }).to_string();
+        let _ = crate::orcha_handoff::herdr_json(&["api", "call", "plugin.pane.restart", &params]);
+    }
+}
+
+/// The panes of `id` in a `plugin.pane.list` result.
+pub(crate) fn plugin_pane_ids(listed: &serde_json::Value, id: &str) -> Vec<String> {
+    listed["plugin_panes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|pane| pane["plugin_id"].as_str() == Some(id))
+        .filter_map(|pane| pane["pane_id"].as_str().map(str::to_owned))
+        .collect()
+}
+
+/// Forgets the cached answer for `id` (it was just updated).
+fn forget(id: &str) {
+    let mut cache = read_cache();
+    let before = cache.plugins.len();
+    cache.plugins.retain(|plugin| plugin.id != id);
+    if cache.plugins.len() != before {
+        write_cache(&cache);
+    }
 }
 
 /// Asks the remotes when the last check is a day old (or `force`), else
@@ -446,7 +591,9 @@ mod tests {
         let temp = TempDir::new("offline");
         let missing = format!("file://{}", temp.path().join("gone").display());
         let plugin = installed("abc");
-        let found = check_plugins(std::slice::from_ref(&plugin), &[], |_| Some(missing.clone()));
+        let found = check_plugins(std::slice::from_ref(&plugin), &[], |_| {
+            Some(missing.clone())
+        });
         assert!(!found[0].available());
 
         let mut known = found[0].clone();
@@ -463,6 +610,38 @@ mod tests {
         let shown = reconcile(&[installed("new")], vec![stale]);
         assert!(!shown[0].available());
         assert_eq!(shown[0].installed_commit.as_deref(), Some("new"));
+    }
+
+    #[test]
+    fn notices_point_to_orcha_update_when_orcha_is_too_old() {
+        let mut update = current_entry(&installed("old")).unwrap();
+        update.latest_commit = Some("new".into());
+        update.latest_version = "0.2.0".into();
+        assert_eq!(update.notice("Easy Job"), "Easy Job 0.2.0 is out");
+        update.compatible = false;
+        update.needs_herdr_version = Some("1.2.0".into());
+        assert!(!update.installable());
+        assert_eq!(
+            update.notice("Easy Job"),
+            "Easy Job 0.2.0 needs a newer Orcha (Herdr core 1.2.0); run `orcha update`"
+        );
+    }
+
+    #[test]
+    fn a_failed_update_keeps_the_end_of_its_log() {
+        let text = (1..=20).map(|n| format!("line {n}\n")).collect::<String>();
+        let tail = log_tail(&text);
+        assert!(tail.starts_with("line 9") && tail.ends_with("line 20"));
+        assert_eq!(log_tail("\n \n"), "the update failed");
+    }
+
+    #[test]
+    fn restart_picks_only_the_plugins_panes() {
+        let listed = serde_json::json!({"plugin_panes": [
+            {"plugin_id": "easy-job", "pane_id": "w1:p1"},
+            {"plugin_id": "other", "pane_id": "w1:p2"},
+        ]});
+        assert_eq!(plugin_pane_ids(&listed, "easy-job"), ["w1:p1"]);
     }
 
     #[test]

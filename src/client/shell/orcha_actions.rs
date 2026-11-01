@@ -717,6 +717,7 @@ impl ClientShellState {
             Some(super::orcha_popup::OrchaPopup::OpenWith { choices, .. }) => choices.len(),
             Some(super::orcha_popup::OrchaPopup::FoundAccounts { chosen, .. }) => chosen.len(),
             Some(super::orcha_popup::OrchaPopup::Update { .. }) => 3,
+            Some(super::orcha_popup::OrchaPopup::PluginUpdate { .. }) => 2,
             Some(super::orcha_popup::OrchaPopup::SwitchAccount { .. }) => 3,
             Some(super::orcha_popup::OrchaPopup::PluginOffer { plugin, .. }) => {
                 if plugin.autostart.is_some() {
@@ -747,6 +748,7 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::OpenWith { selected, .. }
                 | super::orcha_popup::OrchaPopup::FoundAccounts { selected, .. }
                 | super::orcha_popup::OrchaPopup::Update { selected, .. }
+                | super::orcha_popup::OrchaPopup::PluginUpdate { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginOffer { selected, .. }
                 | super::orcha_popup::OrchaPopup::SwitchAccount { selected, .. }
                 | super::orcha_popup::OrchaPopup::Palette { selected, .. }
@@ -775,6 +777,7 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::OpenWith { selected, .. }
                 | super::orcha_popup::OrchaPopup::FoundAccounts { selected, .. }
                 | super::orcha_popup::OrchaPopup::Update { selected, .. }
+                | super::orcha_popup::OrchaPopup::PluginUpdate { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginOffer { selected, .. }
                 | super::orcha_popup::OrchaPopup::SwitchAccount { selected, .. }
                 | super::orcha_popup::OrchaPopup::Palette { selected, .. }
@@ -929,6 +932,13 @@ impl ClientShellState {
                         crate::orcha_app::answer_plugin_offer(plugin.id, true);
                     }
                     None => {}
+                }
+                return;
+            }
+            super::orcha_popup::OrchaPopup::PluginUpdate { update, name, .. } => {
+                self.orcha_ui.popup = None;
+                if index == 0 {
+                    self.start_plugin_update(update.id, name);
                 }
                 return;
             }
@@ -2083,6 +2093,31 @@ impl ClientShellState {
         self.start_update_check();
     }
 
+    /// Updates a GitHub plugin off the input path, then restarts its running
+    /// panes so they run the new files. The click was the consent.
+    pub(super) fn start_plugin_update(&mut self, id: String, name: String) {
+        if self.orcha_ui.plugin_update_run.is_some() {
+            self.show_notice("a plugin update is already running".to_owned());
+            return;
+        }
+        self.show_notice(format!("updating {name}…"));
+        self.orcha_ui
+            .plugin_updates
+            .retain(|update| update.id != id);
+        let (tx, rx) = std::sync::mpsc::channel();
+        if crate::thread_spawn::spawn_named("orcha-plugin-update", move || {
+            let result = crate::orcha_plugin_updates::update_plugin(&id);
+            if result.is_ok() {
+                crate::orcha_plugin_updates::restart_running_panes(&id);
+            }
+            let _ = tx.send((name, result));
+        })
+        .is_ok()
+        {
+            self.orcha_ui.plugin_update_run = Some(rx);
+        }
+    }
+
     /// Asks (at most daily, off the input path) whether a newer orcha is out.
     fn start_update_check(&mut self) {
         let (tx, rx) = std::sync::mpsc::channel();
@@ -2095,7 +2130,7 @@ impl ClientShellState {
         }
         let (tx, rx) = std::sync::mpsc::channel();
         if crate::thread_spawn::spawn_named("orcha-plugin-update-check", move || {
-            let _ = tx.send(crate::orcha_plugin_updates::check(false).0);
+            let _ = tx.send(crate::orcha_plugin_updates::news());
         })
         .is_ok()
         {
@@ -2124,10 +2159,28 @@ impl ClientShellState {
             }
             return true;
         }
+        if let Some(Ok((name, result))) = self
+            .orcha_ui
+            .plugin_update_run
+            .as_ref()
+            .map(|rx| rx.try_recv())
+        {
+            self.orcha_ui.plugin_update_run = None;
+            match result {
+                Ok(version) => self.show_notice(format!("{name} updated to {version}")),
+                Err(log) => {
+                    tracing::warn!(%log, "plugin update failed");
+                    let last = log.lines().last().unwrap_or_default().to_owned();
+                    self.show_notice(format!("{name} was not updated: {last}"));
+                }
+            }
+            return true;
+        }
         let ui = &mut self.orcha_ui;
-        if let Some(Ok(updates)) = ui.plugin_update_check.as_ref().map(|rx| rx.try_recv()) {
+        if let Some(Ok(news)) = ui.plugin_update_check.as_ref().map(|rx| rx.try_recv()) {
             ui.plugin_update_check = None;
-            ui.plugin_updates = updates;
+            ui.plugin_updates = news.updates;
+            ui.plugin_update_notice = news.notice;
         }
         if let Some(Ok(news)) = ui.whats_new_check.as_ref().map(|rx| rx.try_recv()) {
             ui.whats_new_check = None;
@@ -2144,6 +2197,21 @@ impl ClientShellState {
                     selected: 0,
                     plugin,
                 });
+                return true;
+            }
+        }
+        if ui.popup.is_none() && ui.whats_new.is_none() && ui.whats_new_check.is_none() {
+            if let Some((update, name)) = ui.plugin_update_notice.take() {
+                if update.installable() {
+                    ui.popup = Some(super::orcha_popup::OrchaPopup::PluginUpdate {
+                        selected: 0,
+                        update,
+                        name,
+                    });
+                } else {
+                    let notice = update.notice(&name);
+                    self.show_notice(notice);
+                }
                 return true;
             }
         }

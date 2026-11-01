@@ -90,6 +90,12 @@ pub(crate) enum OrchaPopup {
         selected: usize,
         plugin: crate::orcha_app::OfferedPlugin,
     },
+    /// A newer version of a GitHub plugin, shown once per version.
+    PluginUpdate {
+        selected: usize,
+        update: crate::orcha_plugin_updates::PluginUpdate,
+        name: String,
+    },
     /// What changed in this build, shown once after an update.
     WhatsNew { release: crate::orcha_app::Release },
     /// Claude sign-ins found on this machine (`OrchaUiState::found_accounts`),
@@ -1531,6 +1537,89 @@ pub(super) fn plugin_offer_rows(
     rows
 }
 
+/// Update now, or later from COMMANDS.
+pub(super) fn plugin_update_rows(
+    update: &crate::orcha_plugin_updates::PluginUpdate,
+    name: &str,
+) -> [(String, String, &'static str); 2] {
+    [
+        (
+            format!("Update {name} to {}", update.latest_version),
+            "downloads it, then restarts its running panes".to_owned(),
+            "UPDATE",
+        ),
+        (
+            "Not now".to_owned(),
+            format!("COMMANDS keeps an Update {name} row"),
+            "LATER",
+        ),
+    ]
+}
+
+fn render_plugin_update(
+    buffer: &mut Buffer,
+    selected: usize,
+    update: &crate::orcha_plugin_updates::PluginUpdate,
+    name: &str,
+    t: &Brutal,
+    hits: &mut PopupHits,
+) -> Option<()> {
+    let rows = plugin_update_rows(update, name);
+    let frame = popup_frame(
+        buffer,
+        72,
+        rows_height(rows.len()),
+        "PLUGIN",
+        &format!("{} · Update", update.notice(name)),
+        &[("↵", "choose"), ("↑↓", "move")],
+        "esc later",
+        t,
+        hits,
+    )?;
+    let mut y = frame.body.y;
+    for (index, (title, detail, label)) in rows.iter().enumerate() {
+        if y + ROW > frame.body.bottom() {
+            break;
+        }
+        let rect = Rect::new(frame.body.x, y, frame.body.width, ROW);
+        let fill = row_box(buffer, rect, index == 0, index == selected, t);
+        put_text(
+            buffer,
+            rect.x + 2,
+            y,
+            rect.width.saturating_sub(16),
+            title,
+            Style::default()
+                .fg(t.ink)
+                .bg(fill)
+                .add_modifier(Modifier::BOLD),
+        );
+        put_text(
+            buffer,
+            rect.x + 2,
+            y + 1,
+            rect.width.saturating_sub(16),
+            detail,
+            Style::default().fg(t.muted).bg(fill),
+        );
+        if index == selected {
+            let action = button(
+                buffer,
+                rect.right() - 1,
+                y,
+                label,
+                ButtonKind::Primary,
+                fill,
+                t,
+            );
+            hits.actions.push((action, index));
+        }
+        hits.rows.push((rect, index));
+        y += ROW;
+    }
+    Some(())
+}
+
 fn render_plugin_offer(
     buffer: &mut Buffer,
     selected: usize,
@@ -1544,7 +1633,7 @@ fn render_plugin_offer(
         72,
         rows_height(rows.len()),
         "PLUGIN",
-        &format!("{} is on this Mac: add it to Orcha?", plugin.name),
+        &format!("Add {} to Orcha? It installs from GitHub.", plugin.name),
         &[("↵", "choose"), ("↑↓", "move")],
         "esc later",
         t,
@@ -2008,6 +2097,13 @@ pub(super) fn render_popup(
         }
         OrchaPopup::Update { selected, release } => {
             let _ = render_update(buffer, *selected, release, &t, &mut hits);
+        }
+        OrchaPopup::PluginUpdate {
+            selected,
+            update,
+            name,
+        } => {
+            let _ = render_plugin_update(buffer, *selected, update, name, &t, &mut hits);
         }
         OrchaPopup::WhatsNew { release } => {
             let _ = render_whats_new(buffer, release, &t, &mut hits);

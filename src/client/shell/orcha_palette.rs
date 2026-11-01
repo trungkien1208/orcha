@@ -211,6 +211,11 @@ pub(super) enum PluginRun {
     OpenUrl {
         url: String,
     },
+    /// Install a newer version of a GitHub plugin.
+    Update {
+        plugin_id: String,
+        name: String,
+    },
 }
 
 /// Plugin rows from the last refresh; read when COMMANDS opens.
@@ -250,6 +255,10 @@ fn refresh_plugin_actions() {
             .collect();
         let mut rows = plugin_action_rows(call("plugin.action.list").as_ref());
         rows.extend(plugin_pane_rows(call("plugin.pane.list").as_ref(), &names));
+        rows.extend(plugin_update_rows(
+            &crate::orcha_plugin_updates::cached(),
+            &names,
+        ));
         if let Ok(mut known) = PLUGIN_ACTIONS.lock() {
             *known = rows;
         }
@@ -273,6 +282,34 @@ fn plugin_action_rows(result: Option<&serde_json::Value>) -> Vec<PluginPaletteAc
                     plugin_id,
                 },
             })
+        })
+        .collect()
+}
+
+/// An Update row for each GitHub plugin with a newer version this Orcha runs.
+fn plugin_update_rows(
+    updates: &[crate::orcha_plugin_updates::PluginUpdate],
+    names: &std::collections::HashMap<String, String>,
+) -> Vec<PluginPaletteAction> {
+    updates
+        .iter()
+        .filter(|update| update.installable())
+        .map(|update| {
+            let name = names
+                .get(&update.id)
+                .cloned()
+                .unwrap_or_else(|| update.id.clone());
+            PluginPaletteAction {
+                title: format!("Update {name} to {}", update.latest_version),
+                detail: format!(
+                    "{} is installed; restarts its running panes",
+                    update.current_version
+                ),
+                run: PluginRun::Update {
+                    plugin_id: update.id.clone(),
+                    name,
+                },
+            }
         })
         .collect()
 }
@@ -724,10 +761,14 @@ impl ClientShellState {
         };
         if let Some(action) = plugin_action(index) {
             self.orcha_ui.popup = None;
+            if let PluginRun::Update { plugin_id, name } = action.run {
+                self.start_plugin_update(plugin_id, name);
+                return;
+            }
             self.show_notice(match &action.run {
                 PluginRun::Invoke { .. } => format!("running {}", action.title),
                 PluginRun::OpenUrl { url } => format!("opening {url}"),
-                PluginRun::Restart { .. } | PluginRun::Stop { .. } => {
+                PluginRun::Restart { .. } | PluginRun::Stop { .. } | PluginRun::Update { .. } => {
                     format!("{}…", action.title.to_lowercase())
                 }
             });
@@ -764,6 +805,7 @@ impl ClientShellState {
                     PluginRun::OpenUrl { url } => {
                         let _ = crate::platform::open_url(&url);
                     }
+                    PluginRun::Update { .. } => {}
                 }
             });
             return;
@@ -884,6 +926,37 @@ mod tests {
 #[cfg(test)]
 mod plugin_palette_tests {
     use super::*;
+
+    #[test]
+    fn only_updates_this_orcha_can_run_get_an_update_row() {
+        let update = |id: &str, compatible: bool| crate::orcha_plugin_updates::PluginUpdate {
+            id: id.into(),
+            current_version: "0.1.0".into(),
+            latest_version: "0.2.0".into(),
+            compatible,
+            needs_herdr_version: None,
+            source: format!("me/{id}"),
+            reference: Some("plugin".into()),
+            installed_commit: Some("a".into()),
+            latest_commit: Some("b".into()),
+        };
+        let mut current = update("current", true);
+        current.latest_commit = current.installed_commit.clone();
+        let names = std::collections::HashMap::from([("easy-job".into(), "Easy Job".into())]);
+        let rows = plugin_update_rows(
+            &[update("easy-job", true), update("blocked", false), current],
+            &names,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].title, "Update Easy Job to 0.2.0");
+        assert_eq!(
+            rows[0].run,
+            PluginRun::Update {
+                plugin_id: "easy-job".into(),
+                name: "Easy Job".into()
+            }
+        );
+    }
 
     #[test]
     fn plugin_actions_follow_the_built_in_commands_and_match_queries() {

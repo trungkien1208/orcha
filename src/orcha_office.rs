@@ -99,11 +99,17 @@ fn update() -> i32 {
     if !installed() {
         return not_added();
     }
-    if !status_of(orcha(&["plugin", "update", PLUGIN_ID, "--yes"]).stdin(Stdio::null())) {
-        eprintln!("Easy Job was not updated.");
-        return 1;
+    match crate::orcha_plugin_updates::update_plugin(PLUGIN_ID) {
+        Ok(version) => {
+            crate::orcha_plugin_updates::restart_running_panes(PLUGIN_ID);
+            println!("Easy Job is at {version}.");
+            0
+        }
+        Err(log) => {
+            eprintln!("{log}\nEasy Job was not updated.");
+            1
+        }
     }
-    0
 }
 
 fn ask(question: &str) -> bool {
@@ -153,18 +159,9 @@ fn stop_panes() {
     else {
         return;
     };
-    let panes = listed["plugin_panes"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    for pane in panes
-        .iter()
-        .filter(|pane| pane["plugin_id"].as_str() == Some(PLUGIN_ID))
-    {
-        if let Some(pane_id) = pane["pane_id"].as_str() {
-            let params = serde_json::json!({ "pane_id": pane_id }).to_string();
-            let _ = crate::orcha_handoff::herdr_json(&["api", "call", "plugin.pane.stop", &params]);
-        }
+    for pane_id in crate::orcha_plugin_updates::plugin_pane_ids(&listed, PLUGIN_ID) {
+        let params = serde_json::json!({ "pane_id": pane_id }).to_string();
+        let _ = crate::orcha_handoff::herdr_json(&["api", "call", "plugin.pane.stop", &params]);
     }
 }
 

@@ -898,6 +898,7 @@ fn print_plugin_list_human(response: &serde_json::Value) -> std::io::Result<i32>
         plugins.len(),
         if plugins.len() == 1 { "" } else { "s" }
     );
+    let updates = crate::orcha_plugin_updates::cached();
     for plugin in plugins {
         let enabled = if plugin.enabled {
             "enabled"
@@ -921,6 +922,19 @@ fn print_plugin_list_human(response: &serde_json::Value) -> std::io::Result<i32>
             "  config: {}",
             crate::plugin_paths::plugin_config_dir(&plugin.plugin_id).display()
         );
+        if let Some(update) = updates
+            .iter()
+            .find(|update| update.id == plugin.plugin_id && update.available())
+        {
+            if update.installable() {
+                println!(
+                    "  update: {} is out; run `orcha plugin update {}`",
+                    update.latest_version, plugin.plugin_id
+                );
+            } else {
+                println!("  update: {}", update.notice(&plugin.name));
+            }
+        }
         for warning in plugin.warnings {
             println!("  warning: {warning}");
         }
