@@ -947,9 +947,36 @@ Errors look like this:
 
 ## Sync API
 
-Protocol 23 adds methods for clients that mirror Herdr's state, such as a
+Protocol 24 adds methods for clients that mirror Herdr's state, such as a
 local web dashboard. Every addition is optional: older servers reject the new
 methods with `invalid_request`, and older clients never see the new shapes.
+
+### Clients
+
+The recommended way to keep a live copy of the session:
+
+1. **Capabilities.** Call `server.capabilities` on a fresh connection. Use the
+   sync path only when it lists `server.multiplex`, `session.changed` and the
+   features you need; otherwise fall back to one request per connection.
+2. **Multiplex.** Open one connection, send `server.multiplex`, and send every
+   later request on it with a unique `id`.
+3. **Subscribe.** In one `events.subscribe` request, subscribe to
+   `session.changed`, `pane.agent_status_changed` (no `pane_id`: every pane),
+   `pane.agent_model_changed` and, if you show accounts, `accounts.changed`.
+   One request keeps them on one ordered timeline.
+4. **Snapshot.** Call `session.snapshot` and keep its `session_version` and
+   `session_epoch`.
+5. **Deltas.** Apply `session.changed` events whose `version` is greater than
+   the one you hold, in order. For status, trust a `pane.agent_status_changed`
+   over a `session.changed` record of the same pane whose `version` is not
+   greater than the event's `session_version`.
+6. **Recover.** On a gap in `version`, a different `epoch`, `events_lost`, or
+   a reconnect, call `session.snapshot { since, epoch }`: a `session_delta`
+   patches your copy, a `session_snapshot` replaces it. Then go on from step 5.
+
+Nothing else needs polling: model settings, stage, accounts and fuel all arrive
+as events. Read transcripts with `agent.transcript.subscribe` instead of
+tailing files, and history with `source: "scrollback"` instead of `recent`.
 
 ### server.capabilities
 
@@ -965,8 +992,8 @@ works even while the UI is busy.
   "id": "c1",
   "result": {
     "type": "server_capabilities",
-    "version": "0.9.13",
-    "protocol": 23,
+    "version": "0.10.0",
+    "protocol": 24,
     "methods": ["agent.focus", "agent.get", "...", "workspace.rename"],
     "events": ["layout.updated", "pane.agent_status_changed", "..."],
     "features": []
