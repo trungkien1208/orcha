@@ -499,3 +499,26 @@ pub struct PluginRunActionParams {
     pub plugin_id: String,
     pub action_id: String,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PluginAutostartSetParams {
+    pub plugin_id: String,
+    /// The manifest pane id, such as `server`.
+    pub entrypoint: String,
+    /// Start it with the server (and now); false stops starting it.
+    pub enabled: bool,
+    /// Tokens put on the pane and its workspace, such as `{"easy_job":"bridge"}`.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub tokens: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PluginAutostartEntry {
+    pub plugin_id: String,
+    pub entrypoint: String,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub tokens: HashMap<String, String>,
+    /// The running pane, when there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_id: Option<String>,
+}

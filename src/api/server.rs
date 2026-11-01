@@ -120,6 +120,7 @@ fn start_server_inner(
 
     let running = Arc::new(AtomicBool::new(true));
     crate::api::model_observer::spawn(api_tx.clone(), Arc::clone(&running));
+    crate::api::plugin_autostart::spawn_supervisor(api_tx.clone(), Arc::clone(&running));
     crate::api::accounts::spawn_watcher(api_tx.clone(), event_hub.clone(), Arc::clone(&running));
     let listener_running = Arc::clone(&running);
     let spawned = crate::thread_spawn::spawn_named("herdr-api-accept", move || {
@@ -606,6 +607,25 @@ fn serve_request(
                 .unwrap_or_default(),
                 Err((code, message)) => error_response_json(request_id.clone(), code, message),
             };
+            finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
+        }
+        Method::PluginAutostartSet(params) => {
+            let response = match crate::api::plugin_autostart::set(params, api_tx) {
+                Ok(result) => serde_json::to_string(&SuccessResponse {
+                    id: request_id.clone(),
+                    result,
+                })
+                .unwrap_or_default(),
+                Err((code, message)) => error_response_json(request_id.clone(), code, message),
+            };
+            finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
+        }
+        Method::PluginAutostartList(_) => {
+            let response = serde_json::to_string(&SuccessResponse {
+                id: request_id.clone(),
+                result: crate::api::plugin_autostart::list(api_tx),
+            })
+            .unwrap_or_default();
             finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
         }
         Method::AgentHandoff(params) => {

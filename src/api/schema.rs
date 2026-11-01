@@ -167,6 +167,8 @@ operations::define_operations! {
     AgentAnswer(AgentAnswerParams) => "agent.answer", false, false;
     PaneReportAgentStage(PaneReportAgentStageParams) => "pane.report_agent_stage", false, false;
     PluginRunAction(PluginRunActionParams) => "plugin.run_action", true, false;
+    PluginAutostartSet(PluginAutostartSetParams) => "plugin.autostart.set", false, false;
+    PluginAutostartList(EmptyParams) => "plugin.autostart.list", false, false;
 }
 
 #[cfg(test)]

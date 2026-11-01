@@ -4141,6 +4141,34 @@
           },
           "type": "object"
         },
+        "PluginAutostartSetParams": {
+          "properties": {
+            "enabled": {
+              "description": "Start it with the server (and now); false stops starting it.",
+              "type": "boolean"
+            },
+            "entrypoint": {
+              "description": "The manifest pane id, such as `server`.",
+              "type": "string"
+            },
+            "plugin_id": {
+              "type": "string"
+            },
+            "tokens": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Tokens put on the pane and its workspace, such as `{\"easy_job\":\"bridge\"}`.",
+              "type": "object"
+            }
+          },
+          "required": [
+            "plugin_id",
+            "entrypoint",
+            "enabled"
+          ],
+          "type": "object"
+        },
         "PluginInvocationContext": {
           "properties": {
             "clicked_url": {
@@ -7417,6 +7445,38 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "plugin.autostart.set",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PluginAutostartSetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "plugin.autostart.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -10285,6 +10345,34 @@
           ],
           "type": "object"
         },
+        "PluginAutostartEntry": {
+          "properties": {
+            "entrypoint": {
+              "type": "string"
+            },
+            "pane_id": {
+              "description": "The running pane, when there is one.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "plugin_id": {
+              "type": "string"
+            },
+            "tokens": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "plugin_id",
+            "entrypoint"
+          ],
+          "type": "object"
+        },
         "PluginCommandLogInfo": {
           "properties": {
             "action_id": {
@@ -12298,6 +12386,25 @@
               "required": [
                 "type",
                 "logs"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "entries": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/PluginAutostartEntry"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "plugin_autostart",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "entries"
               ],
               "type": "object"
             },

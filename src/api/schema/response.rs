@@ -339,6 +339,9 @@ pub enum ResponseResult {
     PluginLogList {
         logs: Vec<PluginCommandLogInfo>,
     },
+    PluginAutostart {
+        entries: Vec<super::plugins::PluginAutostartEntry>,
+    },
     PluginPaneOpened {
         plugin_pane: PluginPaneInfo,
     },

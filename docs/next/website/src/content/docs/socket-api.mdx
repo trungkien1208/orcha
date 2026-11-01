@@ -110,7 +110,7 @@ Raw socket method names use dot notation:
 | Agent | `agent.models`, `agent.configure`, `agent.handoff`, `agent.mark_seen`, `agent.question`, `agent.answer`, `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
 | Events | `events.subscribe`, `events.wait` |
 | Integrations | `integration.install`, `integration.uninstall` |
-| Plugins | `plugin.link`, `plugin.list`, `plugin.unlink`, `plugin.enable`, `plugin.disable`, `plugin.action.list`, `plugin.action.invoke`, `plugin.run_action`, `plugin.log.list`, `plugin.pane.open`, `plugin.pane.focus`, `plugin.pane.close` |
+| Plugins | `plugin.link`, `plugin.list`, `plugin.unlink`, `plugin.enable`, `plugin.disable`, `plugin.action.list`, `plugin.action.invoke`, `plugin.run_action`, `plugin.autostart.set`, `plugin.autostart.list`, `plugin.log.list`, `plugin.pane.open`, `plugin.pane.focus`, `plugin.pane.close` |
 
 `agent.wait` is server-owned and event-driven. It pins the resolved pane occupant so a replacement cannot satisfy the wait. `agent.prompt` accepts an optional `wait` object with `until` and `timeout_ms`; this submits the prompt and starts the wait in one request, avoiding a race between separate calls. If the resolved agent is already `blocked`, `agent.prompt` returns `agent_blocked` without sending input or starting the wait. Without `wait`, `agent.prompt` waits up to 15 s for a starting agent to accept input
 (`agent_not_ready` otherwise) and succeeds only when the agent reacts. If the text
@@ -1411,6 +1411,25 @@ list actions with `plugin.list` or `plugin.action.list`:
 ```
 
 Linked plugins' actions also appear at the end of Orcha's COMMANDS palette.
+
+### Plugin panes that start with Orcha
+
+A plugin pane can start with the server once the user opts in:
+
+```json
+{"id":"p2","method":"plugin.autostart.set","params":{"plugin_id":"easy-job","entrypoint":"server","enabled":true,"tokens":{"easy_job":"bridge"}}}
+{"id":"p2","result":{"type":"plugin_autostart","entries":[{"plugin_id":"easy-job","entrypoint":"server","tokens":{"easy_job":"bridge"},"pane_id":"w7:p2"}]}}
+```
+
+The pane opens as a tab of a background workspace named after the plugin, never
+taking focus, and starts again if it exits (at most three times a minute). Its
+pane gets `plugin_autostart=<plugin>/<pane>` plus the given `tokens`, and its
+workspace `plugin_autostart_host=<plugin>` plus the same tokens, so clients can
+hide them. Like every pane it has `HERDR_SOCKET_PATH`, `HERDR_PANE_ID` and
+`HERDR_WORKSPACE_ID` in its environment. `enabled: false` stops starting it
+(a running pane is left alone; close it with `plugin.pane.close`).
+`plugin.autostart.list` returns the entries with their running `pane_id`.
+To start a pane once on demand, use `plugin.pane.open` with `"focus": false`.
 
 ## Protocol stability
 
