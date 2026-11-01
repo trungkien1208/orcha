@@ -96,6 +96,9 @@ pub enum Subscription {
     PaneAgentModelChanged {},
     #[serde(rename = "accounts.changed")]
     AccountsChanged {},
+    /// GitHub plugins have a newer version (or an update was installed).
+    #[serde(rename = "plugin.updates_changed")]
+    PluginUpdatesChanged {},
     /// New records of the agent's transcript (Claude, Codex) as they are written.
     #[serde(rename = "agent.transcript")]
     AgentTranscript {
@@ -243,6 +246,7 @@ pub enum EventKind {
     SessionChanged,
     PaneAgentModelChanged,
     AccountsChanged,
+    PluginUpdatesChanged,
 }
 
 impl EventKind {
@@ -277,6 +281,7 @@ impl EventKind {
             EventKind::SessionChanged => "session.changed",
             EventKind::PaneAgentModelChanged => "pane.agent_model_changed",
             EventKind::AccountsChanged => "accounts.changed",
+            EventKind::PluginUpdatesChanged => "plugin.updates_changed",
         }
     }
 }
@@ -311,6 +316,7 @@ pub const KNOWN_EVENT_KINDS: &[EventKind] = &[
     EventKind::SessionChanged,
     EventKind::PaneAgentModelChanged,
     EventKind::AccountsChanged,
+    EventKind::PluginUpdatesChanged,
 ];
 
 pub const PLUGIN_HOOK_EVENT_KINDS: &[EventKind] = &[
@@ -642,5 +648,8 @@ pub enum EventData {
         /// `added`, `removed`, `renamed`, `switched`, `login_started` or `updated`.
         reason: String,
         accounts: Vec<super::accounts::AccountInfo>,
+    },
+    PluginUpdatesChanged {
+        plugins: Vec<super::plugins::PluginUpdateInfo>,
     },
 }

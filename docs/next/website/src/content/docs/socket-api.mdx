@@ -110,7 +110,7 @@ Raw socket method names use dot notation:
 | Agent | `agent.models`, `agent.configure`, `agent.handoff`, `agent.mark_seen`, `agent.question`, `agent.answer`, `agent.transcript.subscribe`, `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
 | Events | `events.subscribe`, `events.wait` |
 | Integrations | `integration.install`, `integration.uninstall` |
-| Plugins | `plugin.link`, `plugin.list`, `plugin.unlink`, `plugin.enable`, `plugin.disable`, `plugin.action.list`, `plugin.action.invoke`, `plugin.run_action`, `plugin.autostart.set`, `plugin.autostart.list`, `plugin.pane.list`, `plugin.pane.stop`, `plugin.pane.restart`, `plugin.log.list`, `plugin.pane.open`, `plugin.pane.focus`, `plugin.pane.close` |
+| Plugins | `plugin.link`, `plugin.list`, `plugin.unlink`, `plugin.enable`, `plugin.disable`, `plugin.action.list`, `plugin.action.invoke`, `plugin.run_action`, `plugin.autostart.set`, `plugin.autostart.list`, `plugin.pane.list`, `plugin.pane.stop`, `plugin.pane.restart`, `plugin.updates`, `plugin.update`, `plugin.log.list`, `plugin.pane.open`, `plugin.pane.focus`, `plugin.pane.close` |
 
 `agent.wait` is server-owned and event-driven. It pins the resolved pane occupant so a replacement cannot satisfy the wait. `agent.prompt` accepts an optional `wait` object with `until` and `timeout_ms`; this submits the prompt and starts the wait in one request, avoiding a race between separate calls. If the resolved agent is already `blocked`, `agent.prompt` returns `agent_blocked` without sending input or starting the wait. Without `wait`, `agent.prompt` waits up to 15 s for a starting agent to accept input
 (`agent_not_ready` otherwise) and succeeds only when the agent reacts. If the text
@@ -1016,6 +1016,7 @@ methods that a method name alone cannot show.
 | `agent.model_state` | Agent records carry `model`, `effort`, `fast`. |
 | `agent.model_state.observed` | `effort` and `fast` are observed, not always `null`. |
 | `pane.agent_model_changed.all_sources` | The model event fires for every change, whatever its source. |
+| `plugin.updates` | `plugin.updates`, `plugin.update` and the `plugin.updates_changed` event. |
 | `agent.stage` | Agent records and status events carry `stage` and `tool`. |
 | `agent.seen_seq` | Agent records carry `seen_seq`. |
 | `agent.prompt.confirmed` | `agent.prompt` waits for readiness and fails if the prompt is not taken. |
@@ -1488,6 +1489,46 @@ stops starting it (otherwise it would come back within seconds).
 focus. Orcha's COMMANDS lists Open, Restart and Stop for every running plugin
 pane.
 To start a pane once on demand, use `plugin.pane.open` with `"focus": false`.
+
+### Plugin updates
+
+Plugins installed from GitHub (`orcha plugin install owner/repo --ref …`) can
+learn about their own new versions without going online: Orcha checks each
+plugin's source with `git ls-remote` once a day, with its own release check,
+and keeps the answer.
+
+```json
+{"id":"u1","method":"plugin.updates","params":{}}
+{"id":"u1","result":{"type":"plugin_updates","plugins":[{"id":"easy-job","current_version":"0.1.0","latest_version":"0.2.0","update_available":true,"compatible":true,"source":"trungkien1208/orcha-plugin-office","ref":"plugin"}]}}
+```
+
+The answer comes from the last check, so the call never waits on the network;
+`"refresh": true` checks the sources now. Without news, `latest_version` is the
+current one and `update_available` is false. No network keeps the last answer.
+When the new version's `min_herdr_version` is newer than this Orcha,
+`compatible` is false and `needs_herdr_version` names it: tell the user to run
+`orcha update` instead of offering the update.
+
+`plugin.update` installs the newer version and restarts the plugin's running
+panes so they run the new files (a page served by one reconnects). Call it only
+on the user's click: that click is the consent.
+
+```json
+{"id":"u2","method":"plugin.update","params":{"id":"easy-job"}}
+{"id":"u2","result":{"type":"plugin_updated","id":"easy-job","version":"0.2.0"}}
+```
+
+Errors: `plugin_not_found` (not installed from GitHub),
+`plugin_requires_newer_herdr`, and `plugin_update_failed` whose message is the
+end of the update's build log. The CLI equivalents are
+`orcha api call plugin.updates` and `orcha plugin update <id> --yes`.
+
+Subscribe to `plugin.updates_changed` to hear about a new version when the
+daily check finds one, and after an update:
+
+```json
+{"event":"plugin_updates_changed","data":{"type":"plugin_updates_changed","plugins":[…]}}
+```
 
 ### Transcript stream
 

@@ -124,6 +124,7 @@ fn start_server_inner(
     crate::api::model_observer::spawn(api_tx.clone(), Arc::clone(&running));
     crate::api::plugin_autostart::spawn_supervisor(api_tx.clone(), Arc::clone(&running));
     crate::api::accounts::spawn_watcher(api_tx.clone(), event_hub.clone(), Arc::clone(&running));
+    crate::api::plugin_updates::spawn_checker(event_hub.clone(), Arc::clone(&running));
     let listener_running = Arc::clone(&running);
     let spawned = crate::thread_spawn::spawn_named("herdr-api-accept", move || {
         run_accept_loop(
@@ -632,6 +633,14 @@ fn serve_request(
             let result = crate::api::handoff::handle(params);
             reply(connection, &request_id, method, changes_ui, result)
         }
+        Method::PluginUpdates(params) => {
+            let result = Ok(crate::api::plugin_updates::list(params, event_hub));
+            reply(connection, &request_id, method, changes_ui, result)
+        }
+        Method::PluginUpdate(params) => {
+            let result = crate::api::plugin_updates::update(&params.id, api_tx, event_hub);
+            reply(connection, &request_id, method, changes_ui, result)
+        }
         Method::AgentStart(params) if crate::api::start::wants_server_start(&params) => {
             let response =
                 crate::api::start::start(&request_id, params, connection, api_tx, running);
@@ -1040,6 +1049,8 @@ const API_FEATURES: &[&str] = &[
     "agent.seen_seq",
     // `pane.agent_model_changed` fires for every change of the record's model state.
     "pane.agent_model_changed.all_sources",
+    // `plugin.updates` / `plugin.update` and the `plugin.updates_changed` event.
+    "plugin.updates",
 ];
 
 fn server_capabilities_response(id: String) -> String {

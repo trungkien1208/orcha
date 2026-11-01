@@ -935,6 +935,25 @@
                 "accounts"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "plugins": {
+                  "items": {
+                    "$ref": "#/schemas/event/$defs/PluginUpdateInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "plugin_updates_changed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "plugins"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -968,7 +987,8 @@
             "layout_updated",
             "session_changed",
             "pane_agent_model_changed",
-            "accounts_changed"
+            "accounts_changed",
+            "plugin_updates_changed"
           ],
           "type": "string"
         },
@@ -1273,6 +1293,55 @@
             "offset_from_bottom",
             "max_offset_from_bottom",
             "viewport_rows"
+          ],
+          "type": "object"
+        },
+        "PluginUpdateInfo": {
+          "description": "A plugin installed from GitHub and the newest version its source has.",
+          "properties": {
+            "compatible": {
+              "description": "False when the newer version needs a newer Orcha.",
+              "type": "boolean"
+            },
+            "current_version": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "latest_version": {
+              "description": "The current version when nothing newer was found.",
+              "type": "string"
+            },
+            "needs_herdr_version": {
+              "description": "The newer version's `min_herdr_version`, when this Orcha is older.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ref": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "description": "`owner/repo[/subdir]`",
+              "type": "string"
+            },
+            "update_available": {
+              "default": false,
+              "description": "The source has a newer commit than the installed one.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "current_version",
+            "latest_version",
+            "compatible",
+            "source"
           ],
           "type": "object"
         },
@@ -4563,6 +4632,27 @@
           ],
           "type": "object"
         },
+        "PluginUpdateParams": {
+          "properties": {
+            "id": {
+              "description": "The plugin id, such as `easy-job`.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "PluginUpdatesParams": {
+          "properties": {
+            "refresh": {
+              "description": "Ask the plugins' GitHub sources now instead of answering from the\nlast daily check.",
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
         "PopupSize": {
           "oneOf": [
             {
@@ -5097,6 +5187,19 @@
               "properties": {
                 "type": {
                   "const": "accounts.changed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "GitHub plugins have a newer version (or an update was installed).",
+              "properties": {
+                "type": {
+                  "const": "plugin.updates_changed",
                   "type": "string"
                 }
               },
@@ -7591,6 +7694,38 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "plugin.updates",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PluginUpdatesParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "plugin.update",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PluginUpdateParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -9248,6 +9383,25 @@
                 "accounts"
               ],
               "type": "object"
+            },
+            {
+              "properties": {
+                "plugins": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/PluginUpdateInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "plugin_updates_changed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "plugins"
+              ],
+              "type": "object"
             }
           ]
         },
@@ -9296,7 +9450,8 @@
             "layout_updated",
             "session_changed",
             "pane_agent_model_changed",
-            "accounts_changed"
+            "accounts_changed",
+            "plugin_updates_changed"
           ],
           "type": "string"
         },
@@ -11046,6 +11201,55 @@
           ],
           "type": "string"
         },
+        "PluginUpdateInfo": {
+          "description": "A plugin installed from GitHub and the newest version its source has.",
+          "properties": {
+            "compatible": {
+              "description": "False when the newer version needs a newer Orcha.",
+              "type": "boolean"
+            },
+            "current_version": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "latest_version": {
+              "description": "The current version when nothing newer was found.",
+              "type": "string"
+            },
+            "needs_herdr_version": {
+              "description": "The newer version's `min_herdr_version`, when this Orcha is older.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ref": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "description": "`owner/repo[/subdir]`",
+              "type": "string"
+            },
+            "update_available": {
+              "default": false,
+              "description": "The source has a newer commit than the installed one.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "current_version",
+            "latest_version",
+            "compatible",
+            "source"
+          ],
+          "type": "object"
+        },
         "PopupSize": {
           "oneOf": [
             {
@@ -12603,6 +12807,45 @@
               "required": [
                 "type",
                 "entries"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "plugins": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/PluginUpdateInfo"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "plugin_updates",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "plugins"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "plugin_updated",
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "id",
+                "version"
               ],
               "type": "object"
             },

@@ -345,6 +345,13 @@ pub enum ResponseResult {
     PluginAutostart {
         entries: Vec<super::plugins::PluginAutostartEntry>,
     },
+    PluginUpdates {
+        plugins: Vec<super::plugins::PluginUpdateInfo>,
+    },
+    PluginUpdated {
+        id: String,
+        version: String,
+    },
     PluginPaneOpened {
         plugin_pane: PluginPaneInfo,
     },

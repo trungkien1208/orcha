@@ -173,6 +173,8 @@ operations::define_operations! {
     PluginPaneList(EmptyParams) => "plugin.pane.list", false, false;
     PluginPaneStop(PluginPaneCloseParams) => "plugin.pane.stop", true, false;
     PluginPaneRestart(PluginPaneCloseParams) => "plugin.pane.restart", true, false;
+    PluginUpdates(PluginUpdatesParams) => "plugin.updates", false, false;
+    PluginUpdate(PluginUpdateParams) => "plugin.update", true, false;
 }
 
 #[cfg(test)]

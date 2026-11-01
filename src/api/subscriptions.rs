@@ -246,6 +246,11 @@ impl ActiveSubscription {
                 last_sequence: event_start_sequence,
                 _session_watch: Some(event_hub.watch_accounts()),
             })),
+            Subscription::PluginUpdatesChanged {} => Ok(Self::Event(ActiveEventSubscription {
+                event_kind: EventKind::PluginUpdatesChanged,
+                last_sequence: event_start_sequence,
+                _session_watch: None,
+            })),
             Subscription::SessionChanged {} => Ok(Self::Event(ActiveEventSubscription {
                 event_kind: EventKind::SessionChanged,
                 last_sequence: event_start_sequence,

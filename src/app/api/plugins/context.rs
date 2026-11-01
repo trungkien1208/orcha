@@ -129,9 +129,9 @@ impl App {
                     context
                 }),
             // Not a plugin hook event; session.changed never reaches hooks.
-            EventData::SessionChanged { .. } | EventData::AccountsChanged { .. } => {
-                empty_plugin_context(correlation_id)
-            }
+            EventData::SessionChanged { .. }
+            | EventData::AccountsChanged { .. }
+            | EventData::PluginUpdatesChanged { .. } => empty_plugin_context(correlation_id),
             EventData::LayoutUpdated { layout } => self
                 .plugin_context_for_tab_id(&layout.tab_id, correlation_id)
                 .or_else(|| {

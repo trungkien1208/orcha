@@ -6,6 +6,7 @@ mod event_hub;
 mod handoff;
 mod model_observer;
 pub(crate) mod plugin_autostart;
+mod plugin_updates;
 mod question;
 pub mod schema;
 mod server;

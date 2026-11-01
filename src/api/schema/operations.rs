@@ -206,6 +206,7 @@ mod tests {
             "plugin.run_action",
             "plugin.pane.stop",
             "plugin.pane.restart",
+            "plugin.update",
             "plugin.pane.open",
             "plugin.pane.focus",
             "plugin.pane.close",

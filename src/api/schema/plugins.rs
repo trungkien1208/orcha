@@ -523,6 +523,41 @@ pub struct PluginAutostartEntry {
     pub pane_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PluginUpdatesParams {
+    /// Ask the plugins' GitHub sources now instead of answering from the
+    /// last daily check.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub refresh: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PluginUpdateParams {
+    /// The plugin id, such as `easy-job`.
+    pub id: String,
+}
+
+/// A plugin installed from GitHub and the newest version its source has.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PluginUpdateInfo {
+    pub id: String,
+    pub current_version: String,
+    /// The current version when nothing newer was found.
+    pub latest_version: String,
+    /// The source has a newer commit than the installed one.
+    #[serde(default)]
+    pub update_available: bool,
+    /// False when the newer version needs a newer Orcha.
+    pub compatible: bool,
+    /// The newer version's `min_herdr_version`, when this Orcha is older.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs_herdr_version: Option<String>,
+    /// `owner/repo[/subdir]`
+    pub source: String,
+    #[serde(default, rename = "ref", skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+}
+
 /// A plugin pane that is running now.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PluginPaneListEntry {
