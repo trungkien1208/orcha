@@ -584,6 +584,30 @@ fn serve_request(
             .unwrap_or_default();
             finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
         }
+        Method::AgentQuestionGet(params) => {
+            let result = crate::api::question::question(&request_id, &params.pane_id, api_tx);
+            let response = match result {
+                Ok(result) => serde_json::to_string(&SuccessResponse {
+                    id: request_id.clone(),
+                    result,
+                })
+                .unwrap_or_default(),
+                Err((code, message)) => error_response_json(request_id.clone(), code, message),
+            };
+            finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
+        }
+        Method::AgentAnswer(params) => {
+            let result = crate::api::question::answer(&request_id, params, api_tx);
+            let response = match result {
+                Ok(result) => serde_json::to_string(&SuccessResponse {
+                    id: request_id.clone(),
+                    result,
+                })
+                .unwrap_or_default(),
+                Err((code, message)) => error_response_json(request_id.clone(), code, message),
+            };
+            finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
+        }
         Method::AgentHandoff(params) => {
             let result = crate::api::handoff::handle(params, api_tx);
             let response = match result {

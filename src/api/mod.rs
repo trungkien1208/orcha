@@ -4,6 +4,7 @@ mod configure;
 mod event_hub;
 mod handoff;
 mod model_observer;
+mod question;
 pub mod schema;
 mod server;
 mod start;

@@ -107,7 +107,7 @@ Raw socket method names use dot notation:
 | Popup | `popup.close` |
 | Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio` |
 | Accounts | `accounts.list`, `accounts.plan`, `accounts.switch`, `accounts.login`, `accounts.add`, `accounts.remove`, `accounts.rename`, `accounts.set_default`, `accounts.env` |
-| Agent | `agent.models`, `agent.configure`, `agent.handoff`, `agent.mark_seen`, `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
+| Agent | `agent.models`, `agent.configure`, `agent.handoff`, `agent.mark_seen`, `agent.question`, `agent.answer`, `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
 | Events | `events.subscribe`, `events.wait` |
 | Integrations | `integration.install`, `integration.uninstall` |
 | Plugins | `plugin.link`, `plugin.list`, `plugin.unlink`, `plugin.enable`, `plugin.disable`, `plugin.action.list`, `plugin.action.invoke`, `plugin.log.list`, `plugin.pane.open`, `plugin.pane.focus`, `plugin.pane.close` |
@@ -1329,6 +1329,43 @@ only exists inside the agent is not part of `scrollback`; read its transcript
 ```
 
 CLI: `herdr agent read w1:p2 --source scrollback`.
+
+### agent.question and agent.answer
+
+A `blocked` agent's question as data, read from the bottom of its screen the way
+the terminal shows it: numbered lists (`❯ 1. Yes`), keyed lists
+(`[a] Trust this workspace`), plain lists with a cursor (`❯ No, exit`) and
+checkbox lists. Only the last block of options counts, never older text above.
+
+```json
+{"id":"q1","method":"agent.question","params":{"pane_id":"w1:p2"}}
+{"id":"q1","result":{"type":"agent_question","question":{
+  "text":"Do you trust the contents of this directory?",
+  "options":[{"label":"Trust this workspace","key":"a","selected":true},{"label":"Quit","key":"q"}],
+  "multi_select":false,"free_text":false,"source":"screen"}}}
+```
+
+`question` is `null` when the agent is not blocked or shows no options. Options
+carry `label`, `key` (the number or letter shown), `description`, `selected`
+(the cursor is on it), and `checkbox`/`checked` in multi-select lists.
+`free_text` is true when an option takes typed text ("Type something", "No, and
+tell Claude what to do").
+
+`agent.answer` answers as a person would: a letter key picks its option
+directly; lists are walked with the arrow keys and confirmed with Enter;
+`options` checks several boxes with Space; `text` picks the free-text option
+first, types the text and presses Enter.
+
+```json
+{"id":"q2","method":"agent.answer","params":{"pane_id":"w1:p2","option":"a"}}
+{"id":"q2","method":"agent.answer","params":{"pane_id":"w1:p2","options":["Docs","Frontend"]}}
+{"id":"q2","method":"agent.answer","params":{"pane_id":"w1:p2","text":"Use the staging database"}}
+```
+
+Errors: `no_question`, `unknown_option`, `not_multi_select`,
+`free_text_not_allowed`. The answer is checked against the screen at the time
+of the call, so a question that changed in between fails instead of picking the
+wrong option.
 
 ## Protocol stability
 

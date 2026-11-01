@@ -374,3 +374,54 @@ pub struct AgentMarkSeenParams {
     /// The `completion_seq` the user saw. A newer completion stays unseen.
     pub completion_seq: u64,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentQuestionParams {
+    pub pane_id: String,
+}
+
+/// The question a blocked agent shows, as on its screen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentQuestion {
+    pub text: String,
+    pub options: Vec<AgentQuestionOption>,
+    /// Several options can be checked before confirming.
+    #[serde(default)]
+    pub multi_select: bool,
+    /// An option takes typed text (such as "Type something").
+    #[serde(default)]
+    pub free_text: bool,
+    /// Where it was read from; `screen` for now.
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentQuestionOption {
+    pub label: String,
+    /// The number or letter shown with it, such as `1` or `a`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The cursor is on this option.
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub selected: bool,
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub checkbox: bool,
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub checked: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentAnswerParams {
+    pub pane_id: String,
+    /// One option, by its key or label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub option: Option<String>,
+    /// Several options of a multi-select question, by key or label.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
+    /// Free text, when the question takes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}

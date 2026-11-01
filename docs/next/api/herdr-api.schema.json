@@ -1631,6 +1631,38 @@
           ],
           "type": "object"
         },
+        "AgentAnswerParams": {
+          "properties": {
+            "option": {
+              "description": "One option, by its key or label.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "options": {
+              "description": "Several options of a multi-select question, by key or label.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "text": {
+              "description": "Free text, when the question takes it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "pane_id"
+          ],
+          "type": "object"
+        },
         "AgentConfigureParams": {
           "properties": {
             "effort": {
@@ -1772,6 +1804,17 @@
               "type": "array"
             }
           },
+          "type": "object"
+        },
+        "AgentQuestionParams": {
+          "properties": {
+            "pane_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id"
+          ],
           "type": "object"
         },
         "AgentReadParams": {
@@ -7233,6 +7276,38 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.question",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentQuestionParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.answer",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentAnswerParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -7899,6 +7974,74 @@
           },
           "required": [
             "id"
+          ],
+          "type": "object"
+        },
+        "AgentQuestion": {
+          "description": "The question a blocked agent shows, as on its screen.",
+          "properties": {
+            "free_text": {
+              "default": false,
+              "description": "An option takes typed text (such as \"Type something\").",
+              "type": "boolean"
+            },
+            "multi_select": {
+              "default": false,
+              "description": "Several options can be checked before confirming.",
+              "type": "boolean"
+            },
+            "options": {
+              "items": {
+                "$ref": "#/schemas/success_response/$defs/AgentQuestionOption"
+              },
+              "type": "array"
+            },
+            "source": {
+              "description": "Where it was read from; `screen` for now.",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "options",
+            "source"
+          ],
+          "type": "object"
+        },
+        "AgentQuestionOption": {
+          "properties": {
+            "checkbox": {
+              "type": "boolean"
+            },
+            "checked": {
+              "type": "boolean"
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "key": {
+              "description": "The number or letter shown with it, such as `1` or `a`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "type": "string"
+            },
+            "selected": {
+              "description": "The cursor is on this option.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "label"
           ],
           "type": "object"
         },
@@ -10583,6 +10726,46 @@
                 "session_version",
                 "session_epoch",
                 "changes"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "question": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/schemas/success_response/$defs/AgentQuestion"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "`null` when the agent is not blocked or shows no options."
+                },
+                "type": {
+                  "const": "agent_question",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "question": {
+                  "$ref": "#/schemas/success_response/$defs/AgentQuestion",
+                  "description": "The question that was answered."
+                },
+                "type": {
+                  "const": "agent_answered",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "question"
               ],
               "type": "object"
             },

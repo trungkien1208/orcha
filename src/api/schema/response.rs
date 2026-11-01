@@ -63,6 +63,14 @@ pub enum ResponseResult {
         session_epoch: String,
         changes: Vec<super::session::SessionChange>,
     },
+    AgentQuestion {
+        /// `null` when the agent is not blocked or shows no options.
+        question: Option<super::agents::AgentQuestion>,
+    },
+    AgentAnswered {
+        /// The question that was answered.
+        question: super::agents::AgentQuestion,
+    },
     AgentSeen {
         /// False when a newer completion arrived after `completion_seq`.
         marked: bool,

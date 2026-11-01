@@ -163,6 +163,8 @@ operations::define_operations! {
     AgentHandoff(AgentHandoffParams) => "agent.handoff", false, false;
     AccountsEnv(AccountTarget) => "accounts.env", false, false;
     AgentMarkSeen(AgentMarkSeenParams) => "agent.mark_seen", true, false;
+    AgentQuestionGet(AgentQuestionParams) => "agent.question", false, false;
+    AgentAnswer(AgentAnswerParams) => "agent.answer", false, false;
 }
 
 #[cfg(test)]
