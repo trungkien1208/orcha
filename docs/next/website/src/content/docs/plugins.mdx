@@ -375,6 +375,30 @@ Link clicks invoke plugins only while `ui.mouse_capture` is enabled. Matching ha
 There is no Herdr-managed plugin storage API in v1. Plugins that need durable
 state should own their files or database.
 
+## Starting with Orcha
+
+A plugin pane can run in the background from the moment Orcha starts, once the
+user opts in:
+
+```bash
+herdr api call plugin.autostart.set '{"plugin_id":"easy-job","entrypoint":"server","enabled":true,"tokens":{"easy_job":"bridge"}}'
+```
+
+The pane opens as a tab of a background project named after the plugin,
+never takes focus, and starts again if it exits (at most three times a
+minute). The pane and its project carry `plugin_autostart` /
+`plugin_autostart_host` plus the `tokens` you pass, so clients can hide them.
+Like every pane it gets `HERDR_SOCKET_PATH`, `HERDR_PANE_ID` and
+`HERDR_WORKSPACE_ID`. `"enabled": false` stops starting it, and unlinking the
+plugin removes its autostart entry.
+
+Orcha offers known plugins it finds on the machine (today: Easy Job, when the
+`easy-job` command is installed) once after install or update: add it, add it
+and start it with Orcha, not now (asks again after the next update), or never.
+Nothing is installed or started without that choice. Adding runs the plugin's
+own installer (`easy-job orcha-plugin install`); remove it with
+`orcha plugin unlink easy-job`.
+
 ## Marketplace
 
 Community plugins are discoverable in the [marketplace](/plugins/), an automatic

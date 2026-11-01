@@ -55,6 +55,16 @@ fn save(entries: &[PluginAutostartEntry]) -> Result<(), AutostartError> {
     })
 }
 
+/// Stops starting every pane of `plugin_id` (it was unlinked).
+pub(crate) fn forget(plugin_id: &str) {
+    let mut entries = load();
+    let before = entries.len();
+    entries.retain(|entry| entry.plugin_id != plugin_id);
+    if entries.len() != before {
+        let _ = save(&entries);
+    }
+}
+
 pub(super) fn set(
     params: PluginAutostartSetParams,
     api_tx: &ApiRequestSender,

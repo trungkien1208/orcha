@@ -709,6 +709,13 @@ impl ClientShellState {
             Some(super::orcha_popup::OrchaPopup::OpenWith { choices, .. }) => choices.len(),
             Some(super::orcha_popup::OrchaPopup::FoundAccounts { chosen, .. }) => chosen.len(),
             Some(super::orcha_popup::OrchaPopup::Update { .. }) => 3,
+            Some(super::orcha_popup::OrchaPopup::PluginOffer { plugin, .. }) => {
+                if plugin.autostart.is_some() {
+                    4
+                } else {
+                    3
+                }
+            }
             Some(super::orcha_popup::OrchaPopup::WhatsNew { .. }) => 1,
             Some(
                 super::orcha_popup::OrchaPopup::Welcome(_)
@@ -731,6 +738,7 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::OpenWith { selected, .. }
                 | super::orcha_popup::OrchaPopup::FoundAccounts { selected, .. }
                 | super::orcha_popup::OrchaPopup::Update { selected, .. }
+                | super::orcha_popup::OrchaPopup::PluginOffer { selected, .. }
                 | super::orcha_popup::OrchaPopup::Palette { selected, .. }
                 | super::orcha_popup::OrchaPopup::Import { selected, .. },
             ) => *selected = index,
@@ -757,6 +765,7 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::OpenWith { selected, .. }
                 | super::orcha_popup::OrchaPopup::FoundAccounts { selected, .. }
                 | super::orcha_popup::OrchaPopup::Update { selected, .. }
+                | super::orcha_popup::OrchaPopup::PluginOffer { selected, .. }
                 | super::orcha_popup::OrchaPopup::Palette { selected, .. }
                 | super::orcha_popup::OrchaPopup::Import { selected, .. },
             ) => *selected,
@@ -842,6 +851,31 @@ impl ClientShellState {
             }
             super::orcha_popup::OrchaPopup::Broadcast { .. } => {
                 self.send_broadcast();
+                return;
+            }
+            super::orcha_popup::OrchaPopup::PluginOffer { plugin, .. } => {
+                self.orcha_ui.popup = None;
+                let rows = super::orcha_popup::plugin_offer_rows(&plugin);
+                match rows.get(index).map(|row| row.0) {
+                    Some(super::orcha_popup::PluginOfferChoice::Add { autostart }) => {
+                        crate::orcha_app::answer_plugin_offer(plugin.id, false);
+                        self.show_notice(format!("adding {}…", plugin.name));
+                        let _ = crate::thread_spawn::spawn_named("orcha-plugin-add", move || {
+                            if let Err(message) =
+                                crate::orcha_app::add_offered_plugin(&plugin, autostart)
+                            {
+                                tracing::warn!(%message, "offered plugin was not added");
+                            }
+                        });
+                    }
+                    Some(super::orcha_popup::PluginOfferChoice::NotNow) => {
+                        crate::orcha_app::answer_plugin_offer(plugin.id, false);
+                    }
+                    Some(super::orcha_popup::PluginOfferChoice::Never) => {
+                        crate::orcha_app::answer_plugin_offer(plugin.id, true);
+                    }
+                    None => {}
+                }
                 return;
             }
             super::orcha_popup::OrchaPopup::Update { release, .. } => {
@@ -1969,6 +2003,14 @@ impl ClientShellState {
             if !crate::orcha_import::asked() {
                 self.start_import_scan();
             }
+            let (tx, rx) = std::sync::mpsc::channel();
+            if crate::thread_spawn::spawn_named("orcha-plugin-offer", move || {
+                let _ = tx.send(crate::orcha_app::plugin_to_offer());
+            })
+            .is_ok()
+            {
+                self.orcha_ui.plugin_offer_check = Some(rx);
+            }
         }
         self.start_update_check();
     }
@@ -1992,6 +2034,20 @@ impl ClientShellState {
         if let Some(Ok(news)) = ui.whats_new_check.as_ref().map(|rx| rx.try_recv()) {
             ui.whats_new_check = None;
             ui.whats_new = news;
+        }
+        if let Some(Ok(offer)) = ui.plugin_offer_check.as_ref().map(|rx| rx.try_recv()) {
+            ui.plugin_offer_check = None;
+            ui.plugin_offer = offer;
+        }
+        // after "what's new", once nothing else is on screen
+        if ui.popup.is_none() && ui.whats_new.is_none() && ui.whats_new_check.is_none() {
+            if let Some(plugin) = ui.plugin_offer.take() {
+                ui.popup = Some(super::orcha_popup::OrchaPopup::PluginOffer {
+                    selected: 0,
+                    plugin,
+                });
+                return true;
+            }
         }
         // shown once nothing else is on screen
         if ui.popup.is_none() {

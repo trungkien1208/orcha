@@ -4,7 +4,7 @@ mod configure;
 mod event_hub;
 mod handoff;
 mod model_observer;
-mod plugin_autostart;
+pub(crate) mod plugin_autostart;
 mod question;
 pub mod schema;
 mod server;

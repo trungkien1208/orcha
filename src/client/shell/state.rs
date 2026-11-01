@@ -158,6 +158,11 @@ pub(crate) struct OrchaUiState {
     /// The "what's new" of this build, looked up after an update.
     pub(super) whats_new_check:
         Option<std::sync::mpsc::Receiver<Option<crate::orcha_app::Release>>>,
+    /// Looking for a plugin to offer, off the input path.
+    pub(super) plugin_offer_check:
+        Option<std::sync::mpsc::Receiver<Option<crate::orcha_app::OfferedPlugin>>>,
+    /// A plugin offer waiting for the screen to be free of other popups.
+    pub(super) plugin_offer: Option<crate::orcha_app::OfferedPlugin>,
     /// A "what's new" waiting for the screen to be free of other popups.
     pub(super) whats_new: Option<crate::orcha_app::Release>,
     pub(super) update_available: Option<String>,

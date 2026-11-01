@@ -75,6 +75,11 @@ pub(crate) enum OrchaPopup {
         selected: usize,
         release: crate::orcha_app::Release,
     },
+    /// A plugin installed on this machine that Orcha can add (only on consent).
+    PluginOffer {
+        selected: usize,
+        plugin: crate::orcha_app::OfferedPlugin,
+    },
     /// What changed in this build, shown once after an update.
     WhatsNew { release: crate::orcha_app::Release },
     /// Claude sign-ins found on this machine (`OrchaUiState::found_accounts`),
@@ -1382,6 +1387,109 @@ fn render_notes(buffer: &mut Buffer, body: Rect, y: u16, notes: &[String], t: &B
 }
 
 /// UPDATE: what the new version brings, then update now, later or skip it.
+/// What a row of the plugin offer does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PluginOfferChoice {
+    Add { autostart: bool },
+    NotNow,
+    Never,
+}
+
+pub(super) fn plugin_offer_rows(
+    plugin: &crate::orcha_app::OfferedPlugin,
+) -> Vec<(PluginOfferChoice, String, String, &'static str)> {
+    let mut rows = vec![(
+        PluginOfferChoice::Add { autostart: false },
+        format!("Add {}", plugin.name),
+        "an action in COMMANDS; nothing runs until you use it".to_owned(),
+        "ADD",
+    )];
+    if plugin.autostart.is_some() {
+        rows.push((
+            PluginOfferChoice::Add { autostart: true },
+            format!("Add and start {} with Orcha", plugin.name),
+            "runs in a background project that never takes focus".to_owned(),
+            "ADD",
+        ));
+    }
+    rows.push((
+        PluginOfferChoice::NotNow,
+        "Not now".to_owned(),
+        "asks again after the next Orcha update".to_owned(),
+        "LATER",
+    ));
+    rows.push((
+        PluginOfferChoice::Never,
+        "Never".to_owned(),
+        "add it later with orcha plugin link".to_owned(),
+        "NEVER",
+    ));
+    rows
+}
+
+fn render_plugin_offer(
+    buffer: &mut Buffer,
+    selected: usize,
+    plugin: &crate::orcha_app::OfferedPlugin,
+    t: &Brutal,
+    hits: &mut PopupHits,
+) -> Option<()> {
+    let rows = plugin_offer_rows(plugin);
+    let frame = popup_frame(
+        buffer,
+        72,
+        rows_height(rows.len()),
+        "PLUGIN",
+        &format!("{} is on this Mac: add it to Orcha?", plugin.name),
+        &[("↵", "choose"), ("↑↓", "move")],
+        "esc later",
+        t,
+        hits,
+    )?;
+    let mut y = frame.body.y;
+    for (index, (_, title, detail, label)) in rows.iter().enumerate() {
+        if y + ROW > frame.body.bottom() {
+            break;
+        }
+        let rect = Rect::new(frame.body.x, y, frame.body.width, ROW);
+        let fill = row_box(buffer, rect, index == 0, index == selected, t);
+        put_text(
+            buffer,
+            rect.x + 2,
+            y,
+            rect.width.saturating_sub(16),
+            title,
+            Style::default()
+                .fg(t.ink)
+                .bg(fill)
+                .add_modifier(Modifier::BOLD),
+        );
+        put_text(
+            buffer,
+            rect.x + 2,
+            y + 1,
+            rect.width.saturating_sub(16),
+            detail,
+            Style::default().fg(t.muted).bg(fill),
+        );
+        if index == selected {
+            let action = button(
+                buffer,
+                rect.right() - 1,
+                y,
+                label,
+                ButtonKind::Primary,
+                fill,
+                t,
+            );
+            hits.actions.push((action, index));
+        }
+        hits.rows.push((rect, index));
+        y += ROW;
+    }
+    Some(())
+}
+
 fn render_update(
     buffer: &mut Buffer,
     selected: usize,
@@ -1776,6 +1884,9 @@ pub(super) fn render_popup(
         OrchaPopup::NewWorkspace { selected, project } => {
             let _ = render_new_workspace(buffer, *selected, project.as_deref(), &t, &mut hits);
         }
+        OrchaPopup::PluginOffer { selected, plugin } => {
+            let _ = render_plugin_offer(buffer, *selected, plugin, &t, &mut hits);
+        }
         OrchaPopup::Update { selected, release } => {
             let _ = render_update(buffer, *selected, release, &t, &mut hits);
         }
@@ -1816,4 +1927,35 @@ pub(super) fn focused_agent_pane(snapshot: &ClientShellSnapshot) -> Option<Strin
         .find(|agent| agent.pane_id == focused && agent.agent_status != AgentStatus::Unknown)
         .map(|agent| agent.pane_id.clone())
         .or_else(|| Some(focused.to_owned()))
+}
+
+#[cfg(test)]
+mod plugin_offer_tests {
+    #[test]
+    fn the_offer_adds_only_on_consent_and_offers_autostart_when_possible() {
+        let plugin = crate::orcha_app::OfferedPlugin {
+            id: "easy-job",
+            name: "Easy Job",
+            install: &["easy-job", "orcha-plugin", "install"],
+            autostart: Some(("server", &[("easy_job", "bridge")])),
+        };
+        let choices: Vec<_> = super::plugin_offer_rows(&plugin)
+            .into_iter()
+            .map(|row| row.0)
+            .collect();
+        assert_eq!(
+            choices,
+            [
+                super::PluginOfferChoice::Add { autostart: false },
+                super::PluginOfferChoice::Add { autostart: true },
+                super::PluginOfferChoice::NotNow,
+                super::PluginOfferChoice::Never,
+            ]
+        );
+        let plain = crate::orcha_app::OfferedPlugin {
+            autostart: None,
+            ..plugin
+        };
+        assert_eq!(super::plugin_offer_rows(&plain).len(), 3);
+    }
 }

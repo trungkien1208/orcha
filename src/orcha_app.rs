@@ -334,6 +334,110 @@ pub(crate) fn first_offer(version: &str) -> bool {
     true
 }
 
+/// A plugin Orcha can offer to add, never without the user's consent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OfferedPlugin {
+    pub id: &'static str,
+    pub name: &'static str,
+    /// The plugin's own installer, which knows where its manifest is.
+    pub install: &'static [&'static str],
+    /// The pane that can start with Orcha, and the tokens that hide it.
+    pub autostart: Option<(&'static str, &'static [(&'static str, &'static str)])>,
+}
+
+const OFFERED_PLUGINS: &[OfferedPlugin] = &[OfferedPlugin {
+    id: "easy-job",
+    name: "Easy Job",
+    install: &["easy-job", "orcha-plugin", "install"],
+    autostart: Some(("server", &[("easy_job", "bridge")])),
+}];
+
+const PLUGIN_OFFERS: &str = ".plugin-offers.json";
+
+fn plugin_offers() -> std::collections::HashMap<String, String> {
+    std::fs::read_to_string(crate::config::config_dir().join(PLUGIN_OFFERS))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+/// Remembers the answer: `never`, or the Orcha version a "not now" was given
+/// in (the next update asks again).
+pub(crate) fn answer_plugin_offer(id: &str, never: bool) {
+    let mut offers = plugin_offers();
+    offers.insert(
+        id.to_owned(),
+        if never {
+            "never".to_owned()
+        } else {
+            ORCHA_VERSION.to_owned()
+        },
+    );
+    if let Ok(text) = serde_json::to_string_pretty(&offers) {
+        let _ = std::fs::write(crate::config::config_dir().join(PLUGIN_OFFERS), text);
+    }
+}
+
+/// A plugin to offer now: installed on this machine, not linked yet, and not
+/// declined (for good, or in this version). Blocking: run off the input path.
+pub(crate) fn plugin_to_offer() -> Option<OfferedPlugin> {
+    let offers = plugin_offers();
+    let linked = crate::orcha_handoff::herdr_json(&["api", "call", "plugin.list"])?;
+    let linked: Vec<&str> = linked
+        .get("plugins")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|plugin| plugin.get("plugin_id").or(plugin.get("id"))?.as_str())
+        .collect();
+    OFFERED_PLUGINS
+        .iter()
+        .find(|plugin| {
+            let answered = offers.get(plugin.id).map(String::as_str);
+            !linked.contains(&plugin.id)
+                && answered != Some("never")
+                && answered != Some(ORCHA_VERSION)
+                && crate::orcha_handoff::command_installed(plugin.install[0])
+        })
+        .cloned()
+}
+
+/// Adds an offered plugin with its own installer, then (when asked) starts
+/// its pane with Orcha. Blocking: run off the input path.
+pub(crate) fn add_offered_plugin(plugin: &OfferedPlugin, autostart: bool) -> Result<(), String> {
+    let (program, args) = plugin.install.split_first().ok_or("no installer")?;
+    let status = crate::noninteractive_process::command(program)
+        .args(args)
+        .env(
+            crate::api::SOCKET_PATH_ENV_VAR,
+            crate::session::active_api_socket_path(),
+        )
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_err(|err| format!("could not run {program}: {err}"))?;
+    if !status.success() {
+        return Err(format!("{} could not add its plugin", plugin.name));
+    }
+    if let (true, Some((entrypoint, tokens))) = (autostart, plugin.autostart) {
+        let tokens: serde_json::Map<String, serde_json::Value> = tokens
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), serde_json::Value::from(*value)))
+            .collect();
+        let params = serde_json::json!({
+            "plugin_id": plugin.id,
+            "entrypoint": entrypoint,
+            "enabled": true,
+            "tokens": tokens,
+        })
+        .to_string();
+        crate::orcha_handoff::herdr_json(&["api", "call", "plugin.autostart.set", &params])
+            .ok_or("the plugin was added, but could not start with Orcha")?;
+    }
+    Ok(())
+}
+
 /// No reminder for this release; a newer one asks again.
 pub(crate) fn skip_release(version: &str) {
     let _ = std::fs::write(
