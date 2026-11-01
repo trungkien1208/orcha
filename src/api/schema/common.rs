@@ -88,6 +88,9 @@ pub enum ReadSource {
     Recent,
     RecentUnwrapped,
     Detection,
+    // Recent history as Herdr holds it, never by scrolling the agent's
+    // screen: safe for background reads of idle full-screen agents.
+    Scrollback,
 }
 
 pub(crate) const READ_SOURCES: &[crate::cli::projection::Choice<ReadSource>] = &[
@@ -96,6 +99,7 @@ pub(crate) const READ_SOURCES: &[crate::cli::projection::Choice<ReadSource>] = &
     crate::cli::projection::Choice::new("recent-unwrapped", ReadSource::RecentUnwrapped),
     crate::cli::projection::Choice::hidden("recent_unwrapped", ReadSource::RecentUnwrapped),
     crate::cli::projection::Choice::new("detection", ReadSource::Detection),
+    crate::cli::projection::Choice::new("scrollback", ReadSource::Scrollback),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

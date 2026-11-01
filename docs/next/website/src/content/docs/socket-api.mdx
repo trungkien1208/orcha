@@ -1314,6 +1314,22 @@ Agent records carry `seen_seq`, the `completion_seq` the user has seen (in
 Herdr or through this method). A `pane.agent_status_changed` event reports the
 change.
 
+### Reading history without input
+
+`agent.read` and `pane.read` accept `source: "scrollback"`: the recent history
+Herdr already holds, the same text as `recent`, but never gathered by scrolling
+the agent's screen. `recent` on an idle full-screen agent (such as Codex) walks
+its history with scroll input; `scrollback` never sends input, so background
+clients can read as often as they like. For a full-screen agent, history that
+only exists inside the agent is not part of `scrollback`; read its transcript
+(`agent_session.transcript_path`) for the whole conversation.
+
+```json
+{"id":"r2","method":"agent.read","params":{"target":"w1:p2","source":"scrollback","lines":400}}
+```
+
+CLI: `herdr agent read w1:p2 --source scrollback`.
+
 ## Protocol stability
 
 The client-rendered Herdr UI uses a stable endpoint generation for local and SSH

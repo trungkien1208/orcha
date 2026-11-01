@@ -100,7 +100,8 @@ impl PendingAltScreenRead {
         let line_limit = lines.map(|lines| lines.min(1000) as usize);
         match source {
             crate::api::schema::ReadSource::Recent
-            | crate::api::schema::ReadSource::RecentUnwrapped => {
+            | crate::api::schema::ReadSource::RecentUnwrapped
+            | crate::api::schema::ReadSource::Scrollback => {
                 let limit = line_limit.unwrap_or(80);
                 crate::terminal::snapshot_text(
                     &self.initial.rows,

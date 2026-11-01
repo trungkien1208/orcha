@@ -4433,7 +4433,8 @@
             "visible",
             "recent",
             "recent_unwrapped",
-            "detection"
+            "detection",
+            "scrollback"
           ],
           "type": "string"
         },
@@ -7434,7 +7435,8 @@
             "visible",
             "recent",
             "recent_unwrapped",
-            "detection"
+            "detection",
+            "scrollback"
           ],
           "type": "string"
         },
@@ -10482,7 +10484,8 @@
             "visible",
             "recent",
             "recent_unwrapped",
-            "detection"
+            "detection",
+            "scrollback"
           ],
           "type": "string"
         },

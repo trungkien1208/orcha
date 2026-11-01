@@ -84,7 +84,9 @@ impl App {
         let completion = terminal.last_agent_completion_seq;
         let marked = completion.is_some_and(|completion| completion <= params.completion_seq);
         if marked {
-            let before = self.agent_info(ws_idx, pane_id).map(|agent| agent.agent_status);
+            let before = self
+                .agent_info(ws_idx, pane_id)
+                .map(|agent| agent.agent_status);
             if let Some(pane) = self.state.workspaces[ws_idx].pane_state_mut(pane_id) {
                 pane.seen = true;
             }

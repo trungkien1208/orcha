@@ -8713,7 +8713,10 @@ fn mark_seen_clears_done_without_moving_focus() {
     assert_eq!(seen["result"]["marked"], true);
     assert_eq!(seen["result"]["agent"]["agent_status"], "idle");
     assert_eq!(agent(&server).seen_seq, Some(completion));
-    assert_eq!(server.app.session_snapshot().focused_pane_id, focused_before);
+    assert_eq!(
+        server.app.session_snapshot().focused_pane_id,
+        focused_before
+    );
     assert!(server
         .app
         .event_hub
@@ -8724,4 +8727,58 @@ fn mark_seen_clears_done_without_moving_focus() {
             api::schema::EventData::PaneAgentStatusChanged { agent_status, .. }
                 if *agent_status == api::schema::AgentStatus::Idle
         )));
+}
+
+#[tokio::test]
+async fn scrollback_reads_never_scroll_an_idle_full_screen_agent() {
+    use crate::detect::{Agent, AgentState};
+    use api::schema::{AgentReadParams, Method, ReadFormat, ReadSource, Request};
+
+    let (writer, _control_rx, _render_rx) = test_client_writer();
+    let (mut server, pane_id) = completion_guard_server(writer);
+    let terminal_id = server.app.state.workspaces[0].panes[&pane_id]
+        .attached_terminal_id
+        .clone();
+    server
+        .app
+        .state
+        .terminals
+        .get_mut(&terminal_id)
+        .unwrap()
+        .set_detected_state(Some(Agent::Codex), AgentState::Idle);
+    // A full-screen agent with mouse reporting, as Codex runs.
+    let runtime = crate::terminal::TerminalRuntime::test_with_scrollback_bytes(
+        5,
+        20,
+        1000,
+        b"one\r\ntwo\r\n\x1b[?1049h\x1b[?1000h\x1b[?1006hcomposer",
+    );
+    server.app.terminal_runtimes.insert(terminal_id, runtime);
+    let public_pane_id = server.app.public_pane_id(0, pane_id).unwrap();
+    let read = |source| Request {
+        id: "read".into(),
+        method: Method::AgentRead(AgentReadParams {
+            target: public_pane_id.clone(),
+            source,
+            lines: Some(200),
+            format: ReadFormat::Text,
+            strip_ansi: true,
+        }),
+    };
+
+    assert!(
+        server
+            .alt_screen_read_spec(&read(ReadSource::Recent))
+            .is_some(),
+        "recent walks the full-screen history"
+    );
+    assert!(server
+        .alt_screen_read_spec(&read(ReadSource::Scrollback))
+        .is_none());
+    let response = server
+        .app
+        .handle_api_request_after_internal_events_drained(read(ReadSource::Scrollback));
+    let value: serde_json::Value = serde_json::from_str(&response).unwrap();
+    assert_eq!(value["result"]["read"]["source"], "scrollback");
+    assert!(server.pending_alt_screen_reads.is_empty());
 }

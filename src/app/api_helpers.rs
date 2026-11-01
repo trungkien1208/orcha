@@ -120,7 +120,9 @@ pub(super) fn read_terminal_snapshot(
         (ReadFormat::Text, ReadSource::Visible) => {
             limit_snapshot_lines(terminal.visible_text(), line_limit)
         }
-        (ReadFormat::Text, ReadSource::Recent) => terminal.recent_text_snapshot(recent_lines),
+        (ReadFormat::Text, ReadSource::Recent | ReadSource::Scrollback) => {
+            terminal.recent_text_snapshot(recent_lines)
+        }
         (ReadFormat::Text, ReadSource::RecentUnwrapped) => {
             terminal.recent_unwrapped_text_snapshot(recent_lines)
         }
@@ -130,7 +132,9 @@ pub(super) fn read_terminal_snapshot(
         (ReadFormat::Ansi, ReadSource::Visible) => {
             limit_snapshot_lines(terminal.visible_ansi(), line_limit)
         }
-        (ReadFormat::Ansi, ReadSource::Recent) => terminal.recent_ansi_snapshot(recent_lines),
+        (ReadFormat::Ansi, ReadSource::Recent | ReadSource::Scrollback) => {
+            terminal.recent_ansi_snapshot(recent_lines)
+        }
         (ReadFormat::Ansi, ReadSource::RecentUnwrapped) => {
             terminal.recent_unwrapped_ansi_snapshot(recent_lines)
         }
