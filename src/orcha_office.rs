@@ -44,13 +44,45 @@ fn status_of(command: &mut Command) -> bool {
     command.status().is_ok_and(|status| status.success())
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum Install {
+    Missing,
+    /// Recorded, but its files are gone (say, a link to a deleted folder).
+    Broken,
+    Ready,
+}
+
+fn install_state() -> Install {
+    let plugins = crate::persist::plugin_registry::try_load().unwrap_or_default();
+    state_of(&plugins)
+}
+
+fn state_of(plugins: &[crate::api::schema::InstalledPluginInfo]) -> Install {
+    match plugins.iter().find(|plugin| plugin.plugin_id == PLUGIN_ID) {
+        None => Install::Missing,
+        Some(plugin)
+            if plugin.warnings.iter().any(|warning| {
+                warning.starts_with(
+                    crate::persist::plugin_registry::MANIFEST_UNAVAILABLE_WARNING_PREFIX,
+                )
+            }) =>
+        {
+            Install::Broken
+        }
+        Some(_) => Install::Ready,
+    }
+}
+
 fn installed() -> bool {
-    crate::persist::plugin_registry::try_load()
-        .is_ok_and(|plugins| plugins.iter().any(|plugin| plugin.plugin_id == PLUGIN_ID))
+    install_state() == Install::Ready
 }
 
 fn not_added() -> i32 {
-    eprintln!("Easy Job is not added yet. Add it with: orcha office install");
+    if install_state() == Install::Broken {
+        eprintln!("Easy Job's files are gone. Add it again with: orcha office install");
+    } else {
+        eprintln!("Easy Job is not added yet. Add it with: orcha office install");
+    }
     1
 }
 
@@ -80,9 +112,21 @@ fn open() -> i32 {
 }
 
 fn install() -> i32 {
-    if installed() {
-        println!("Easy Job is already added. Open it with: orcha office");
-        return 0;
+    match install_state() {
+        Install::Ready => {
+            println!("Easy Job is already added. Open it with: orcha office");
+            return 0;
+        }
+        Install::Broken => {
+            // its files are gone: drop the record so the GitHub install can take its place
+            if !status_of(orcha(&["plugin", "unlink", PLUGIN_ID]).stdout(Stdio::null())) {
+                eprintln!(
+                    "Easy Job's old entry could not be removed. Run: orcha plugin unlink easy-job"
+                );
+                return 1;
+            }
+        }
+        Install::Missing => {}
     }
     // asked for by name: the in-app offer has its answer
     crate::orcha_app::answer_plugin_offer(PLUGIN_ID, false);
@@ -122,7 +166,7 @@ fn ask(question: &str) -> bool {
 }
 
 fn remove() -> i32 {
-    if !installed() {
+    if install_state() == Install::Missing {
         println!("Easy Job is not added. Nothing to remove.");
         return 0;
     }
@@ -168,6 +212,30 @@ fn stop_panes() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_entry_whose_files_are_gone_counts_as_broken() {
+        let plugin = |warnings: Vec<String>| -> crate::api::schema::InstalledPluginInfo {
+            serde_json::from_value(serde_json::json!({
+                "plugin_id": PLUGIN_ID,
+                "name": "Easy Job",
+                "version": "0.1.0",
+                "min_herdr_version": "0.9.0",
+                "manifest_path": "/gone/herdr-plugin.toml",
+                "plugin_root": "/gone",
+                "enabled": true,
+                "warnings": warnings,
+            }))
+            .unwrap()
+        };
+        assert_eq!(state_of(&[]), Install::Missing);
+        assert_eq!(state_of(&[plugin(Vec::new())]), Install::Ready);
+        let gone = format!(
+            "{}no such file",
+            crate::persist::plugin_registry::MANIFEST_UNAVAILABLE_WARNING_PREFIX
+        );
+        assert_eq!(state_of(&[plugin(vec![gone])]), Install::Broken);
+    }
 
     #[test]
     fn help_and_unknown_commands_change_nothing() {
