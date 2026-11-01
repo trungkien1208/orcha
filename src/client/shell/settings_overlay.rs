@@ -140,7 +140,12 @@ fn render_orcha_frame(
     let footer_y = inner.bottom().saturating_sub(1);
     rule(buffer, footer_y - 1);
     let mut x = inner.x + 1;
-    for (key, what) in [("↑↓", "choose"), ("tab", "section"), ("esc", "close")] {
+    for (key, what) in [
+        ("↑↓", "choose"),
+        ("tab", "section"),
+        ("b", "in browser"),
+        ("esc", "close"),
+    ] {
         let key_width = display_width(key) + 2;
         brutal::chip(buffer, x, footer_y, key_width, key, t.ink, t.frame);
         put_text(

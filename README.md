@@ -165,7 +165,10 @@ New Easy Job versions come out on their own schedule: orcha tells you when one i
 orcha             # open orcha (or come back to it)
 orcha update      # get the latest version, and update your plugins too
 orcha uninstall   # remove orcha (asks before touching your settings)
+orcha settings    # every setting on one page in your browser
 ```
+
+**Settings in the browser.** `orcha settings`, COMMANDS › Settings in the browser, or `b` in Settings opens a page with every setting: look (with a sketch of your window that follows each change), terminal palette and font, apps, notifications, accounts, widgets, project and language, plugins. A change applies at once, in every open orcha window. The page lives on 127.0.0.1 behind a one-time token and closes by itself a few minutes after you close the tab.
 
 **Quitting orcha only closes the window.** Your agents keep working in the background, and `orcha` brings you back. After an update, switch the background part to the new version without stopping anyone:
 

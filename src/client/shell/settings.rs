@@ -938,6 +938,12 @@ impl ClientShellState {
             self.apply_settings_choice(outcome);
             return true;
         }
+        if code == KeyCode::Char('b') && modifiers.is_empty() {
+            self.cancel_settings_overlay();
+            self.open_settings_web();
+            outcome.repaint = true;
+            return true;
+        }
         true
     }
 }

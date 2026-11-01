@@ -30,6 +30,7 @@ pub(super) enum PaletteCommand {
     Search,
     ImportProjects,
     Settings,
+    SettingsWeb,
     Keybinds,
     ToggleRightPanel,
     OpenAllProjects,
@@ -39,7 +40,7 @@ pub(super) enum PaletteCommand {
 }
 
 /// (command, title, what it does)
-const COMMANDS: [(PaletteCommand, &str, &str); 25] = [
+const COMMANDS: [(PaletteCommand, &str, &str); 26] = [
     (
         PaletteCommand::NewAgent,
         "New agent",
@@ -130,6 +131,11 @@ const COMMANDS: [(PaletteCommand, &str, &str); 25] = [
         PaletteCommand::Settings,
         "Settings",
         "theme, look, apps, notifications",
+    ),
+    (
+        PaletteCommand::SettingsWeb,
+        "Settings in the browser",
+        "every setting on one page, applied as you change it",
     ),
     (
         PaletteCommand::Keybinds,
@@ -892,6 +898,7 @@ impl ClientShellState {
             PaletteCommand::Settings => {
                 self.record_binding(binding(KeybindAction::Settings), outcome)
             }
+            PaletteCommand::SettingsWeb => self.open_settings_web(),
             PaletteCommand::Keybinds => self.record_binding(binding(KeybindAction::Help), outcome),
             PaletteCommand::ToggleRightPanel => {
                 let on = !self.config.right_panel;

@@ -2157,6 +2157,17 @@ impl ClientShellState {
         }
     }
 
+    /// Opens every setting in the browser (starting its page when needed),
+    /// off the input path.
+    pub(super) fn open_settings_web(&mut self) {
+        self.show_notice("opening settings in the browser…".to_owned());
+        let _ = crate::thread_spawn::spawn_named("orcha-settings-web", || {
+            if let Err(message) = super::orcha_settings_web::open_quietly() {
+                tracing::warn!(%message, "the settings page did not open");
+            }
+        });
+    }
+
     /// Opens Easy Job in the browser (starting it when needed), off the input path.
     pub(super) fn open_office(&mut self) {
         self.show_notice("opening Easy Job…".to_owned());

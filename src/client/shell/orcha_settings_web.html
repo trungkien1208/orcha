@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Orcha Settings</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #fff4d6; --card: #ffffff; --frame: #f4ead0; --ink: #111111; --line: #111111;
+    --shadow: #111111; --muted: #6b6556; --soft: #c9c2ad; --pane: #ffffff;
+    --yellow: #ffd23f; --pink: #ff7ab6; --green: #7be0ad; --blue: #6c8cff; --red: #e5484d;
+    --accent: var(--pink);
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #1f1c19; --card: #2e2a25; --frame: #29261f; --ink: #f2e8d3; --line: #0b0a09;
+      --shadow: #000000; --muted: #b3a891; --soft: #4f493f; --pane: #262320;
+      --yellow: #f2c53d; --pink: #f07aae; --green: #74d3a3; --blue: #7f9bff; --red: #f26464;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #1f1c19; --card: #2e2a25; --frame: #29261f; --ink: #f2e8d3; --line: #0b0a09;
+    --shadow: #000000; --muted: #b3a891; --soft: #4f493f; --pane: #262320;
+    --yellow: #f2c53d; --pink: #f07aae; --green: #74d3a3; --blue: #7f9bff; --red: #f26464;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 var(--sans); }
+  button, input, select { font: inherit; color: inherit; }
+  .top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px; background: var(--bg); border-bottom: 3px solid var(--line); }
+  .brand { font: 700 18px var(--mono); letter-spacing: .5px; }
+  .brand span { background: var(--accent); color: #111; padding: 0 6px; border: 2px solid var(--line); margin-left: 6px; font-size: 13px; }
+  .top .grow { flex: 1; }
+  .live { font: 12px var(--mono); color: var(--muted); }
+  .live b { color: var(--green); }
+  .iconbtn { border: 2px solid var(--line); background: var(--card); box-shadow: 2px 2px 0 var(--shadow);
+    padding: 4px 10px; cursor: pointer; font: 13px var(--mono); }
+  .iconbtn:active { transform: translate(2px, 2px); box-shadow: none; }
+  .layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; max-width: 1180px; margin: 0 auto; padding: 20px; }
+  nav { position: sticky; top: 76px; align-self: start; display: flex; flex-direction: column; gap: 6px; }
+  nav a { display: block; padding: 7px 10px; border: 2px solid transparent; text-decoration: none; color: var(--ink); font: 14px var(--mono); }
+  nav a:hover { border-color: var(--line); background: var(--card); }
+  nav a.on { border-color: var(--line); background: var(--yellow); color: #111; box-shadow: 3px 3px 0 var(--shadow); }
+  main { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+  .card { background: var(--card); border: 3px solid var(--line); box-shadow: 5px 5px 0 var(--shadow); padding: 18px 20px; scroll-margin-top: 80px; }
+  .card h2 { margin: 0 0 12px; font: 700 16px var(--mono); text-transform: uppercase; letter-spacing: 1px; }
+  .row { display: grid; grid-template-columns: minmax(150px, 230px) minmax(0, 1fr); gap: 6px 18px; align-items: center;
+    padding: 11px 0; border-top: 2px dashed var(--soft); }
+  .row:first-of-type { border-top: 0; }
+  .label b { display: block; font-weight: 600; }
+  .label small { color: var(--muted); font-size: 12.5px; }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; }
+  .seg button { border: 2px solid var(--line); background: var(--pane); padding: 4px 11px; cursor: pointer; font-size: 13.5px; }
+  .seg button.on { background: var(--accent); color: #111; box-shadow: 2px 2px 0 var(--shadow); font-weight: 600; }
+  select, input[type=text] { width: 100%; max-width: 420px; border: 2px solid var(--line); background: var(--pane); padding: 6px 9px; }
+  input[type=text]:focus, select:focus { outline: 3px solid var(--accent); outline-offset: 1px; }
+  .switch { position: relative; width: 52px; height: 28px; border: 2px solid var(--line); background: var(--soft); cursor: pointer; padding: 0; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: var(--card); border: 2px solid var(--line); transition: left .15s; }
+  .switch.on { background: var(--green); }
+  .switch.on::after { left: 26px; }
+  .range { display: flex; align-items: center; gap: 12px; max-width: 420px; }
+  .range input { flex: 1; accent-color: var(--accent); }
+  .range output { min-width: 48px; font: 600 14px var(--mono); border: 2px solid var(--line); padding: 2px 6px; text-align: center; background: var(--pane); }
+  .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+  .swatches button { width: 34px; height: 34px; border: 2px solid var(--line); cursor: pointer; position: relative; }
+  .swatches button.on { box-shadow: 0 0 0 3px var(--card), 0 0 0 6px var(--line); }
+  .swatches button[data-theme-default] { background: repeating-linear-gradient(45deg, var(--soft) 0 6px, var(--card) 6px 12px); }
+  .palettes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .palettes button { border: 2px solid var(--line); background: var(--pane); padding: 8px; text-align: left; cursor: pointer; }
+  .palettes button.on { box-shadow: 3px 3px 0 var(--shadow); outline: 3px solid var(--accent); }
+  .palettes .strip { display: flex; height: 18px; margin-bottom: 6px; border: 2px solid var(--line); }
+  .palettes .strip i { flex: 1; }
+  .palettes small { display: block; color: var(--muted); font-size: 12px; }
+  /* the live sketch of an orcha window */
+  .preview { display: grid; gap: 10px; }
+  .win { border: 3px solid var(--line); background: #1b1917; height: 200px; display: flex; flex-direction: column; box-shadow: 4px 4px 0 var(--shadow); }
+  .win .bar { height: 22px; background: #0b0a09; display: flex; align-items: center; gap: 6px; padding: 0 8px; }
+  .win .bar i { width: 9px; height: 9px; border-radius: 50%; background: #444; }
+  .win .bar .chip { margin-left: auto; font: 10px var(--mono); color: #111; background: var(--accent); padding: 0 5px; }
+  .win .body { flex: 1; display: flex; min-height: 0; }
+  .win .side, .win .panel { background: #2a2622; display: flex; flex-direction: column; gap: 4px; padding: 6px; color: #b3a891; font: 9px var(--mono); }
+  .win .side { width: var(--side-w, 22%); }
+  .win .panel { width: 24%; }
+  .win .panes { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; }
+  .win .pane { background: #262320; border: 1px solid #3a352f; }
+  .win.paper .pane { background: #f2e8d3; }
+  .win .line { height: 5px; background: #4f493f; border-radius: 1px; }
+  .win .line.hot { background: var(--accent); }
+  .win .gauge { height: 6px; background: #4f493f; } .win .gauge b { display: block; height: 100%; width: 62%; background: var(--green); }
+  .win .train { margin-top: auto; height: 10px; background: repeating-linear-gradient(90deg, var(--yellow) 0 8px, transparent 8px 11px); }
+  .win .status { height: 16px; background: #0b0a09; display: flex; align-items: center; gap: 8px; padding: 0 8px; }
+  .win .status .gauge { width: 60px; }
+  .hint { color: var(--muted); font-size: 12.5px; }
+  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(120px); background: var(--ink); color: var(--bg);
+    border: 3px solid var(--line); padding: 8px 14px; font: 13px var(--mono); transition: transform .2s; max-width: calc(100% - 32px); z-index: 10; }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.bad { background: var(--red); color: #fff; }
+  .saving { opacity: .55; pointer-events: none; }
+  .gone { padding: 40px 20px; text-align: center; font: 15px var(--mono); }
+  @media (max-width: 760px) {
+    .layout { grid-template-columns: minmax(0, 1fr); padding: 16px; }
+    nav { position: static; flex-direction: row; overflow-x: auto; }
+    nav a { white-space: nowrap; }
+    .row { grid-template-columns: minmax(0, 1fr); }
+    .win { height: 150px; }
+  }
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="brand">orcha<span>settings</span></div>
+  <div class="grow"></div>
+  <div class="live" id="live">connecting…</div>
+  <button class="iconbtn" id="mode" title="light or dark">◐</button>
+</div>
+<div class="layout">
+  <nav id="nav"></nav>
+  <main id="main"></main>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+"use strict";
+const token = new URLSearchParams(location.search).get("t") || "";
+// keep the token out of the address bar, history and screenshots
+history.replaceState(null, "", "/");
+const $ = (sel) => document.querySelector(sel);
+const el = (tag, props = {}, ...kids) => {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k.includes("-")) node.setAttribute(k, v); else node[k] = v;
+  }
+  for (const kid of kids) if (kid != null) node.append(kid);
+  return node;
+};
+let state = null;
+let busy = false;
+
+try {
+  const mode = localStorage.getItem("orcha-settings-theme");
+  if (mode) document.documentElement.dataset.theme = mode;
+} catch (_) {}
+$("#mode").onclick = () => {
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const now = document.documentElement.dataset.theme || (dark ? "dark" : "light");
+  const next = now === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("orcha-settings-theme", next); } catch (_) {}
+};
+
+function toast(text, bad) {
+  const node = $("#toast");
+  node.textContent = text;
+  node.className = "toast show" + (bad ? " bad" : "");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => (node.className = "toast" + (bad ? " bad" : "")), bad ? 4000 : 2200);
+}
+
+async function call(path, body) {
+  const response = await fetch(path, {
+    method: body ? "POST" : "GET",
+    headers: { "X-Orcha-Token": token, "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || response.statusText);
+  return data;
+}
+
+function field(key) {
+  for (const section of state.sections) for (const f of section.fields) if (f.key === key) return f;
+  return null;
+}
+const value = (key) => field(key)?.value;
+
+async function save(key, next, row) {
+  if (row) row.classList.add("saving");
+  busy = true;
+  try {
+    const data = await call("/api/set", { key, value: next });
+    state = data.state;
+    render();
+    toast(data.note || "saved · orcha shows it now");
+  } catch (err) {
+    toast(err.message, true);
+    render();
+  } finally {
+    busy = false;
+  }
+}
+
+function control(f, row) {
+  if (f.kind === "toggle") {
+    const button = el("button", { className: "switch" + (f.value ? " on" : ""), title: f.value ? "on" : "off" });
+    button.setAttribute("role", "switch");
+    button.setAttribute("aria-checked", String(!!f.value));
+    button.setAttribute("aria-label", f.label);
+    button.onclick = () => save(f.key, !f.value, row);
+    return button;
+  }
+  if (f.kind === "select" && f.options.length <= 4) {
+    return el("div", { className: "seg" }, ...f.options.map((o) => {
+      const b = el("button", { className: o.value === f.value ? "on" : "", textContent: o.label });
+      b.onclick = () => o.value !== f.value && save(f.key, o.value, row);
+      return b;
+    }));
+  }
+  if (f.kind === "select") {
+    const s = el("select", { "aria-label": f.label }, ...f.options.map((o) =>
+      el("option", { value: o.value, textContent: o.label, selected: o.value === f.value })));
+    s.onchange = () => save(f.key, s.value, row);
+    return s;
+  }
+  if (f.kind === "range") {
+    const out = el("output", { textContent: f.value + (f.unit || "") });
+    const input = el("input", { type: "range", min: f.min, max: f.max, value: f.value, "aria-label": f.label });
+    input.oninput = () => (out.textContent = input.value + (f.unit || ""));
+    input.onchange = () => save(f.key, Number(input.value), row);
+    return el("div", { className: "range" }, input, out);
+  }
+  if (f.kind === "text") {
+    const input = el("input", { type: "text", value: f.value, spellcheck: false, "aria-label": f.label });
+    const commit = () => input.value !== f.value && save(f.key, input.value, row);
+    input.onkeydown = (e) => { if (e.key === "Enter") input.blur(); if (e.key === "Escape") { input.value = f.value; input.blur(); } };
+    input.onblur = commit;
+    return input;
+  }
+  if (f.kind === "swatches") {
+    return el("div", { className: "swatches" }, ...f.options.map((o) => {
+      const b = el("button", { className: o.value === f.value ? "on" : "", title: o.label, "aria-label": o.label });
+      if (o.color) b.style.background = o.color; else b.dataset.themeDefault = "";
+      b.onclick = () => o.value !== f.value && save(f.key, o.value, row);
+      return b;
+    }));
+  }
+  if (f.kind === "palettes") {
+    return el("div", { className: "palettes" }, ...f.options.map((o) => {
+      const strip = el("div", { className: "strip" }, ...(o.swatch || []).map((c) => {
+        const i = el("i"); i.style.background = c || "transparent"; return i;
+      }));
+      const b = el("button", { className: o.value === f.value ? "on" : "" }, strip, el("b", { textContent: o.label }), el("small", { textContent: o.help || "" }));
+      b.onclick = () => o.value !== f.value && save(f.key, o.value, row);
+      return b;
+    }));
+  }
+  return el("span", { className: "hint", textContent: String(f.value) });
+}
+
+function sketch() {
+  const side = value("sidebar_side") === "right" ? "right" : "left";
+  const panel = !!value("right_panel");
+  const fuel = value("fuel");
+  const process = value("process");
+  const widths = { narrow: "17%", normal: "21%", wide: "27%" };
+  const sideBox = el("div", { className: "side" }, "PROJECTS",
+    el("div", { className: "line hot" }), el("div", { className: "line" }), el("div", { className: "line" }),
+    process === "sidebar" || (process === "panel" && !panel) ? el("div", { className: "train" }) : null);
+  sideBox.style.setProperty("--side-w", widths[value("sidebar_width")] || "21%");
+  const panelBox = panel ? el("div", { className: "panel" }, "ACCOUNTS",
+    fuel === "panel" ? el("div", { className: "gauge" }, el("b")) : null,
+    el("div", { className: "line" }), el("div", { className: "line" }),
+    process === "panel" ? el("div", { className: "train" }) : null) : null;
+  const panes = el("div", { className: "panes" }, el("div", { className: "pane" }), el("div", { className: "pane" }));
+  const body = el("div", { className: "body" }, ...(side === "left" ? [sideBox, panes, panelBox] : [panelBox, panes, sideBox]));
+  const status = el("div", { className: "status" }, fuel === "status_bar" ? el("div", { className: "gauge" }, el("b")) : null);
+  const win = el("div", { className: "win" + (value("pane_paper") ? " paper" : "") },
+    el("div", { className: "bar" }, el("i"), el("i"), el("i"), el("span", { className: "chip", textContent: "⌕ commands" })),
+    body, status);
+  return el("div", { className: "preview" }, win, el("div", { className: "hint", textContent: "A sketch of your orcha window: it follows every change below." }));
+}
+
+function applyAccent() {
+  const accent = field("accent");
+  const color = accent?.options.find((o) => o.value === accent.value)?.color;
+  document.documentElement.style.setProperty("--accent", color || "var(--pink)");
+}
+
+function render() {
+  applyAccent();
+  const focused = document.activeElement;
+  if (focused && focused.tagName === "INPUT" && focused.type === "text") return; // do not eat someone's typing
+  const main = $("#main");
+  const nav = $("#nav");
+  const scroll = scrollY;
+  main.replaceChildren();
+  nav.replaceChildren();
+  for (const section of state.sections) {
+    const card = el("section", { className: "card", id: section.id }, el("h2", { textContent: section.title }));
+    if (section.id === "look") card.append(sketch());
+    for (const f of section.fields) {
+      const row = el("div", { className: "row" });
+      row.append(el("div", { className: "label" }, el("b", { textContent: f.label }), f.help ? el("small", { textContent: f.help }) : null));
+      row.append(el("div", {}, control(f, row)));
+      card.append(row);
+    }
+    main.append(card);
+    nav.append(el("a", { href: "#" + section.id, textContent: section.title }));
+  }
+  if (!state.has_config_tool) {
+    main.append(el("p", { className: "hint", textContent: "Palette, font, widgets and language come from orcha-config, which is not installed here." }));
+  }
+  scrollTo(0, scroll);
+  markNav();
+}
+
+function markNav() {
+  let current = state?.sections[0]?.id;
+  for (const section of state?.sections || []) {
+    const node = document.getElementById(section.id);
+    if (node && node.getBoundingClientRect().top < 140) current = section.id;
+  }
+  for (const a of document.querySelectorAll("nav a")) a.classList.toggle("on", a.getAttribute("href") === "#" + current);
+}
+addEventListener("scroll", markNav, { passive: true });
+
+async function refresh(first) {
+  if (busy) return;
+  try {
+    const next = await call("/api/state");
+    $("#live").innerHTML = "<b>●</b> live · orcha " + next.version;
+    // only redraw when something changed (say, from orcha's own Settings)
+    if (first || JSON.stringify(next) !== JSON.stringify(state)) {
+      state = next;
+      render();
+    }
+  } catch (err) {
+    $("#live").textContent = "○ not connected";
+    if (first) {
+      $("#main").replaceChildren(el("div", { className: "card gone", textContent: "This page has closed. Open it again with: orcha settings" }));
+    }
+  }
+}
+refresh(true);
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>
