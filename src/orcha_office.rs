@@ -84,11 +84,32 @@ pub(crate) fn office_state() -> Option<bool> {
     installed().then(|| bridge_pid().is_some())
 }
 
+/// Easy Job's own data folder, found the way Easy Job finds it: an env
+/// override, else ~/.easy-job, else the pre-rename ~/.orcha-office when only
+/// that one exists. Guessing only ~/.easy-job left the header chip dark.
+fn data_home() -> Option<PathBuf> {
+    let env = |name| std::env::var_os(name).filter(|value| !value.is_empty());
+    if let Some(dir) = env("EASY_JOB_HOME").or_else(|| env("ORCHA_OFFICE_HOME")) {
+        return Some(PathBuf::from(dir));
+    }
+    let home = crate::platform::user_home_dir()?;
+    Some(pick_data_home(
+        home.join(".easy-job"),
+        home.join(".orcha-office"),
+    ))
+}
+
+fn pick_data_home(next: PathBuf, previous: PathBuf) -> PathBuf {
+    if !next.exists() && previous.exists() {
+        previous
+    } else {
+        next
+    }
+}
+
 /// The server's pid from the state file Easy Job keeps, when it still runs.
 fn bridge_pid() -> Option<u32> {
-    let path = crate::platform::user_home_dir()?
-        .join(".easy-job")
-        .join("bridge.json");
+    let path = data_home()?.join("bridge.json");
     let state: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
     let pid = u32::try_from(state.get("pid")?.as_u64()?).ok()?;
     crate::platform::process_exists(pid).then_some(pid)
@@ -282,8 +303,7 @@ fn remove() -> i32 {
         eprintln!("Easy Job was not removed.");
         return 1;
     }
-    let data = crate::platform::user_home_dir().map(|home| home.join(".easy-job"));
-    if let Some(data) = data.filter(|data| data.exists()) {
+    if let Some(data) = data_home().filter(|data| data.exists()) {
         if ask(&format!(
             "Also delete Easy Job's own data in {}?",
             data.display()
@@ -338,6 +358,21 @@ mod tests {
             crate::persist::plugin_registry::MANIFEST_UNAVAILABLE_WARNING_PREFIX
         );
         assert_eq!(state_of(&[plugin(vec![gone])]), Install::Broken);
+    }
+
+    #[test]
+    fn the_pre_rename_data_folder_counts_until_the_new_one_exists() {
+        let root = std::env::temp_dir().join(format!("orcha-office-home-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let next = root.join(".easy-job");
+        let previous = root.join(".orcha-office");
+        assert_eq!(pick_data_home(next.clone(), previous.clone()), next);
+        std::fs::create_dir(&previous).unwrap();
+        assert_eq!(pick_data_home(next.clone(), previous.clone()), previous);
+        std::fs::create_dir(&next).unwrap();
+        assert_eq!(pick_data_home(next.clone(), previous), next);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
