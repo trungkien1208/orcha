@@ -61,6 +61,29 @@ pub(crate) fn claim_identity() {
     }
 }
 
+/// Subcommands of herdr's own `plugin` command (herdr-plugin.toml plugins).
+pub(crate) fn is_herdr_plugin_subcommand(sub: &str) -> bool {
+    matches!(
+        sub,
+        "link"
+            | "unlink"
+            | "list"
+            | "enable"
+            | "disable"
+            | "install"
+            | "uninstall"
+            | "update"
+            | "config-dir"
+            | "action"
+            | "log"
+            | "logs"
+            | "pane"
+            | "help"
+            | "--help"
+            | "-h"
+    )
+}
+
 /// The platform's user config root, respecting explicit XDG overrides.
 fn config_base() -> Option<PathBuf> {
     crate::platform::orcha_config_base_dir()
@@ -106,6 +129,11 @@ pub(crate) fn maybe_run_config_tool(args: &[String]) -> Option<i32> {
     if !CONFIG_TOOL_COMMANDS.contains(&command) {
         return None;
     }
+    if command == "plugin" && args.get(2).is_some_and(|sub| is_herdr_plugin_subcommand(sub)) {
+        // `orcha plugin link <dir>` and friends manage herdr-plugin.toml
+        // plugins; bare `orcha plugin` still installs the Claude Code plugin.
+        return None;
+    }
     let Some(tool) = config_tool() else {
         eprintln!(
             "orcha {command}: orcha-config is not installed (github.com/trungkien1208/orcha-config)"
@@ -114,6 +142,17 @@ pub(crate) fn maybe_run_config_tool(args: &[String]) -> Option<i32> {
     };
     let status = crate::platform::orcha_tool_command(&tool, &args[1..]).status();
     Some(status.ok().and_then(|status| status.code()).unwrap_or(1))
+}
+
+#[cfg(test)]
+mod plugin_routing_tests {
+    #[test]
+    fn plugin_subcommands_go_to_herdr_and_bare_plugin_to_orcha_config() {
+        for sub in ["link", "unlink", "list", "action", "pane"] {
+            assert!(super::is_herdr_plugin_subcommand(sub), "{sub}");
+        }
+        assert!(!super::is_herdr_plugin_subcommand("marketplace"));
+    }
 }
 
 #[cfg(test)]
