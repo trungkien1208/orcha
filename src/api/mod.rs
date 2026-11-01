@@ -1,4 +1,5 @@
 pub mod client;
+mod configure;
 mod event_hub;
 mod model_observer;
 pub mod schema;

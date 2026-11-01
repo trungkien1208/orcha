@@ -63,6 +63,13 @@ pub enum ResponseResult {
         session_epoch: String,
         changes: Vec<super::session::SessionChange>,
     },
+    AgentConfigured {
+        /// `applied` when the commands were sent, `queued` when they wait for
+        /// the busy agent to become idle.
+        outcome: String,
+        /// The agent commands sent or queued; empty when nothing changes.
+        commands: Vec<String>,
+    },
     AgentModelReported {
         changed: bool,
     },

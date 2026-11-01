@@ -564,6 +564,11 @@ fn serve_request(
                 wait_for_output(request_id.clone(), params, connection, api_tx, running)?;
             finish_wait_response(connection, response, &request_id, method, changes_ui)
         }
+        Method::AgentConfigure(params) => {
+            let response =
+                crate::api::configure::configure_agent(request_id.clone(), params, api_tx);
+            finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
+        }
         method_body => {
             let (response_write_tx, response_write_rx) = std::sync::mpsc::channel();
             let response = handle_request(

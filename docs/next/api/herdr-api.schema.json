@@ -1367,6 +1367,35 @@
     },
     "request": {
       "$defs": {
+        "AgentConfigureParams": {
+          "properties": {
+            "effort": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fast": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "model": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id"
+          ],
+          "type": "object"
+        },
         "AgentModelsParams": {
           "properties": {
             "kind": {
@@ -6628,6 +6657,22 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.configure",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentConfigureParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -9790,6 +9835,31 @@
                 "session_version",
                 "session_epoch",
                 "changes"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "commands": {
+                  "description": "The agent commands sent or queued; empty when nothing changes.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "outcome": {
+                  "description": "`applied` when the commands were sent, `queued` when they wait for\nthe busy agent to become idle.",
+                  "type": "string"
+                },
+                "type": {
+                  "const": "agent_configured",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "outcome",
+                "commands"
               ],
               "type": "object"
             },

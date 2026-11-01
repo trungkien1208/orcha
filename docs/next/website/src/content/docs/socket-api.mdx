@@ -106,7 +106,7 @@ Raw socket method names use dot notation:
 | Pane | `pane.split`, `pane.swap`, `pane.move`, `pane.zoom`, `pane.layout`, `pane.process_info`, `pane.neighbor`, `pane.edges`, `pane.focus_direction`, `pane.resize`, `pane.list`, `pane.current`, `pane.get`, `pane.rename`, `pane.send_text`, `pane.send_keys`, `pane.send_input`, `pane.read`, `pane.report_agent`, `pane.report_agent_session`, `pane.report_metadata`, `pane.clear_agent_authority`, `pane.release_agent`, `pane.close`, `pane.wait_for_output` |
 | Popup | `popup.close` |
 | Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio` |
-| Agent | `agent.models`, `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
+| Agent | `agent.models`, `agent.configure`, `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
 | Events | `events.subscribe`, `events.wait` |
 | Integrations | `integration.install`, `integration.uninstall` |
 | Plugins | `plugin.link`, `plugin.list`, `plugin.unlink`, `plugin.enable`, `plugin.disable`, `plugin.action.list`, `plugin.action.invoke`, `plugin.log.list`, `plugin.pane.open`, `plugin.pane.focus`, `plugin.pane.close` |
@@ -1178,6 +1178,36 @@ models also list `variants`, Cursor's own id for each effort and fast
 combination; a variant with no `effort` uses the model's default effort.
 `default: true` marks the agent's default model. A missing cache or CLI returns
 `models_unavailable` with a hint. CLI: `herdr api call agent.models '{"kind":"cursor"}'`.
+
+### agent.configure
+
+Changes model, effort and fast mode as one action, using the agent's own
+commands. Settings are checked against `agent.models` first, so nothing is typed
+for an unknown model, an effort the model does not accept, or a fast mode it
+lacks. Settings that already match are skipped.
+
+```json
+{"id":"c1","method":"agent.configure","params":{"pane_id":"w1:p2","model":"gpt-5.6-sol","effort":"high","fast":true}}
+{"id":"c1","result":{"type":"agent_configured","outcome":"applied","commands":["/model gpt-5.6-sol --reasoning=high --speed=fast"]}}
+```
+
+- `outcome: "applied"`: the commands were sent. The agent may still refuse
+  one (Claude's fast mode needs usage credits); the agent record and
+  `pane.agent_model_changed` show what took effect.
+- `outcome: "queued"`: the agent is working or waiting on a question; the
+  commands are sent once it is idle (up to 30 minutes). A newer
+  `agent.configure` for the same pane replaces a queued one.
+
+| Agent | Commands | Notes |
+| --- | --- | --- |
+| Codex | `/model <id> --reasoning=<effort> --speed=fast\|standard` | Applies to this session only. Pass `model` when the current one is not known yet. |
+| Claude | `/model <id>`, `/effort <level>`, `/fast` | Claude saves the effort as the default for new sessions. `/fast` toggles, so a fast change needs the current state (`fast_state_unknown` before Claude's first reply). |
+| Cursor | — | `unsupported_agent`: Cursor's model picker filters by display name and cannot be driven reliably. Start a new agent with the model instead. |
+
+Errors: `invalid_params`, `unsupported_agent`, `models_unavailable`,
+`unknown_model`, `invalid_effort`, `fast_unavailable`, `model_unknown`,
+`fast_state_unknown`, `configure_failed`. CLI:
+`herdr api call agent.configure '{"pane_id":"w1:p2","effort":"high"}'`.
 
 ## Protocol stability
 

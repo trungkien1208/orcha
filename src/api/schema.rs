@@ -149,6 +149,7 @@ operations::define_operations! {
     ServerMultiplex(EmptyParams) => "server.multiplex", false, false;
     AgentModels(AgentModelsParams) => "agent.models", false, false;
     PaneReportAgentModel(PaneReportAgentModelParams) => "pane.report_agent_model", false, false;
+    AgentConfigure(AgentConfigureParams) => "agent.configure", false, false;
 }
 
 #[cfg(test)]
