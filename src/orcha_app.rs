@@ -119,6 +119,8 @@ pub(crate) fn maybe_run_config_tool(args: &[String]) -> Option<i32> {
             return Some(0);
         }
         "update" => return Some(update_from_cli()),
+        // install.sh's Easy Job question (internal)
+        "__offer-easy-job" => return Some(installer_offer(args.get(2).map(String::as_str))),
         "uninstall" => return Some(uninstall()),
         "channel" => {
             eprintln!("orcha has one channel: `orcha update` installs the latest release.");
@@ -488,6 +490,43 @@ fn last_line(bytes: &[u8]) -> Option<String> {
         .map(str::trim)
         .rfind(|line| !line.is_empty())
         .map(str::to_owned)
+}
+
+/// install.sh asks about Easy Job through this: `pending` exits 0 when the
+/// question is still open (not answered, not installed), `yes` installs it
+/// and `no` declines; both answers keep the in-app offer from asking again.
+fn installer_offer(answer: Option<&str>) -> i32 {
+    let id = "easy-job";
+    match answer {
+        Some("pending") => {
+            let installed = crate::persist::plugin_registry::try_load()
+                .map(|plugins| plugins.iter().any(|plugin| plugin.plugin_id == id))
+                .unwrap_or(false);
+            let offers = plugin_offers();
+            i32::from(!PLUGIN_OFFER_PLATFORM || installed || offers.contains_key(id))
+        }
+        Some("yes") => {
+            answer_plugin_offer(id, false);
+            let me = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("orcha"));
+            let ok = std::process::Command::new(me)
+                .args(EASY_JOB_INSTALL)
+                .stdin(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success());
+            if !ok {
+                // the in-app offer asks again
+                forget_plugin_offer(id);
+                eprintln!("Easy Job was not added. Try later with: orcha office install");
+                return 1;
+            }
+            0
+        }
+        Some("no") => {
+            answer_plugin_offer(id, true);
+            0
+        }
+        _ => 2,
+    }
 }
 
 /// Installs an offered plugin, then (when asked) starts its pane with

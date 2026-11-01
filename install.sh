@@ -2,9 +2,22 @@
 # orcha in one line (macOS, Apple Silicon or Intel):
 #   curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.sh | sh
 # Installs the orcha app to ~/.local/bin/orcha and its extras (fuel and
-# account scripts, hand-off, theme, logo font) to ~/.orcha. No questions.
-# Run it again to update.
+# account scripts, hand-off, theme, logo font) to ~/.orcha. Run it again to
+# update.
+#
+# One question, asked once: add Easy Job, a pixel-art office for your
+# agents? Default no. `sh -s -- --office` answers yes, `--no-office` no; a
+# run without a terminal answers no.
 set -e
+
+OFFICE=ask
+for arg in "$@"; do
+  case "$arg" in
+    --office) OFFICE=yes ;;
+    --no-office) OFFICE=no ;;
+    *) echo "unknown option: $arg (use --office or --no-office)"; exit 2 ;;
+  esac
+done
 
 if [ "$(uname)" != Darwin ]; then
   echo "orcha's ready-made build is for macOS (and Windows: see install.ps1)."
@@ -55,6 +68,30 @@ else
   git clone --depth 1 --quiet https://github.com/trungkien1208/orcha-config "$EXTRAS"
 fi
 python3 -I "$EXTRAS/lib/setup.py" --app
+
+# Easy Job: only when the question is still open (not answered, not added)
+if "$BIN/orcha" __offer-easy-job pending 2>/dev/null; then
+  if [ "$OFFICE" = ask ]; then
+    OFFICE=no
+    if [ -t 1 ] && { : </dev/tty; } 2>/dev/null; then
+      printf "Add Easy Job, a pixel-art office for your agents? (y/N) "
+      read -r answer </dev/tty || answer=
+      case "$answer" in
+        y|Y|yes|YES|Yes) OFFICE=yes ;;
+      esac
+    else
+      # nobody to ask: no, and the question stays open
+      OFFICE=skip
+    fi
+  fi
+  case "$OFFICE" in
+    yes)
+      echo "→ adding Easy Job"
+      "$BIN/orcha" __offer-easy-job yes || true
+      ;;
+    no) "$BIN/orcha" __offer-easy-job no || true ;;
+  esac
+fi
 
 echo
 echo "✓ done. Open a new terminal window, then run:  orcha"
