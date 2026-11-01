@@ -2129,8 +2129,9 @@ impl ClientShellState {
             self.orcha_ui.update_check = Some(rx);
         }
         let (tx, rx) = std::sync::mpsc::channel();
+        let automatic = self.config.orcha.update_plugins;
         if crate::thread_spawn::spawn_named("orcha-plugin-update-check", move || {
-            let _ = tx.send(crate::orcha_plugin_updates::news());
+            let _ = tx.send(crate::orcha_plugin_updates::news(automatic));
         })
         .is_ok()
         {
@@ -2181,6 +2182,10 @@ impl ClientShellState {
             ui.plugin_update_check = None;
             ui.plugin_updates = news.updates;
             ui.plugin_update_notice = news.notice;
+            if let Some(updated) = news.updated {
+                self.show_notice(updated);
+                return true;
+            }
         }
         if let Some(Ok(news)) = ui.whats_new_check.as_ref().map(|rx| rx.try_recv()) {
             ui.whats_new_check = None;

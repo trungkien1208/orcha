@@ -56,10 +56,11 @@ pub(super) enum LookRow {
     Logos,
     Process,
     Side,
+    PluginUpdates,
 }
 
 impl LookRow {
-    pub(super) const ALL: [Self; 8] = [
+    pub(super) const ALL: [Self; 9] = [
         Self::Accent,
         Self::Side,
         Self::Sidebar,
@@ -68,6 +69,7 @@ impl LookRow {
         Self::Process,
         Self::Panes,
         Self::Logos,
+        Self::PluginUpdates,
     ];
 
     pub(super) fn label(self) -> &'static str {
@@ -80,6 +82,7 @@ impl LookRow {
             Self::Logos => "agent logos",
             Self::Process => "process",
             Self::Side => "sidebar side",
+            Self::PluginUpdates => "plugin updates",
         }
     }
 }
@@ -646,6 +649,12 @@ impl ClientShellState {
                     crate::config::ProcessPlacement::Off => "hidden".to_owned(),
                 }
             }
+            LookRow::PluginUpdates => if self.config.orcha.update_plugins {
+                "automatic · new versions install by themselves"
+            } else {
+                "ask first · Orcha shows what is new"
+            }
+            .to_owned(),
             LookRow::Logos => {
                 let mode = match self.config.orcha.icons {
                     crate::config::IconMode::Auto => "auto",
@@ -688,6 +697,12 @@ impl ClientShellState {
             LookRow::Panes => {
                 self.save_settings_edit(
                     ConfigEdit::PanePaper(!self.config.orcha.pane_paper),
+                    outcome,
+                );
+            }
+            LookRow::PluginUpdates => {
+                self.save_settings_edit(
+                    ConfigEdit::UpdatePlugins(!self.config.orcha.update_plugins),
                     outcome,
                 );
             }

@@ -126,15 +126,43 @@ pub(crate) struct PluginNews {
     pub updates: Vec<PluginUpdate>,
     /// An update to announce, with the plugin's name.
     pub notice: Option<(PluginUpdate, String)>,
+    /// What the automatic update installed, to show once.
+    pub updated: Option<String>,
 }
 
-/// Checks (at most daily) and picks the notice to show. Blocking.
-pub(crate) fn news() -> PluginNews {
-    let (updates, _) = check(false);
+/// Checks (at most daily) and picks the notice to show. With `automatic`
+/// (the "update plugins automatically" setting), installs what this Orcha
+/// can run instead, and the notice says what was updated. Blocking.
+pub(crate) fn news(automatic: bool) -> PluginNews {
+    let (mut updates, _) = check(false);
     let names: std::collections::HashMap<String, String> = github_plugins()
         .into_iter()
         .map(|plugin| (plugin.plugin_id, plugin.name))
         .collect();
+    if automatic {
+        let mut done = Vec::new();
+        for update in updates.iter().filter(|update| update.installable()) {
+            let name = names
+                .get(&update.id)
+                .cloned()
+                .unwrap_or_else(|| update.id.clone());
+            match update_plugin(&update.id) {
+                Ok(version) => {
+                    restart_running_panes(&update.id);
+                    done.push(format!("{name} updated to {version}"));
+                }
+                Err(log) => tracing::warn!(id = %update.id, %log, "automatic plugin update failed"),
+            }
+        }
+        if !done.is_empty() {
+            updates = cached();
+            return PluginNews {
+                updates,
+                notice: None,
+                updated: Some(done.join(" · ")),
+            };
+        }
+    }
     let notice = updates
         .iter()
         .filter(|update| update.available())
@@ -146,7 +174,103 @@ pub(crate) fn news() -> PluginNews {
                 .unwrap_or_else(|| update.id.clone());
             (update.clone(), name)
         });
-    PluginNews { updates, notice }
+    PluginNews {
+        updates,
+        notice,
+        updated: None,
+    }
+}
+
+/// How one plugin fared in `orcha update`.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum FollowOutcome {
+    Updated(String),
+    Current,
+    NeedsNewerOrcha,
+    Failed(String),
+}
+
+impl FollowOutcome {
+    pub(crate) fn line(&self, id: &str) -> String {
+        match self {
+            Self::Updated(version) => format!("  {id}: updated to {version}"),
+            Self::Current => format!("  {id}: already current"),
+            Self::NeedsNewerOrcha => format!("  {id}: needs a newer Orcha"),
+            Self::Failed(reason) => format!("  {id}: failed ({reason})"),
+        }
+    }
+}
+
+/// After `orcha update`: updates every GitHub plugin with the new Orcha
+/// (the executable on disk is the new one), printing one line each.
+pub(crate) fn follow_self_update() {
+    let plugins = github_plugins();
+    if plugins.is_empty() {
+        return;
+    }
+    println!("Plugins:");
+    for plugin in plugins {
+        let id = plugin.plugin_id;
+        let outcome = run_update(&id);
+        if matches!(outcome, FollowOutcome::Updated(_)) {
+            restart_running_panes(&id);
+        }
+        println!("{}", outcome.line(&id));
+    }
+}
+
+fn run_update(id: &str) -> FollowOutcome {
+    let Ok(exe) = std::env::current_exe() else {
+        return FollowOutcome::Failed("could not find orcha".to_owned());
+    };
+    let output = crate::noninteractive_process::command(exe)
+        .args(["plugin", "update", id, "--yes"])
+        .env(
+            crate::api::SOCKET_PATH_ENV_VAR,
+            crate::session::active_api_socket_path(),
+        )
+        .stdin(Stdio::null())
+        .output();
+    let Ok(output) = output else {
+        return FollowOutcome::Failed("could not run orcha plugin update".to_owned());
+    };
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    let version = || {
+        crate::persist::plugin_registry::try_load()
+            .ok()
+            .and_then(|plugins| plugins.into_iter().find(|plugin| plugin.plugin_id == id))
+            .map(|plugin| plugin.version)
+    };
+    let outcome = classify_update(output.status.success(), &text, version);
+    if matches!(outcome, FollowOutcome::Updated(_)) {
+        forget(id);
+    }
+    outcome
+}
+
+fn classify_update(
+    success: bool,
+    output: &str,
+    version: impl FnOnce() -> Option<String>,
+) -> FollowOutcome {
+    if success && output.contains("already up to date") {
+        return FollowOutcome::Current;
+    }
+    if success {
+        return FollowOutcome::Updated(version().unwrap_or_else(|| "the newest version".into()));
+    }
+    if output.contains("requires Herdr") || output.contains("plugin_requires_newer_herdr") {
+        return FollowOutcome::NeedsNewerOrcha;
+    }
+    FollowOutcome::Failed(
+        output
+            .lines()
+            .map(str::trim)
+            .rfind(|line| !line.is_empty())
+            .unwrap_or("no output")
+            .to_owned(),
+    )
 }
 
 /// The last answer, matched to what is installed now; no network.
@@ -642,6 +766,37 @@ mod tests {
             {"plugin_id": "other", "pane_id": "w1:p2"},
         ]});
         assert_eq!(plugin_pane_ids(&listed, "easy-job"), ["w1:p1"]);
+    }
+
+    #[test]
+    fn orcha_update_reports_each_plugin_in_one_line() {
+        let version = || Some("0.2.0".to_owned());
+        assert_eq!(
+            classify_update(true, "easy-job is already up to date.\n", version),
+            FollowOutcome::Current
+        );
+        assert_eq!(
+            classify_update(true, "Updated easy-job from x.\n", version),
+            FollowOutcome::Updated("0.2.0".into())
+        );
+        assert_eq!(
+            classify_update(
+                false,
+                "plugin requires Herdr 1.2.0 or newer; current Herdr is 0.9.5\n",
+                version
+            ),
+            FollowOutcome::NeedsNewerOrcha
+        );
+        let failed = classify_update(false, "build...\nfetch.sh: no network\n", version);
+        assert_eq!(failed, FollowOutcome::Failed("fetch.sh: no network".into()));
+        assert_eq!(
+            failed.line("easy-job"),
+            "  easy-job: failed (fetch.sh: no network)"
+        );
+        assert_eq!(
+            FollowOutcome::NeedsNewerOrcha.line("easy-job"),
+            "  easy-job: needs a newer Orcha"
+        );
     }
 
     #[test]

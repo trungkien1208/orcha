@@ -12,6 +12,8 @@ pub(crate) enum ConfigEdit<'a> {
     Fuel(super::FuelPlacement),
     /// orcha: paint default-colored pane cells with the style's paper.
     PanePaper(bool),
+    /// orcha: install GitHub plugin updates without asking.
+    UpdatePlugins(bool),
     /// orcha: agent logos from the icon font or plain symbols.
     Icons(super::IconMode),
     /// orcha: where PROCESS sits.
@@ -32,6 +34,7 @@ impl ConfigEdit<'_> {
             Self::RightPanel(_) => "right panel setting",
             Self::Fuel(_) => "fuel placement",
             Self::PanePaper(_) => "pane colors",
+            Self::UpdatePlugins(_) => "plugin update setting",
             Self::Icons(_) => "logo setting",
             Self::Process(_) => "process placement",
             Self::SidebarSide(_) => "sidebar side",
@@ -83,6 +86,9 @@ impl ConfigEdit<'_> {
                 super::upsert_section_value(content, "orcha", "fuel", value)
             }
             Self::PanePaper(on) => super::upsert_section_bool(content, "orcha", "pane_paper", on),
+            Self::UpdatePlugins(on) => {
+                super::upsert_section_bool(content, "orcha", "update_plugins", on)
+            }
             Self::Icons(mode) => {
                 let value = match mode {
                     super::IconMode::Auto => "\"auto\"",
@@ -149,12 +155,14 @@ mod tests {
         let content = ConfigEdit::RightPanel(false).apply(&content);
         let content = ConfigEdit::Fuel(crate::config::FuelPlacement::StatusBar).apply(&content);
         let content = ConfigEdit::PanePaper(false).apply(&content);
+        let content = ConfigEdit::UpdatePlugins(true).apply(&content);
         let value: toml::Value = toml::from_str(&content).expect("valid TOML");
         assert_eq!(value["theme"]["custom"]["mauve"].as_str(), Some("#6c8cff"));
         assert_eq!(value["ui"]["sidebar_width"].as_integer(), Some(40));
         assert_eq!(value["ui"]["right_panel"].as_bool(), Some(false));
         assert_eq!(value["orcha"]["fuel"].as_str(), Some("status_bar"));
         assert_eq!(value["orcha"]["pane_paper"].as_bool(), Some(false));
+        assert_eq!(value["orcha"]["update_plugins"].as_bool(), Some(true));
         let reset = ConfigEdit::Accent(None).apply(&content);
         assert!(!reset.contains("mauve"));
     }

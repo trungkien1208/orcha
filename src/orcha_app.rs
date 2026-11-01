@@ -648,6 +648,7 @@ fn update_from_cli() -> i32 {
         eprintln!("orcha update failed. Try again, or run:\n  {instruction}");
         return 1;
     }
+    crate::orcha_plugin_updates::follow_self_update();
     println!("Quit orcha and open it again to use the new version. Your agents keep running.");
     0
 }
