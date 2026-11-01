@@ -163,16 +163,41 @@ New Easy Job versions come out on their own schedule: orcha tells you when one i
 
 ```sh
 orcha             # open orcha (or come back to it)
-orcha update      # get the latest version
+orcha update      # get the latest version, and update your plugins too
 orcha uninstall   # remove orcha (asks before touching your settings)
-
-orcha office          # open Easy Job, the pixel office for your agents
-orcha office install  # add Easy Job
-orcha office update   # get the newest Easy Job
-orcha office remove   # remove Easy Job (asks first, keeps ~/.easy-job unless you say so)
 ```
 
-orcha also shows a green button when an update is ready, and `orcha update` brings your plugins (like Easy Job) along.
+**Quitting orcha only closes the window.** Your agents keep working in the background, and `orcha` brings you back. After an update, switch the background part to the new version without stopping anyone:
+
+```sh
+orcha server live-handoff --import-exe ~/.local/bin/orcha   # then open orcha again
+orcha server stop                                          # stops everything, agents too
+```
+
+**Easy Job, the pixel office:**
+
+```sh
+orcha office          # open it (starts it if it is off)
+orcha office install  # add it
+orcha office update   # get the newest one; a running office restarts on it
+orcha office remove   # remove it (asks first, keeps ~/.easy-job unless you say so)
+orcha plugin action invoke stop --plugin easy-job   # close it, keep it installed
+```
+
+In orcha itself, the header shows `● office` while Easy Job runs and `○ office` when it is off: click it to open. COMMANDS (`⌕ commands`) has Open, Stop, Update and Uninstall for Easy Job and every other plugin.
+
+**Plugins in general:**
+
+```sh
+orcha plugin list                       # what is installed, and any update waiting
+orcha plugin install owner/repo         # add a plugin from GitHub
+orcha plugin update <id>                # get its newest version
+orcha plugin uninstall <id>             # remove it
+```
+
+orcha checks once a day whether a plugin has a new version, tells you once, and keeps an Update in COMMANDS. Rather not be asked? Settings, look, "plugin updates": automatic.
+
+orcha also shows a green button when an update of orcha itself is ready.
 
 ## Good to know
 
@@ -182,15 +207,13 @@ orcha also shows a green button when an update is ready, and `orcha update` brin
 <details>
 <summary><b>Updating from an older version</b></summary>
 
-Run `orcha update`, then quit orcha and open it again.
-
-On macOS, if you see `config.toml has unknown keys` after updating, the old version is still running in the background. Switch it to the new one with:
+Run `orcha update`, then switch the background part to the new version (quitting orcha alone keeps the old one running):
 
 ```sh
 orcha server live-handoff --import-exe ~/.local/bin/orcha
 ```
 
-Then open orcha again. Your running agents move over without stopping. Avoid `orcha server stop` while agents are busy, because that stops them too.
+Then open orcha again. Your running agents move over without stopping. If you see `config.toml has unknown keys` or a new feature is missing, this step was skipped. Avoid `orcha server stop` while agents are busy, because that stops them too.
 
 </details>
 
