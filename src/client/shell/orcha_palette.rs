@@ -31,6 +31,7 @@ pub(super) enum PaletteCommand {
     ImportProjects,
     Settings,
     SettingsWeb,
+    Background,
     Keybinds,
     ToggleRightPanel,
     OpenAllProjects,
@@ -40,7 +41,7 @@ pub(super) enum PaletteCommand {
 }
 
 /// (command, title, what it does)
-const COMMANDS: [(PaletteCommand, &str, &str); 26] = [
+const COMMANDS: [(PaletteCommand, &str, &str); 27] = [
     (
         PaletteCommand::NewAgent,
         "New agent",
@@ -136,6 +137,11 @@ const COMMANDS: [(PaletteCommand, &str, &str); 26] = [
         PaletteCommand::SettingsWeb,
         "Settings in the browser",
         "every setting on one page, applied as you change it",
+    ),
+    (
+        PaletteCommand::Background,
+        "Running in background",
+        "agents, plugins and Easy Job that keep going after you quit",
     ),
     (
         PaletteCommand::Keybinds,
@@ -899,6 +905,7 @@ impl ClientShellState {
                 self.record_binding(binding(KeybindAction::Settings), outcome)
             }
             PaletteCommand::SettingsWeb => self.open_settings_web(),
+            PaletteCommand::Background => self.open_settings_web_at("background"),
             PaletteCommand::Keybinds => self.record_binding(binding(KeybindAction::Help), outcome),
             PaletteCommand::ToggleRightPanel => {
                 let on = !self.config.right_panel;

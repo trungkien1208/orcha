@@ -405,6 +405,8 @@ struct Inputs {
     transcript: Option<Transcript>,
     screen: String,
     repo: RepoState,
+    /// The checklist the old agent wrote before running low, when there is one.
+    checklist: Option<String>,
 }
 
 /// The last `limit` bytes of `text`, cut at a char boundary.
@@ -466,6 +468,12 @@ fn build_notes(inputs: &Inputs) -> String {
             .to_owned(),
     });
     lines.push(String::new());
+    if let Some(checklist) = &inputs.checklist {
+        lines.push(format!(
+            "The previous agent left a checklist in `{checklist}`: read it first and tick items off as you go."
+        ));
+        lines.push(String::new());
+    }
 
     let repo = &inputs.repo;
     if !repo.branch.is_empty() || !repo.status.is_empty() || !repo.commits.is_empty() {
@@ -706,7 +714,11 @@ pub(crate) fn hand_off_to(
     } else {
         String::new()
     };
+    let checklist_file = crate::config::Config::load().config.orcha.checklist_file;
+    let checklist = (!checklist_file.is_empty() && Path::new(&cwd).join(&checklist_file).is_file())
+        .then_some(checklist_file);
     let inputs = Inputs {
+        checklist,
         repo: RepoState::read(&cwd),
         source,
         cwd: cwd.clone(),
@@ -828,6 +840,7 @@ mod tests {
             mode: Some(Mode::Full),
             transcript: None,
             screen: String::new(),
+            checklist: None,
             repo: RepoState {
                 branch: "feature/dark".to_owned(),
                 status: " M src/a.rs".to_owned(),
@@ -835,6 +848,14 @@ mod tests {
                 commits: "abc123 start dark mode".to_owned(),
             },
         }
+    }
+
+    #[test]
+    fn notes_point_at_the_checklist_only_when_one_was_left() {
+        assert!(!build_notes(&inputs()).contains("checklist"));
+        let mut with = inputs();
+        with.checklist = Some(".orcha/handoff.md".to_owned());
+        assert!(build_notes(&with).contains("`.orcha/handoff.md`"));
     }
 
     #[test]

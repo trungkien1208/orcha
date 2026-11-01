@@ -1097,7 +1097,10 @@ impl ClientShellState {
                                 pane: pane.clone(),
                             },
                         )
-                    } else if alternate || pane.is_none() {
+                    } else if alternate
+                        || pane.is_none()
+                        || orcha.switch_mode == crate::config::SwitchMode::NewPane
+                    {
                         (
                             &orcha.open_command,
                             vec![("id", account.id.clone())],
@@ -1126,12 +1129,31 @@ impl ClientShellState {
                     if let (AccountAction::Switch { id, pane }, "claude") =
                         (&native, account.kind.as_str())
                     {
+                        let blocked = crate::orcha_accounts::restart_blocker(id);
+                        let chosen = match orcha.switch_mode {
+                            crate::config::SwitchMode::Keep => Some(native.clone()),
+                            crate::config::SwitchMode::Restart if blocked.is_none() => {
+                                Some(AccountAction::Restart {
+                                    id: id.clone(),
+                                    pane: pane.clone(),
+                                })
+                            }
+                            _ => None,
+                        };
+                        if let Some(action) = chosen {
+                            self.orcha_ui.popup = None;
+                            self.start_account_action(action);
+                            self.accounts
+                                .mark_current(&account.id, std::time::Instant::now());
+                            self.update_low_fuel_hint();
+                            return;
+                        }
                         self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::SwitchAccount {
                             selected: 0,
                             id: id.clone(),
                             label: account.label.clone(),
                             pane: pane.clone(),
-                            restart_blocked: crate::orcha_accounts::restart_blocker(id),
+                            restart_blocked: blocked,
                         });
                         return;
                     }
@@ -1589,6 +1611,132 @@ impl ClientShellState {
         self.orcha_ui.low_fuel_offered.insert(id);
         self.open_accounts_overlay();
         true
+    }
+
+    /// Running low, with the focused agent between turns: first (under
+    /// `checklist_percent`) ask it to write a hand-off checklist, then
+    /// (under `auto_handoff_percent`) move the chat to the best other
+    /// account without asking. Each happens once per account; both are off
+    /// unless set.
+    pub(super) fn act_on_low_fuel(&mut self) -> bool {
+        if self.orcha_ui.popup.is_some() || self.overlay.is_some() {
+            return false;
+        }
+        let orcha = &self.config.orcha;
+        if orcha.checklist_percent == 0 && orcha.auto_handoff_percent == 0 {
+            return false;
+        }
+        let Some(current) = self.accounts.current().filter(|account| account.current) else {
+            return false;
+        };
+        let Some(left) = current.lowest() else {
+            return false;
+        };
+        let Some((pane, kind)) = self.snapshot.as_deref().and_then(|snapshot| {
+            let focused = snapshot.focused_pane_id.as_deref()?;
+            snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.pane_id == focused)
+                .filter(|agent| {
+                    matches!(
+                        agent.agent_status,
+                        crate::api::schema::AgentStatus::Idle
+                            | crate::api::schema::AgentStatus::Done
+                    )
+                })
+                .map(|agent| {
+                    (
+                        agent.pane_id.clone(),
+                        agent.agent.clone().unwrap_or_default(),
+                    )
+                })
+        }) else {
+            return false;
+        };
+        let id = current.id.clone();
+        let current_kind = current.kind.clone();
+        if left < orcha.checklist_percent && !self.orcha_ui.checklist_asked.contains(&id) {
+            self.orcha_ui.checklist_asked.insert(id);
+            let prompt = checklist_prompt(left, &orcha.checklist_file);
+            let file = orcha.checklist_file.clone();
+            let _ = crate::thread_spawn::spawn_named("orcha-checklist", move || {
+                crate::orcha_handoff::send_prompt(&pane, &prompt);
+            });
+            tracing::info!(left, %file, %kind, "orcha: asked the agent for a hand-off checklist");
+            self.show_notice(format!(
+                "{left}% left · asked {kind} to write its checklist to {file}"
+            ));
+            return true;
+        }
+        if left >= orcha.auto_handoff_percent || self.orcha_ui.auto_handed_off.contains(&id) {
+            return false;
+        }
+        self.orcha_ui.auto_handed_off.insert(id.clone());
+        // it is moving on by itself: the offer would only get in the way
+        self.orcha_ui.low_fuel_offered.insert(id);
+        let target = self.accounts.data().and_then(|accounts| {
+            super::orcha_popup::best_account(accounts)
+                .and_then(|index| accounts.get(index).cloned())
+        });
+        let Some(target) = target else {
+            tracing::info!(left, "orcha: low on fuel, but no other account has any");
+            self.show_notice(format!(
+                "{left}% left · no other account has fuel to move to"
+            ));
+            return true;
+        };
+        tracing::info!(left, to = %target.id, mode = orcha.switch_mode.as_str(), "orcha: moving the chat on by itself");
+        if target.kind != current_kind {
+            self.start_handoff(pane, target.kind.clone(), "summary");
+            self.show_notice(format!(
+                "{left}% left · handing this chat to {}",
+                target.label
+            ));
+            return true;
+        }
+        let action = match orcha.switch_mode {
+            crate::config::SwitchMode::NewPane => AccountAction::Open {
+                id: target.id.clone(),
+                cwd: self.pane_cwd(&pane),
+                pane: Some(pane),
+            },
+            crate::config::SwitchMode::Restart
+                if target.kind == "claude"
+                    && crate::orcha_accounts::restart_blocker(&target.id).is_none() =>
+            {
+                AccountAction::Restart {
+                    id: target.id.clone(),
+                    pane,
+                }
+            }
+            _ => AccountAction::Switch {
+                id: target.id.clone(),
+                pane,
+            },
+        };
+        self.start_account_action(action);
+        self.accounts
+            .mark_current(&target.id, std::time::Instant::now());
+        self.update_low_fuel_hint();
+        self.show_notice(format!(
+            "{left}% left · moved this chat to {}",
+            target.label
+        ));
+        true
+    }
+
+    fn pane_cwd(&self, pane: &str) -> String {
+        self.snapshot
+            .as_deref()
+            .and_then(|snapshot| {
+                snapshot
+                    .panes
+                    .iter()
+                    .find(|p| p.pane_id == pane)
+                    .and_then(|p| p.foreground_cwd.clone().or_else(|| p.cwd.clone()))
+            })
+            .unwrap_or_default()
     }
 
     /// Focuses the next agent that needs you, across all projects.
@@ -2160,9 +2308,14 @@ impl ClientShellState {
     /// Opens every setting in the browser (starting its page when needed),
     /// off the input path.
     pub(super) fn open_settings_web(&mut self) {
+        self.open_settings_web_at("");
+    }
+
+    /// The same page, scrolled to `section`.
+    pub(super) fn open_settings_web_at(&mut self, section: &'static str) {
         self.show_notice("opening settings in the browser…".to_owned());
-        let _ = crate::thread_spawn::spawn_named("orcha-settings-web", || {
-            if let Err(message) = super::orcha_settings_web::open_quietly() {
+        let _ = crate::thread_spawn::spawn_named("orcha-settings-web", move || {
+            if let Err(message) = super::orcha_settings_web::open_quietly(section) {
                 tracing::warn!(%message, "the settings page did not open");
             }
         });
@@ -2412,6 +2565,16 @@ fn launch_project() -> Option<std::path::PathBuf> {
         .filter(|root| !root.is_empty())
         .map(std::path::PathBuf::from);
     Some(root.unwrap_or(cwd))
+}
+
+/// What the agent is asked to write before its account runs dry.
+fn checklist_prompt(left: u8, file: &str) -> String {
+    format!(
+        "Your account has about {left}% of its plan left. Before going on, write a short \
+         hand-off checklist to {file} (create the folder if needed): what is done, what is \
+         next as - [ ] items, open questions, and the files you touched. Keep it under 40 \
+         lines, then stop and wait."
+    )
 }
 
 #[cfg(test)]

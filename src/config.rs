@@ -25,9 +25,9 @@ pub use self::{
         validated_sidebar_bounds, AgentPanelSortConfig, Config, ConfigReloadReport,
         ConfigReloadStatus, FuelPlacement, HostCursorModeConfig, IconMode, NewTerminalCwdConfig,
         OrchaConfig, PaneBordersConfig, ProcessPlacement, ShellModeConfig,
-        SidebarCollapsedModeConfig, SidebarSide, StatusIndicatorStyle, TabBarPositionConfig,
-        ToastClipboardPosition, ToastConfig, ToastDelivery, ToastHerdrPosition,
-        UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
+        SidebarCollapsedModeConfig, SidebarSide, StatusIndicatorStyle, SwitchMode,
+        TabBarPositionConfig, ToastClipboardPosition, ToastConfig, ToastDelivery,
+        ToastHerdrPosition, UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
     },
     sidebar::{
         AgentSidebarToken, AgentsSidebarConfig, SidebarConfig, SidebarTokenStyle,

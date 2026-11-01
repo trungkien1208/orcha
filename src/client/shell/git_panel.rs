@@ -232,6 +232,7 @@ impl ClientShellState {
         repaint |= self.poll_handoff();
         repaint |= self.poll_account_action();
         repaint |= self.poll_update();
+        repaint |= self.act_on_low_fuel();
         repaint |= self.offer_continue_on_low_fuel();
         let running = self.snapshot.as_deref().is_some_and(|snapshot| {
             snapshot

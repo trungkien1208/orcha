@@ -96,6 +96,25 @@
   .win .status { height: 16px; background: #0b0a09; display: flex; align-items: center; gap: 8px; padding: 0 8px; }
   .win .status .gauge { width: 60px; }
   .hint { color: var(--muted); font-size: 12.5px; }
+  /* hand-off: the fuel bar from full to empty with the three marks */
+  .fuelbar { position: relative; height: 34px; border: 3px solid var(--line); margin: 6px 0 30px;
+    background: linear-gradient(90deg, var(--red) 0%, var(--yellow) 30%, var(--green) 60%, var(--green) 100%); }
+  .fuelbar .mark { position: absolute; top: -3px; bottom: -3px; width: 3px; background: var(--line); }
+  .fuelbar .mark span { position: absolute; top: 36px; left: 50%; transform: translateX(-50%); white-space: nowrap;
+    font: 11px var(--mono); background: var(--card); border: 2px solid var(--line); padding: 0 4px; }
+  .fuelbar .end { position: absolute; top: 6px; font: 600 12px var(--mono); color: #111; }
+  /* background list */
+  .bg-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 2px dashed var(--soft); flex-wrap: wrap; }
+  .bg-row:first-of-type { border-top: 0; }
+  .bg-row .what { flex: 1; min-width: 180px; }
+  .bg-row .what small { display: block; color: var(--muted); font-size: 12.5px; }
+  .chip { font: 600 11.5px var(--mono); border: 2px solid var(--line); padding: 1px 7px; background: var(--pane); }
+  .chip.blocked { background: var(--pink); color: #111; } .chip.working { background: var(--yellow); color: #111; }
+  .chip.done { background: var(--green); color: #111; } .chip.on { background: var(--green); color: #111; }
+  .act { border: 2px solid var(--line); background: var(--pane); padding: 3px 10px; cursor: pointer; font-size: 13px; text-decoration: none; color: var(--ink); }
+  .act:hover { background: var(--yellow); color: #111; }
+  .act.danger { background: var(--red); color: #fff; }
+  .counts { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(120px); background: var(--ink); color: var(--bg);
     border: 3px solid var(--line); padding: 8px 14px; font: 13px var(--mono); transition: transform .2s; max-width: calc(100% - 32px); z-index: 10; }
   .toast.show { transform: translateX(-50%) translateY(0); }
@@ -127,7 +146,7 @@
 "use strict";
 const token = new URLSearchParams(location.search).get("t") || "";
 // keep the token out of the address bar, history and screenshots
-history.replaceState(null, "", "/");
+history.replaceState(null, "", "/" + location.hash);
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, props = {}, ...kids) => {
   const node = document.createElement(tag);
@@ -138,6 +157,7 @@ const el = (tag, props = {}, ...kids) => {
   return node;
 };
 let state = null;
+let background = null;
 let busy = false;
 
 try {
@@ -273,6 +293,112 @@ function sketch() {
   return el("div", { className: "preview" }, win, el("div", { className: "hint", textContent: "A sketch of your orcha window: it follows every change below." }));
 }
 
+function fuelbar() {
+  const bar = el("div", { className: "fuelbar" });
+  bar.append(el("span", { className: "end", textContent: "0%", style: "left:6px" }));
+  bar.append(el("span", { className: "end", textContent: "100%", style: "right:6px" }));
+  const marks = [
+    ["checklist_percent", "checklist"],
+    ["low_fuel_percent", "offer"],
+    ["auto_handoff_percent", "move on"],
+  ];
+  for (const [key, label] of marks) {
+    const at = Number(value(key)) || 0;
+    if (!at) continue;
+    const mark = el("div", { className: "mark" }, el("span", { textContent: label + " " + at + "%" }));
+    mark.style.left = at + "%";
+    bar.append(mark);
+  }
+  return el("div", {}, bar, el("div", { className: "hint", textContent:
+    "As an account runs down (right to left), orcha first asks for a checklist, then offers a switch, then moves the chat on by itself. Each happens once, while the agent is between turns." }));
+}
+
+async function act(body, button) {
+  if (button) button.disabled = true;
+  try {
+    const data = await call("/api/background", body);
+    toast(data.note || "done");
+    if (body.what === "settings") return;
+    await refreshBackground();
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+/** A button that asks once more before doing something big. */
+function sure(label, body) {
+  const b = el("button", { className: "act danger", textContent: label });
+  b.onclick = () => {
+    if (b.dataset.armed) return act(body, b);
+    b.dataset.armed = "1";
+    b.textContent = "really? click again";
+    setTimeout(() => { delete b.dataset.armed; b.textContent = label; }, 4000);
+  };
+  return b;
+}
+
+function button(label, body) {
+  const b = el("button", { className: "act", textContent: label });
+  b.onclick = () => act(body, b);
+  return b;
+}
+
+function bgRow(title, sub, ...actions) {
+  return el("div", { className: "bg-row" },
+    el("div", { className: "what" }, el("b", { textContent: title }), sub ? el("small", { textContent: sub }) : null),
+    ...actions);
+}
+
+function backgroundCard() {
+  const card = el("section", { className: "card", id: "background" }, el("h2", { textContent: "Running in background" }));
+  card.append(el("p", { className: "hint", textContent: "Quitting orcha only closes the window. These keep going until you stop them." }));
+  const bg = background;
+  if (!bg) { card.append(el("p", { className: "hint", textContent: "looking…" })); return card; }
+  if (!bg.server.running) { card.append(bgRow("Server", "not running")); return card; }
+  const agents = bg.agents || [];
+  const order = { blocked: 0, working: 1, done: 2, idle: 3, unknown: 3 };
+  const names = { blocked: "needs you", working: "working", done: "done", idle: "idle", unknown: "idle" };
+  const counts = {};
+  for (const a of agents) counts[names[a.status] || a.status] = (counts[names[a.status] || a.status] || 0) + 1;
+  card.append(bgRow("Server", (bg.server.version ? "orcha engine " + bg.server.version + " · " : "") + agents.length + " agent" + (agents.length === 1 ? "" : "s"),
+    sure("Stop everything", { what: "server" })));
+  if (agents.length) {
+    card.append(el("div", { className: "counts" }, ...Object.entries(counts).map(([k, n]) =>
+      el("span", { className: "chip " + (k === "needs you" ? "blocked" : k), textContent: n + " " + k }))));
+  }
+  for (const a of [...agents].sort((x, y) => (order[x.status] ?? 4) - (order[y.status] ?? 4))) {
+    card.append(bgRow((a.project || a.cwd || a.pane_id) + " · " + (a.agent || "agent"), a.cwd,
+      el("span", { className: "chip " + (a.status === "unknown" ? "" : a.status), textContent: names[a.status] || a.status }),
+      button("Go to", { what: "focus", pane_id: a.pane_id })));
+  }
+  for (const p of bg.plugin_panes || []) {
+    const open = p.url ? el("a", { className: "act", href: p.url, target: "_blank", rel: "noreferrer", textContent: "Open" }) : null;
+    card.append(bgRow(p.plugin_id, (p.entrypoint || "server") + " in " + p.pane_id, open,
+      button("Stop", { what: "plugin_pane", pane_id: p.pane_id })));
+  }
+  if (bg.office) {
+    const running = bg.office.running;
+    card.append(bgRow("Easy Job", running ? "office running" + (bg.office.port ? " on port " + bg.office.port : "") : "added, not running",
+      el("span", { className: "chip" + (running ? " on" : ""), textContent: running ? "on" : "off" }),
+      running ? button("Stop", { what: "office" }) : null));
+  }
+  card.append(bgRow("This settings page", "closes by itself a few minutes after the tab is gone", button("Close now", { what: "settings" })));
+  return card;
+}
+
+async function refreshBackground() {
+  try {
+    const next = await call("/api/background");
+    if (JSON.stringify(next) !== JSON.stringify(background)) {
+      background = next;
+      const old = document.getElementById("background");
+      if (old) old.replaceWith(backgroundCard());
+    }
+  } catch (_) {}
+}
+
 function applyAccent() {
   const accent = field("accent");
   const color = accent?.options.find((o) => o.value === accent.value)?.color;
@@ -291,6 +417,7 @@ function render() {
   for (const section of state.sections) {
     const card = el("section", { className: "card", id: section.id }, el("h2", { textContent: section.title }));
     if (section.id === "look") card.append(sketch());
+    if (section.id === "handoff") card.append(fuelbar());
     for (const f of section.fields) {
       const row = el("div", { className: "row" });
       row.append(el("div", { className: "label" }, el("b", { textContent: f.label }), f.help ? el("small", { textContent: f.help }) : null));
@@ -300,6 +427,8 @@ function render() {
     main.append(card);
     nav.append(el("a", { href: "#" + section.id, textContent: section.title }));
   }
+  main.append(backgroundCard());
+  nav.append(el("a", { href: "#background", textContent: "Background" }));
   if (!state.has_config_tool) {
     main.append(el("p", { className: "hint", textContent: "Palette, font, widgets and language come from orcha-config, which is not installed here." }));
   }
@@ -309,10 +438,12 @@ function render() {
 
 function markNav() {
   let current = state?.sections[0]?.id;
-  for (const section of state?.sections || []) {
+  for (const section of [...(state?.sections || []), { id: "background" }]) {
     const node = document.getElementById(section.id);
     if (node && node.getBoundingClientRect().top < 140) current = section.id;
   }
+  // the last card cannot reach the top: at the very bottom, it is the one
+  if (innerHeight + scrollY >= document.documentElement.scrollHeight - 4) current = "background";
   for (const a of document.querySelectorAll("nav a")) a.classList.toggle("on", a.getAttribute("href") === "#" + current);
 }
 addEventListener("scroll", markNav, { passive: true });
@@ -334,8 +465,12 @@ async function refresh(first) {
     }
   }
 }
-refresh(true);
+refresh(true).then(() => {
+  refreshBackground();
+  if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
+});
 setInterval(refresh, 4000);
+setInterval(refreshBackground, 4000);
 </script>
 </body>
 </html>

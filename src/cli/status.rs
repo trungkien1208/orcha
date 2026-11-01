@@ -134,6 +134,9 @@ fn print_full_status(json: bool) -> std::io::Result<i32> {
             }
         }
     }
+    if crate::orcha_app::is_orcha() {
+        crate::orcha_background::print();
+    }
 
     Ok(0)
 }

@@ -27,7 +27,7 @@ const MAX_BODY: usize = 64 * 1024;
 
 pub(crate) fn run(args: &[String]) -> i32 {
     match args.first().map(String::as_str) {
-        None | Some("open") => match open_quietly() {
+        None | Some("open") => match open_quietly("") {
             Ok(url) => {
                 println!("Settings are open in your browser: {url}");
                 0
@@ -63,12 +63,16 @@ pub(crate) fn run(args: &[String]) -> i32 {
 
 /// Opens the page, starting its background server first when needed.
 /// Blocking for up to a few seconds: call it off the input path.
-pub(crate) fn open_quietly() -> Result<String, String> {
+/// `section` (say "background") scrolls the page to it.
+pub(crate) fn open_quietly(section: &str) -> Result<String, String> {
     let server = match running() {
         Some(server) => server,
         None => start()?,
     };
-    let url = server.url();
+    let mut url = server.url();
+    if !section.is_empty() {
+        url = format!("{url}#{section}");
+    }
     crate::platform::open_url(&url).map_err(|err| format!("could not open {url}: {err}"))?;
     Ok(url)
 }
@@ -333,6 +337,27 @@ fn handle(mut stream: TcpStream, token: &str, host_ok: &[String]) -> bool {
             respond_json(&mut stream, "200 OK", &state());
             true
         }
+        ("GET", "/api/background") => {
+            respond_json(&mut stream, "200 OK", &crate::orcha_background::snapshot());
+            true
+        }
+        ("POST", "/api/background") => {
+            let body: Value = serde_json::from_slice(&request.body).unwrap_or_default();
+            let quit = body["what"] == "settings";
+            match background_action(&body) {
+                Ok(note) => respond_json(&mut stream, "200 OK", &json!({"ok": true, "note": note})),
+                Err(message) => respond_json(
+                    &mut stream,
+                    "400 Bad Request",
+                    &json!({"ok": false, "error": message}),
+                ),
+            }
+            if quit {
+                let _ = std::fs::remove_file(state_path());
+                std::process::exit(0);
+            }
+            true
+        }
         ("POST", "/api/set") => {
             let body: Value = serde_json::from_slice(&request.body).unwrap_or_default();
             let key = body["key"].as_str().unwrap_or_default();
@@ -554,9 +579,17 @@ fn state() -> Value {
             vec![option("off", "off"), option("herdr", "in orcha"), option("terminal", "terminal"), option("system", "system")]),
     ]}));
 
-    sections.push(json!({"id": "accounts", "title": "Accounts", "fields": [
-        json!({"key": "low_fuel_percent", "label": "Offer to switch below", "help": "under this % left of a plan window, orcha offers another account",
+    sections.push(json!({"id": "handoff", "title": "Hand-off", "fields": [
+        json!({"key": "checklist_percent", "label": "Ask for a checklist below", "help": "the agent writes what is done and what is next while it still can; 0: never",
+            "kind": "range", "min": 0, "max": 60, "unit": "%", "value": orcha.checklist_percent}),
+        json!({"key": "low_fuel_percent", "label": "Offer to switch below", "help": "orcha asks where to continue",
             "kind": "range", "min": 1, "max": 50, "unit": "%", "value": orcha.low_fuel_percent}),
+        json!({"key": "auto_handoff_percent", "label": "Move on by itself below", "help": "the chat goes to the account with the most fuel, no question; 0: never",
+            "kind": "range", "min": 0, "max": 50, "unit": "%", "value": orcha.auto_handoff_percent}),
+        select("switch_mode", "Switching account", "how a chat moves to another account of the same agent", orcha.switch_mode.as_str(), vec![
+            option("ask", "ask each time"), option("keep", "keep the chat running"),
+            option("restart", "restart the agent"), option("new_pane", "new pane")]),
+        text("checklist_file", "Checklist file", "in the project; a hand-off points the next agent at it", &orcha.checklist_file),
     ]}));
 
     if let Some(widgets) = json_config["widgets"].as_object() {
@@ -745,6 +778,37 @@ fn apply(key: &str, value: &Value) -> Result<Option<String>, String> {
         return Ok(None);
     }
     match key {
+        "checklist_percent" | "auto_handoff_percent" => {
+            let percent = value
+                .as_u64()
+                .filter(|percent| *percent <= if key == "checklist_percent" { 60 } else { 50 })
+                .ok_or("expected a percentage")?;
+            write_orcha_value(key, &percent.to_string())?;
+            reload_server();
+            Ok(None)
+        }
+        "switch_mode" => {
+            let mode = one_of(value, &["ask", "keep", "restart", "new_pane"])?;
+            write_orcha_value(key, &format!("\"{mode}\""))?;
+            reload_server();
+            Ok(None)
+        }
+        "checklist_file" => {
+            let file = value.as_str().ok_or("expected text")?.trim();
+            let path = std::path::Path::new(file);
+            if file.is_empty()
+                || file.contains('\n')
+                || path.is_absolute()
+                || path
+                    .components()
+                    .any(|part| matches!(part, std::path::Component::ParentDir))
+            {
+                return Err("expected a path inside the project, like .orcha/handoff.md".to_owned());
+            }
+            write_orcha_value(key, &serde_json::to_string(file).unwrap_or_default())?;
+            reload_server();
+            Ok(None)
+        }
         "low_fuel_percent" => {
             let percent = value
                 .as_u64()
@@ -856,6 +920,41 @@ fn apply(key: &str, value: &Value) -> Result<Option<String>, String> {
     }
 }
 
+/// Stop or go to something from the background list.
+fn background_action(body: &Value) -> Result<String, String> {
+    let pane = || {
+        body["pane_id"]
+            .as_str()
+            .filter(|pane| !pane.is_empty() && pane.len() < 64)
+            .ok_or_else(|| "expected a pane".to_owned())
+    };
+    let call = |method: &str, params: Value| {
+        crate::orcha_handoff::herdr_json(&["api", "call", method, &params.to_string()])
+            .map(|_| ())
+            .ok_or_else(|| format!("{method} did not work"))
+    };
+    match body["what"].as_str().unwrap_or_default() {
+        "focus" => {
+            call("agent.focus", json!({"target": pane()?}))?;
+            Ok("focused in orcha".to_owned())
+        }
+        "plugin_pane" => {
+            call("plugin.pane.stop", json!({"pane_id": pane()?}))?;
+            Ok("stopped".to_owned())
+        }
+        "office" => {
+            crate::orcha_office::stop_quietly();
+            Ok("Easy Job stopped".to_owned())
+        }
+        "server" => {
+            call("server.stop", json!({}))?;
+            Ok("the server and every agent stopped".to_owned())
+        }
+        "settings" => Ok("this page is closing".to_owned()),
+        other => Err(format!("unknown action: {other}")),
+    }
+}
+
 fn ghostty_note() -> String {
     "saved · Ghostty shows it after ⌘⇧, (reload config)".to_owned()
 }
@@ -920,6 +1019,12 @@ mod tests {
         assert!(apply("low_fuel_percent", &json!(0)).is_err());
         assert!(apply("low_fuel_percent", &json!(90)).is_err());
         assert!(apply("repo.base", &json!("a\nb")).is_err());
+        assert!(apply("checklist_percent", &json!(61)).is_err());
+        assert!(apply("switch_mode", &json!("teleport")).is_err());
+        assert!(apply("checklist_file", &json!("/etc/passwd")).is_err());
+        assert!(apply("checklist_file", &json!("../outside.md")).is_err());
+        assert!(background_action(&json!({"what": "nope"})).is_err());
+        assert!(background_action(&json!({"what": "focus"})).is_err());
     }
 
     #[test]

@@ -374,6 +374,32 @@ pub enum IconMode {
     Symbols,
 }
 
+/// How a chat moves to another account of the same agent (`[orcha] switch_mode`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SwitchMode {
+    /// Ask each time (Claude: keep running or restart).
+    #[default]
+    Ask,
+    /// Same pane, same chat, keeps running on the new sign-in.
+    Keep,
+    /// Same pane, same chat, the agent restarts on the new account.
+    Restart,
+    /// The chat continues in a new pane beside the old one.
+    NewPane,
+}
+
+impl SwitchMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::Keep => "keep",
+            Self::Restart => "restart",
+            Self::NewPane => "new_pane",
+        }
+    }
+}
+
 /// orcha's own settings (`[orcha]`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -413,6 +439,17 @@ pub struct OrchaConfig {
     pub pane_paper: bool,
     /// Under this % left of a plan window, offer to switch accounts. Default: 10.
     pub low_fuel_percent: u8,
+    /// Under this % left, ask the focused agent (between turns) to write a
+    /// hand-off checklist to `checklist_file`. 0 (the default): never.
+    pub checklist_percent: u8,
+    /// Where that checklist goes, relative to the project. A hand-off
+    /// points the next agent at it.
+    pub checklist_file: String,
+    /// Under this % left, move the focused chat (between turns) to the best
+    /// other account without asking. 0 (the default): only offer.
+    pub auto_handoff_percent: u8,
+    /// How a chat moves to another account of the same agent.
+    pub switch_mode: SwitchMode,
     /// Install new versions of GitHub plugins as soon as the daily check
     /// finds them, without asking. Default: false (Orcha asks first).
     pub update_plugins: bool,
@@ -440,6 +477,10 @@ impl Default for OrchaConfig {
             git_gui: String::new(),
             pane_paper: true,
             low_fuel_percent: 10,
+            checklist_percent: 0,
+            checklist_file: ".orcha/handoff.md".to_owned(),
+            auto_handoff_percent: 0,
+            switch_mode: SwitchMode::Ask,
             update_plugins: false,
             open_with: std::collections::HashMap::new(),
         }
@@ -1644,6 +1685,29 @@ status_indicators = "symbols"
         )
         .unwrap();
         assert_eq!(config.ui.status_indicators, StatusIndicatorStyle::Symbols);
+    }
+
+    #[test]
+    fn orcha_hand_off_settings_are_off_until_set() {
+        let orcha = Config::default().orcha;
+        assert_eq!(orcha.checklist_percent, 0);
+        assert_eq!(orcha.auto_handoff_percent, 0);
+        assert_eq!(orcha.switch_mode, SwitchMode::Ask);
+
+        let config: Config = toml::from_str(
+            r#"
+[orcha]
+checklist_percent = 25
+auto_handoff_percent = 5
+switch_mode = "new_pane"
+checklist_file = "NOTES.md"
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.orcha.checklist_percent, 25);
+        assert_eq!(config.orcha.auto_handoff_percent, 5);
+        assert_eq!(config.orcha.switch_mode, SwitchMode::NewPane);
+        assert_eq!(config.orcha.checklist_file, "NOTES.md");
     }
 
     #[test]

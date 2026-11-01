@@ -239,6 +239,10 @@ pub(crate) struct OrchaUiState {
     pub(super) low_fuel_hint: Option<String>,
     /// Accounts the CONTINUE ON popup was already offered for (once each).
     pub(super) low_fuel_offered: HashSet<String>,
+    /// Accounts whose agent was already asked for a hand-off checklist.
+    pub(super) checklist_asked: HashSet<String>,
+    /// Accounts whose chat was already moved on by itself.
+    pub(super) auto_handed_off: HashSet<String>,
     /// WELCOME: the IDEs and the Git GUIs found ("auto" first in each).
     pub(super) welcome_apps: (Vec<WelcomeApp>, Vec<WelcomeApp>),
     /// WELCOME: the agent hooks; none while the list is on its way.

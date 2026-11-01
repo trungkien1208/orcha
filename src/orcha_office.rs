@@ -111,6 +111,21 @@ fn pick_data_home(next: PathBuf, previous: PathBuf) -> PathBuf {
     }
 }
 
+/// Easy Job for the background list: None when it is not added, else
+/// whether its server runs and on which port. Blocking (small file reads).
+pub(crate) fn summary() -> Option<(bool, Option<u64>)> {
+    installed().then(|| match bridge() {
+        Some((_, port)) => (true, port),
+        None => (false, None),
+    })
+}
+
+/// Stops Easy Job's server and panes without questions (the caller asked).
+pub(crate) fn stop_quietly() {
+    stop_bridge();
+    stop_panes();
+}
+
 /// The server's pid from the state file Easy Job keeps, when it still runs.
 fn bridge_pid() -> Option<u32> {
     bridge().map(|(pid, _)| pid)
@@ -267,8 +282,7 @@ fn stop() -> i32 {
         println!("Easy Job is not running. Nothing to stop.");
         return 0;
     }
-    stop_bridge();
-    stop_panes();
+    stop_quietly();
     println!("Easy Job stopped. Open it again with: orcha office");
     0
 }

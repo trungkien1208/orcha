@@ -36,6 +36,7 @@ mod metadata_tokens;
 mod noninteractive_process;
 mod orcha_accounts;
 mod orcha_app;
+mod orcha_background;
 mod orcha_handoff;
 mod orcha_import;
 mod orcha_office;

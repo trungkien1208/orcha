@@ -168,7 +168,11 @@ orcha uninstall   # remove orcha (asks before touching your settings)
 orcha settings    # every setting on one page in your browser
 ```
 
-**Settings in the browser.** `orcha settings`, COMMANDS › Settings in the browser, or `b` in Settings opens a page with every setting: look (with a sketch of your window that follows each change), terminal palette and font, apps, notifications, accounts, widgets, project and language, plugins. A change applies at once, in every open orcha window. The page lives on 127.0.0.1 behind a one-time token and closes by itself a few minutes after you close the tab.
+**Settings in the browser.** `orcha settings`, COMMANDS › Settings in the browser, or `b` in Settings opens a page with every setting: look (with a sketch of your window that follows each change), terminal palette and font, apps, notifications, accounts, widgets, project and language, plugins. A change applies at once, in every open orcha window.
+
+**Hand-off before an account runs dry.** In Settings › Hand-off, three marks on a fuel bar: under the first, orcha asks the agent (between turns) to write a checklist of what is done and what is next to `.orcha/handoff.md`; under the second it offers to switch; under the third it moves the chat to the account with the most fuel by itself. The first and last are off until you set them. Pick there too whether switching keeps the chat running, restarts the agent, or opens a new pane. A hand-off points the next agent at the checklist.
+
+**What runs in the background.** COMMANDS › Running in background (or `orcha status`) lists the server, every agent and its state, plugin servers and Easy Job, with Go to and Stop. The page lives on 127.0.0.1 behind a one-time token and closes by itself a few minutes after you close the tab.
 
 **Quitting orcha only closes the window.** Your agents keep working in the background, and `orcha` brings you back. After an update, switch the background part to the new version without stopping anyone:
 
