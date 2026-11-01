@@ -1,184 +1,271 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Orcha Settings</title>
+<style>/*PICO*/</style>
 <style>
+  /* Pico styles the controls; orcha's theme colors are painted on top at runtime (paintTheme). */
   :root {
-    color-scheme: light;
-    --bg: #fff4d6; --card: #ffffff; --frame: #f4ead0; --ink: #111111; --line: #111111;
-    --shadow: #111111; --muted: #6b6556; --soft: #c9c2ad; --pane: #ffffff;
-    --yellow: #ffd23f; --pink: #ff7ab6; --green: #7be0ad; --blue: #6c8cff; --red: #e5484d;
-    --accent: var(--pink);
-    --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --accent: #ff8fab; --text: #e8f0d6; --muted: #a0b28a; --raised: #222a1e;
+    --mono: "SFMono-Regular", "JetBrains Mono", Consolas, monospace;
+    --pico-font-family-sans-serif: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+    --yellow: #f2c53d; --green: #96d660; --red: #e5484d;
+    --edge: 0 0 0 1px rgba(255, 255, 255, .06), 0 1px 2px rgba(0, 0, 0, .25);
   }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      color-scheme: dark;
-      --bg: #1f1c19; --card: #2e2a25; --frame: #29261f; --ink: #f2e8d3; --line: #0b0a09;
-      --shadow: #000000; --muted: #b3a891; --soft: #4f493f; --pane: #262320;
-      --yellow: #f2c53d; --pink: #f07aae; --green: #74d3a3; --blue: #7f9bff; --red: #f26464;
-    }
+  [data-theme=light] { --edge: 0 0 0 1px rgba(0, 0, 0, .07), 0 1px 2px rgba(0, 0, 0, .05); }
+  /* :not(#_) outranks Pico's own theme selectors */
+  :root:not(#_), [data-theme]:not(#_) {
+    --pico-font-size: 15px; --pico-line-height: 1.45; --pico-border-radius: 8px;
+    --pico-spacing: .8rem; --pico-form-element-spacing-vertical: .38rem; --pico-form-element-spacing-horizontal: .7rem;
+    --pico-primary: var(--accent); --pico-primary-background: var(--accent); --pico-primary-border: var(--accent);
+    --pico-primary-hover: var(--accent); --pico-primary-hover-background: color-mix(in srgb, var(--accent) 86%, black);
+    --pico-primary-hover-border: color-mix(in srgb, var(--accent) 86%, black); --pico-primary-inverse: #121212;
+    --pico-primary-focus: color-mix(in srgb, var(--accent) 35%, transparent); --pico-form-element-focus-color: var(--accent);
   }
-  :root[data-theme="dark"] {
-    color-scheme: dark;
-    --bg: #1f1c19; --card: #2e2a25; --frame: #29261f; --ink: #f2e8d3; --line: #0b0a09;
-    --shadow: #000000; --muted: #b3a891; --soft: #4f493f; --pane: #262320;
-    --yellow: #f2c53d; --pink: #f07aae; --green: #74d3a3; --blue: #7f9bff; --red: #f26464;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 var(--sans); }
-  button, input, select { font: inherit; color: inherit; }
-  .top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px;
-    padding: 12px 20px; background: var(--bg); border-bottom: 3px solid var(--line); }
-  .brand { font: 700 18px var(--mono); letter-spacing: .5px; }
-  .brand span { background: var(--accent); color: #111; padding: 0 6px; border: 2px solid var(--line); margin-left: 6px; font-size: 13px; }
-  .top .grow { flex: 1; }
-  .live { font: 12px var(--mono); color: var(--muted); }
+  html, body { font-size: 15px; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  h1, h2, h3 { text-wrap: balance; }
+  p, small { text-wrap: pretty; }
+  button, [role=button] { width: auto; transition-property: transform, background-color, color, border-color; transition-duration: .12s; }
+  button:active:not(:disabled), [role=button]:active { transform: scale(.96); }
+  input:not([type=checkbox], [type=radio], [type=range]), select { margin: 0; font-size: .93rem; }
+  small, .muted { color: var(--muted); }
+  output, .num { font-variant-numeric: tabular-nums; }
+
+  /* header */
+  .top { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--pico-background-color) 90%, transparent);
+    backdrop-filter: blur(10px); box-shadow: 0 1px 0 var(--pico-muted-border-color); }
+  .top .bar { display: flex; align-items: center; gap: 1rem; max-width: 1080px; margin: 0 auto; padding: .6rem 1.25rem; }
+  .brand { font: 700 1rem var(--mono); white-space: nowrap; }
+  .brand span { background: var(--accent); color: #121212; border-radius: 5px; padding: .05rem .4rem; margin-left: .35rem; font-size: .75rem; }
+  .search { flex: 1; max-width: 400px; margin: 0 auto; }
+  .search input { border-radius: 99px; padding: .36rem 1rem; }
+  .live { font: 12px var(--mono); color: var(--muted); white-space: nowrap; }
   .live b { color: var(--green); }
-  .iconbtn { border: 2px solid var(--line); background: var(--card); box-shadow: 2px 2px 0 var(--shadow);
-    padding: 4px 10px; cursor: pointer; font: 13px var(--mono); }
-  .iconbtn:active { transform: translate(2px, 2px); box-shadow: none; }
-  .layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; max-width: 1180px; margin: 0 auto; padding: 20px; }
-  nav { position: sticky; top: 76px; align-self: start; display: flex; flex-direction: column; gap: 6px; }
-  nav a { display: block; padding: 7px 10px; border: 2px solid transparent; text-decoration: none; color: var(--ink); font: 14px var(--mono); }
-  nav a:hover { border-color: var(--line); background: var(--card); }
-  nav a.on { border-color: var(--line); background: var(--yellow); color: #111; box-shadow: 3px 3px 0 var(--shadow); }
-  main { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
-  .card { background: var(--card); border: 3px solid var(--line); box-shadow: 5px 5px 0 var(--shadow); padding: 18px 20px; scroll-margin-top: 80px; }
-  .card h2 { margin: 0 0 12px; font: 700 16px var(--mono); text-transform: uppercase; letter-spacing: 1px; }
-  .row { display: grid; grid-template-columns: minmax(150px, 230px) minmax(0, 1fr); gap: 6px 18px; align-items: center;
-    padding: 11px 0; border-top: 2px dashed var(--soft); }
-  .row:first-of-type { border-top: 0; }
-  .label b { display: block; font-weight: 600; }
-  .label small { color: var(--muted); font-size: 12.5px; }
-  .seg { display: flex; flex-wrap: wrap; gap: 6px; }
-  .seg button { border: 2px solid var(--line); background: var(--pane); padding: 4px 11px; cursor: pointer; font-size: 13.5px; }
-  .seg button.on { background: var(--accent); color: #111; box-shadow: 2px 2px 0 var(--shadow); font-weight: 600; }
-  select, input[type=text] { width: 100%; max-width: 420px; border: 2px solid var(--line); background: var(--pane); padding: 6px 9px; }
-  input[type=text]:focus, select:focus { outline: 3px solid var(--accent); outline-offset: 1px; }
-  .switch { position: relative; width: 52px; height: 28px; border: 2px solid var(--line); background: var(--soft); cursor: pointer; padding: 0; }
-  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: var(--card); border: 2px solid var(--line); transition: left .15s; }
-  .switch.on { background: var(--green); }
-  .switch.on::after { left: 26px; }
-  .range { display: flex; align-items: center; gap: 12px; max-width: 420px; }
-  .range input { flex: 1; accent-color: var(--accent); }
-  .range output { min-width: 48px; font: 600 14px var(--mono); border: 2px solid var(--line); padding: 2px 6px; text-align: center; background: var(--pane); }
-  .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
-  .swatches button { width: 34px; height: 34px; border: 2px solid var(--line); cursor: pointer; position: relative; }
-  .swatches button.on { box-shadow: 0 0 0 3px var(--card), 0 0 0 6px var(--line); }
-  .swatches button[data-theme-default] { background: repeating-linear-gradient(45deg, var(--soft) 0 6px, var(--card) 6px 12px); }
-  .palettes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
-  .palettes button { border: 2px solid var(--line); background: var(--pane); padding: 8px; text-align: left; cursor: pointer; }
-  .palettes button.on { box-shadow: 3px 3px 0 var(--shadow); outline: 3px solid var(--accent); }
-  .palettes .strip { display: flex; height: 18px; margin-bottom: 6px; border: 2px solid var(--line); }
-  .palettes .strip i { flex: 1; }
-  .palettes small { display: block; color: var(--muted); font-size: 12px; }
-  /* the live sketch of an orcha window */
-  .preview { display: grid; gap: 10px; }
-  .win { border: 3px solid var(--line); background: #1b1917; height: 200px; display: flex; flex-direction: column; box-shadow: 4px 4px 0 var(--shadow); }
-  .win .bar { height: 22px; background: #0b0a09; display: flex; align-items: center; gap: 6px; padding: 0 8px; }
-  .win .bar i { width: 9px; height: 9px; border-radius: 50%; background: #444; }
-  .win .bar .chip { margin-left: auto; font: 10px var(--mono); color: #111; background: var(--accent); padding: 0 5px; }
+  .ghostbtn { background: transparent; border: 1px solid var(--pico-muted-border-color); color: var(--text); padding: .25rem .7rem; margin: 0; font-size: .85rem; }
+
+  /* page: tabs that follow the scroll, one column of cards */
+  .page { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 2rem; max-width: 1080px; margin: 0 auto; padding: 1.4rem 1.25rem 4rem; }
+  .tabs { position: sticky; top: 4.4rem; align-self: start; display: flex; flex-direction: column; gap: 2px; }
+  .tabs a { display: flex; align-items: center; justify-content: space-between; min-height: 36px; padding: 0 .75rem; border-radius: 8px;
+    color: var(--muted); text-decoration: none; font-size: .92rem; transition-property: background-color, color; transition-duration: .12s; }
+  .tabs a:hover { color: var(--text); background: var(--pico-card-background-color); }
+  .tabs a.on { color: var(--text); background: var(--pico-card-background-color); box-shadow: inset 2px 0 0 var(--accent); font-weight: 600; }
+  .tabs a i { font: normal 600 .68rem var(--mono); min-width: 1.25rem; padding: 0 .3rem; text-align: center; border-radius: 99px;
+    background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+  .tabs a i.warn { background: color-mix(in srgb, var(--yellow) 22%, transparent); color: var(--yellow); }
+  main > article { margin: 0 0 1.1rem; padding: 1.1rem 1.25rem .9rem; border-radius: 12px; border: 0; box-shadow: var(--edge); scroll-margin-top: 4.8rem; }
+  .head { margin-bottom: .4rem; }
+  .head h2 { font-size: 1.08rem; font-weight: 650; margin: 0 0 .1rem; }
+  .head p { margin: 0; font-size: .86rem; color: var(--muted); }
+  .sub { font-size: .74rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 1rem 0 .1rem; }
+
+  /* a setting: what it is on the left, the control lined up on the right */
+  .row { display: grid; grid-template-columns: minmax(170px, 1fr) auto; gap: .2rem 1.2rem; align-items: center;
+    min-height: 52px; padding: .45rem 0; border-top: 1px solid var(--pico-muted-border-color); }
+  .sub + .row, .rows > .row:first-child { border-top: 0; }
+  .label b { font-weight: 560; font-size: .95rem; }
+  .label small { display: block; font-size: .82rem; line-height: 1.35; }
+  .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-left: .45rem; vertical-align: middle; }
+  .ctl { display: flex; align-items: center; justify-content: flex-end; gap: .4rem; min-width: 0; }
+  .ctl > .grow { flex: none; width: 270px; max-width: 100%; }
+  .ctl > input.grow { width: 300px; }
+  .reset { position: relative; background: none; border: 0; color: var(--muted); padding: 0 .25rem; margin: 0; font-size: 1rem; line-height: 1; }
+  .reset::after { content: ""; position: absolute; inset: -12px -8px; }
+  .reset:hover { color: var(--accent); }
+  .warn { grid-column: 1 / -1; font-size: .82rem; color: var(--yellow); }
+  input[role=switch] { margin: 0; }
+  /* segmented control: one track, the chosen option a raised pill inside it */
+  .seg { display: inline-flex; flex-wrap: nowrap; gap: 2px; margin: 0; width: auto; padding: 3px; border-radius: 10px;
+    background: var(--raised); box-shadow: inset 0 0 0 1px var(--pico-muted-border-color); }
+  .seg button, .seg button:not(.on) { font-size: .84rem; padding: .28rem .8rem; margin: 0; border: 0; border-radius: 7px;
+    background: transparent; color: var(--muted); box-shadow: none; }
+  .seg button:hover { color: var(--text); }
+  .seg button.on { background: var(--pico-card-background-color); color: var(--text); font-weight: 600;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 0 0 1px var(--pico-muted-border-color), inset 0 -2px 0 var(--accent); }
+  .seg .btn.ghost { border-radius: 7px; }
+  .range { display: flex; align-items: center; gap: .7rem; width: 300px; max-width: 100%; }
+  .range input { margin: 0; flex: 1; }
+  .range output { font: 600 .82rem var(--mono); min-width: 2.8rem; text-align: right; }
+  .swatches { display: flex; gap: .45rem; flex-wrap: wrap; justify-content: flex-end; }
+  .swatches button { position: relative; width: 1.5rem; height: 1.5rem; padding: 0; margin: 0; border-radius: 50%; border: 0; }
+  .swatches button::after { content: ""; position: absolute; inset: -8px; }
+  .swatches button.on { box-shadow: 0 0 0 2px var(--pico-card-background-color), 0 0 0 4px var(--text); }
+  .swatches button.auto { background: conic-gradient(#ff8fab, #ffd23f, #96d660, #6c8cff, #b18cff, #ff8fab); }
+  .strip { display: flex; height: 24px; width: 92px; flex: none; border-radius: 6px; overflow: hidden; box-shadow: var(--edge); }
+  .strip i { flex: 1; }
+  details.more > summary { font-size: .86rem; color: var(--muted); margin: .6rem 0 0; list-style: none; cursor: pointer; }
+  details.more > summary::after { display: none; }
+  details.more[open] > summary { margin-bottom: .3rem; }
+
+  /* layout: a miniature orcha window beside its settings */
+  .look { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 1.4rem; align-items: start; }
+  .look .preview { position: sticky; top: 5.2rem; }
+  .win { border-radius: 10px; overflow: hidden; height: 204px; display: flex; flex-direction: column;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, .35), 0 8px 24px rgba(0, 0, 0, .28); }
+  .win .titlebar { height: 22px; flex: none; display: flex; align-items: center; gap: 5px; padding: 0 9px; }
+  .win .titlebar i { width: 8px; height: 8px; border-radius: 50%; }
+  .win .titlebar span { margin-left: auto; font: 600 8.5px var(--mono); padding: 1px 6px; border-radius: 4px; color: #121212; }
   .win .body { flex: 1; display: flex; min-height: 0; }
-  .win .side, .win .panel { background: #2a2622; display: flex; flex-direction: column; gap: 4px; padding: 6px; color: #b3a891; font: 9px var(--mono); }
-  .win .side { width: var(--side-w, 22%); }
-  .win .panel { width: 24%; }
-  .win .panes { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; }
-  .win .pane { background: #262320; border: 1px solid #3a352f; }
-  .win.paper .pane { background: #f2e8d3; }
-  .win .line { height: 5px; background: #4f493f; border-radius: 1px; }
-  .win .line.hot { background: var(--accent); }
-  .win .gauge { height: 6px; background: #4f493f; } .win .gauge b { display: block; height: 100%; width: 62%; background: var(--green); }
-  .win .train { margin-top: auto; height: 10px; background: repeating-linear-gradient(90deg, var(--yellow) 0 8px, transparent 8px 11px); }
-  .win .status { height: 16px; background: #0b0a09; display: flex; align-items: center; gap: 8px; padding: 0 8px; }
-  .win .status .gauge { width: 60px; }
-  .hint { color: var(--muted); font-size: 12.5px; }
-  /* hand-off: the fuel bar from full to empty with the three marks */
-  .fuelbar { position: relative; height: 34px; border: 3px solid var(--line); margin: 6px 0 30px;
-    background: linear-gradient(90deg, var(--red) 0%, var(--yellow) 30%, var(--green) 60%, var(--green) 100%); }
-  .fuelbar .mark { position: absolute; top: -3px; bottom: -3px; width: 3px; background: var(--line); }
-  .fuelbar .mark span { position: absolute; top: 36px; left: 50%; transform: translateX(-50%); white-space: nowrap;
-    font: 11px var(--mono); background: var(--card); border: 2px solid var(--line); padding: 0 4px; }
-  .fuelbar .end { position: absolute; top: 6px; font: 600 12px var(--mono); color: #111; }
-  /* background list */
-  .bg-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 2px dashed var(--soft); flex-wrap: wrap; }
-  .bg-row:first-of-type { border-top: 0; }
-  .bg-row .what { flex: 1; min-width: 180px; }
-  .bg-row .what small { display: block; color: var(--muted); font-size: 12.5px; }
-  .chip { font: 600 11.5px var(--mono); border: 2px solid var(--line); padding: 1px 7px; background: var(--pane); }
-  .chip.blocked { background: var(--pink); color: #111; } .chip.working { background: var(--yellow); color: #111; }
-  .chip.done { background: var(--green); color: #111; } .chip.on { background: var(--green); color: #111; }
-  .act { border: 2px solid var(--line); background: var(--pane); padding: 3px 10px; cursor: pointer; font-size: 13px; text-decoration: none; color: var(--ink); }
-  .act:hover { background: var(--yellow); color: #111; }
-  .act.danger { background: var(--red); color: #fff; }
-  .counts { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
-  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(120px); background: var(--ink); color: var(--bg);
-    border: 3px solid var(--line); padding: 8px 14px; font: 13px var(--mono); transition: transform .2s; max-width: calc(100% - 32px); z-index: 10; }
-  .toast.show { transform: translateX(-50%) translateY(0); }
+  .win .side, .win .panel { display: flex; flex-direction: column; gap: 5px; padding: 8px 7px; font: 600 7.5px var(--mono); letter-spacing: .04em; }
+  .win .proj { display: flex; align-items: center; gap: 4px; font: 500 8px var(--pico-font-family-sans-serif); letter-spacing: 0; padding: 2px 4px; border-radius: 3px; }
+  .win .proj b { width: 5px; height: 5px; border-radius: 50%; flex: none; }
+  .win .panel { width: 27%; }
+  .win .panes { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; }
+  .win .pane { border-radius: 4px; padding: 6px; display: flex; flex-direction: column; gap: 4px; }
+  .win .bar { height: 4px; border-radius: 2px; }
+  .win .gauge { display: flex; align-items: center; gap: 4px; font: 500 7.5px var(--mono); letter-spacing: 0; }
+  .win .gauge > div { flex: 1; height: 4px; border-radius: 2px; overflow: hidden; }
+  .win .gauge > div > b { display: block; height: 100%; }
+  .win .train { margin-top: auto; height: 7px; border-radius: 2px; }
+  .win .status { height: 15px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 8px; }
+  .win .status .gauge { width: 70px; }
+  .preview small { display: block; margin-top: .55rem; font-size: .8rem; }
+
+  /* accounts */
+  .acct { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) auto; gap: .3rem 1.2rem; align-items: center;
+    min-height: 58px; padding: .5rem 0; border-top: 1px solid var(--pico-muted-border-color); }
+  .acct:first-of-type { border-top: 0; }
+  .acct .who b { font-weight: 600; font-size: .95rem; }
+  .acct .who small { display: block; font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .acct .tag { font: 600 .66rem var(--mono); margin-left: .4rem; padding: .05rem .45rem; border-radius: 99px; vertical-align: 1px;
+    background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+  .acct .tag.dim { background: var(--raised); color: var(--muted); }
+  .meters { display: grid; gap: .3rem; }
+  .meter { display: grid; grid-template-columns: 3.2rem minmax(0, 1fr) 2.8rem; gap: .5rem; align-items: center; font-size: .78rem; color: var(--muted); }
+  .meter > div { height: 6px; border-radius: 99px; background: var(--raised); overflow: hidden; }
+  .meter > div > b { display: block; height: 100%; border-radius: 99px; }
+  .meter span:last-child { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
+  .acct .acts { display: flex; gap: .35rem; justify-content: flex-end; }
+  .addrow { display: flex; gap: .5rem; align-items: center; margin-top: .5rem; }
+  .addrow input { max-width: 220px; }
+
+  /* when an account runs low: three steps in the order they happen */
+  .stages { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: .5rem; align-items: stretch; margin: .5rem 0 .3rem; }
+  .stage { display: flex; flex-direction: column; gap: .35rem; padding: .85rem .9rem; border-radius: 10px; background: var(--raised);
+    box-shadow: inset 0 0 0 1px var(--pico-muted-border-color); }
+  .stage.off { background: transparent; box-shadow: inset 0 0 0 1px var(--pico-muted-border-color); }
+  .stage.off .big, .stage.off b { opacity: .45; }
+  .stage .stage-head { display: flex; align-items: center; justify-content: space-between; min-height: 26px; }
+  .stage .when { font-size: .74rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  .stage .big { display: flex; align-items: center; gap: .35rem; font: 700 1.7rem var(--mono); font-variant-numeric: tabular-nums; color: var(--text); }
+  .stage .big button { width: 30px; height: 30px; padding: 0; margin: 0; border-radius: 8px; font-size: 1rem; line-height: 1;
+    background: var(--pico-card-background-color); color: var(--text); border: 0; box-shadow: inset 0 0 0 1px var(--pico-muted-border-color); }
+  .stage .big span { min-width: 3.2rem; text-align: center; }
+  .stage b { font-weight: 600; font-size: .95rem; }
+  .stage small { font-size: .8rem; line-height: 1.35; }
+  .stage .warn { font-size: .78rem; }
+  .arrow { align-self: center; color: var(--muted); font-size: 1.1rem; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; column-gap: 1.8rem; }
+  .twocol .row { grid-template-columns: minmax(0, 1fr) auto; }
+  .twocol .row:nth-child(-n+2) { border-top: 0; }
+
+  /* projects */
+  .pick { display: flex; align-items: center; gap: .7rem; margin: .6rem 0 .2rem; }
+  .pick select { flex: 1; max-width: 420px; }
+  .pick small { flex: 1; }
+  .item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .2rem .85rem; align-items: center; min-height: 50px;
+    padding: .35rem 0; border-top: 1px solid var(--pico-muted-border-color); }
+  .sub + .item, .sub + small + .item { border-top: 0; }
+  .item b { font-weight: 560; font-size: .93rem; }
+  .item small { display: block; font-size: .8rem; }
+  .item small a { color: var(--muted); }
+  .item .text { position: relative; background: none; border: 0; color: var(--muted); padding: 0 .3rem; margin: 0; font-size: .8rem; }
+  .item .text::after { content: ""; position: absolute; inset: -12px -6px; }
+  .item pre { grid-column: 2 / -1; margin: .25rem 0 .2rem; padding: .55rem .7rem; font-size: .76rem; white-space: pre-wrap; border-radius: 6px; }
+  .apply { position: sticky; bottom: 0; display: flex; align-items: center; gap: .6rem; padding: .7rem 0 .2rem; margin-top: .3rem;
+    background: var(--pico-card-background-color); box-shadow: 0 -1px 0 var(--pico-muted-border-color); }
+  .apply .grow { flex: 1; font-size: .86rem; color: var(--muted); }
+  .btn { padding: .3rem .85rem; font-size: .85rem; margin: 0; }
+  .btn.ghost { background: transparent; color: var(--text); border-color: var(--pico-form-element-border-color); }
+  .btn.danger { background: var(--red); border-color: var(--red); color: #fff; }
+  .diff { margin: .5rem 0 0; padding: .65rem; font-size: .75rem; line-height: 1.5; max-height: 280px; overflow: auto; white-space: pre-wrap; border-radius: 8px; }
+  .diff .add { display: block; background: color-mix(in srgb, var(--green) 22%, transparent); }
+  .diff .del { display: block; background: color-mix(in srgb, var(--red) 22%, transparent); }
+  .chip { font: 600 .7rem var(--mono); border-radius: 99px; padding: .08rem .55rem; background: var(--raised); color: var(--muted); white-space: nowrap; }
+  .chip.on, .chip.done { background: color-mix(in srgb, var(--green) 22%, transparent); color: var(--green); }
+  .chip.working { background: color-mix(in srgb, var(--yellow) 22%, transparent); color: var(--yellow); }
+  .chip.blocked { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent); }
+
+  /* running now */
+  .bgrow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: .7rem; align-items: center; min-height: 50px;
+    padding: .3rem 0; border-top: 1px solid var(--pico-muted-border-color); }
+  .bgrow:first-of-type { border-top: 0; }
+  .bgrow b { font-weight: 560; font-size: .93rem; }
+  .bgrow small { display: block; font-size: .78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .counts { display: flex; gap: .4rem; flex-wrap: wrap; margin: .1rem 0 .3rem; }
+
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: .8rem;
+    background: var(--text); color: var(--pico-background-color); border-radius: 10px; padding: .55rem .6rem .55rem 1rem; font-size: .88rem;
+    max-width: calc(100% - 32px); box-shadow: 0 8px 24px rgba(0, 0, 0, .3); animation: rise .18s cubic-bezier(.2, 0, 0, 1); }
+  @keyframes rise { from { opacity: 0; transform: translate(-50%, 6px); } }
   .toast.bad { background: var(--red); color: #fff; }
-  .saving { opacity: .55; pointer-events: none; }
-  .gone { padding: 40px 20px; text-align: center; font: 15px var(--mono); }
-  @media (max-width: 760px) {
-    .layout { grid-template-columns: minmax(0, 1fr); padding: 16px; }
-    nav { position: static; flex-direction: row; overflow-x: auto; }
-    nav a { white-space: nowrap; }
-    .row { grid-template-columns: minmax(0, 1fr); }
-    .win { height: 150px; }
+  .toast button { margin: 0; padding: .15rem .65rem; font-size: .8rem; background: transparent; color: inherit; border: 1px solid currentColor; }
+  .empty, .gone { text-align: center; color: var(--muted); padding: 2.5rem 0; }
+
+
+  /* orcha's own look: ink outlines, hard offset shadows, flat color, mono labels */
+  :root { --ink: #0b0a09; }
+  [data-theme=light] { --ink: #111111; }
+  main > article { border-radius: 6px; border: 2.5px solid var(--ink); box-shadow: 5px 5px 0 var(--ink); }
+  .head h2 { font-family: var(--mono); text-transform: uppercase; letter-spacing: .05em; font-size: 1rem; }
+  .sub { font-family: var(--mono); color: var(--text); }
+  .seg { padding: 0; gap: 0; border-radius: 6px; background: var(--pico-card-background-color); box-shadow: 0 0 0 2px var(--ink), 2px 2px 0 2px var(--ink); }
+  .seg button, .seg button:not(.on) { border-radius: 0; color: var(--text); font-family: var(--mono); font-size: .8rem; }
+  .seg button + button { box-shadow: inset 2px 0 0 var(--ink); }
+  .seg button.on { background: var(--accent); color: #111; box-shadow: none; }
+  .seg button + button.on { box-shadow: inset 2px 0 0 var(--ink); }
+  input[role=switch] { box-shadow: 0 0 0 2px var(--ink); }
+  .btn, .ghostbtn { border: 2px solid var(--ink); border-radius: 5px; box-shadow: 2px 2px 0 var(--ink); font-family: var(--mono); }
+  .btn:active, .ghostbtn:active { transform: translate(2px, 2px); box-shadow: none; }
+  .tabs a { font-family: var(--mono); font-size: .85rem; }
+  .tabs a.on { background: var(--yellow); color: #111; border-radius: 5px; box-shadow: 0 0 0 2px var(--ink), 3px 3px 0 2px var(--ink); }
+  .chip { border: 1.5px solid var(--ink); }
+  .summary, .strip, .win { box-shadow: 0 0 0 2px var(--ink), 3px 3px 0 2px var(--ink); border-radius: 5px; }
+  .brand span { box-shadow: 0 0 0 2px var(--ink); }
+  input:not([type=checkbox], [type=radio], [type=range]), select { border: 2px solid var(--ink); border-radius: 5px; }
+  .toast { border: 2.5px solid var(--ink); box-shadow: 4px 4px 0 var(--ink); border-radius: 6px; font-family: var(--mono); }
+
+  .stage { border-radius: 6px; background: var(--pico-card-background-color); box-shadow: 0 0 0 2px var(--ink), 4px 4px 0 2px var(--ink); }
+  .stage.off { box-shadow: 0 0 0 2px var(--ink); background: transparent; }
+  .stage .when { font-family: var(--mono); color: var(--text); }
+  .stage .big button { border-radius: 5px; box-shadow: 0 0 0 2px var(--ink), 2px 2px 0 2px var(--ink); }
+  .stage .big button:active { transform: translate(2px, 2px); box-shadow: 0 0 0 2px var(--ink); }
+  .arrow { font: 700 1.3rem var(--mono); color: var(--text); }
+  .meter > div { height: 10px; border-radius: 3px; box-shadow: 0 0 0 2px var(--ink); background: var(--pico-card-background-color); }
+  .meter > div > b { border-radius: 0; }
+  .meter span { font-family: var(--mono); }
+  .acct .tag { border: 1.5px solid var(--ink); background: var(--yellow); color: #111; }
+  .acct .tag.dim { background: var(--pico-card-background-color); color: var(--text); }
+  .item pre, .diff { border: 2px solid var(--ink); border-radius: 5px; }
+  .reset { font-weight: 700; color: var(--text); }
+  .dot { border-radius: 0; width: 7px; height: 7px; box-shadow: 0 0 0 1.5px var(--ink); }
+  .search input { border-radius: 6px; }
+  .tabs a i { border: 1.5px solid var(--ink); background: var(--accent); color: #111; }
+  .tabs a i.warn { background: var(--yellow); }
+  @media (max-width: 820px) {
+    .page { grid-template-columns: minmax(0, 1fr); gap: .6rem; padding: .8rem; }
+    .tabs { top: 3.5rem; z-index: 5; flex-direction: row; overflow-x: auto; background: var(--pico-background-color); padding: .3rem 0; }
+    .tabs a { white-space: nowrap; }
+    .look, .twocol { grid-template-columns: minmax(0, 1fr); }
+    .stages { grid-template-columns: minmax(0, 1fr); } .arrow { display: none; }
+    .acct { grid-template-columns: minmax(0, 1fr); }
+    .look .preview { position: static; }
+    .row, .step { grid-template-columns: minmax(0, 1fr); }
+    .ctl { justify-content: flex-start; }
+    .search { display: none; }
   }
 </style>
 </head>
 <body>
-<div class="top">
-  <div class="brand">orcha<span>settings</span></div>
-  <div class="grow"></div>
-  <div class="live" id="live">connecting…</div>
-  <button class="iconbtn" id="mode" title="light or dark">◐</button>
-</div>
-<div class="layout">
-  <nav id="nav"></nav>
-  <main id="main"></main>
-</div>
-<div class="toast" id="toast"></div>
-<script>
-"use strict";
+<div id="app"></div>
+<script type="module">
+import { html, render, useState, useEffect, useRef, useCallback } from "/vendor/htm-preact.mjs";
+
 const token = new URLSearchParams(location.search).get("t") || "";
 // keep the token out of the address bar, history and screenshots
 history.replaceState(null, "", "/" + location.hash);
-const $ = (sel) => document.querySelector(sel);
-const el = (tag, props = {}, ...kids) => {
-  const node = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k.includes("-")) node.setAttribute(k, v); else node[k] = v;
-  }
-  for (const kid of kids) if (kid != null) node.append(kid);
-  return node;
-};
-let state = null;
-let background = null;
-let busy = false;
-
-try {
-  const mode = localStorage.getItem("orcha-settings-theme");
-  if (mode) document.documentElement.dataset.theme = mode;
-} catch (_) {}
-$("#mode").onclick = () => {
-  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-  const now = document.documentElement.dataset.theme || (dark ? "dark" : "light");
-  const next = now === "dark" ? "light" : "dark";
-  document.documentElement.dataset.theme = next;
-  try { localStorage.setItem("orcha-settings-theme", next); } catch (_) {}
-};
-
-function toast(text, bad) {
-  const node = $("#toast");
-  node.textContent = text;
-  node.className = "toast show" + (bad ? " bad" : "");
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => (node.className = "toast" + (bad ? " bad" : "")), bad ? 4000 : 2200);
-}
 
 async function call(path, body) {
   const response = await fetch(path, {
@@ -191,286 +278,534 @@ async function call(path, body) {
   return data;
 }
 
-function field(key) {
-  for (const section of state.sections) for (const f of section.fields) if (f.key === key) return f;
-  return null;
-}
-const value = (key) => field(key)?.value;
-
-async function save(key, next, row) {
-  if (row) row.classList.add("saving");
-  busy = true;
-  try {
-    const data = await call("/api/set", { key, value: next });
-    state = data.state;
-    render();
-    toast(data.note || "saved · orcha shows it now");
-  } catch (err) {
-    toast(err.message, true);
-    render();
-  } finally {
-    busy = false;
-  }
+function usePoll(fn, every) {
+  useEffect(() => {
+    let alive = true;
+    const run = () => alive && fn();
+    run();
+    const id = setInterval(run, every);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
 }
 
-function control(f, row) {
-  if (f.kind === "toggle") {
-    const button = el("button", { className: "switch" + (f.value ? " on" : ""), title: f.value ? "on" : "off" });
-    button.setAttribute("role", "switch");
-    button.setAttribute("aria-checked", String(!!f.value));
-    button.setAttribute("aria-label", f.label);
-    button.onclick = () => save(f.key, !f.value, row);
-    return button;
-  }
-  if (f.kind === "select" && f.options.length <= 4) {
-    return el("div", { className: "seg" }, ...f.options.map((o) => {
-      const b = el("button", { className: o.value === f.value ? "on" : "", textContent: o.label });
-      b.onclick = () => o.value !== f.value && save(f.key, o.value, row);
-      return b;
-    }));
-  }
-  if (f.kind === "select") {
-    const s = el("select", { "aria-label": f.label }, ...f.options.map((o) =>
-      el("option", { value: o.value, textContent: o.label, selected: o.value === f.value })));
-    s.onchange = () => save(f.key, s.value, row);
-    return s;
-  }
-  if (f.kind === "range") {
-    const out = el("output", { textContent: f.value + (f.unit || "") });
-    const input = el("input", { type: "range", min: f.min, max: f.max, value: f.value, "aria-label": f.label });
-    input.oninput = () => (out.textContent = input.value + (f.unit || ""));
-    input.onchange = () => save(f.key, Number(input.value), row);
-    return el("div", { className: "range" }, input, out);
-  }
-  if (f.kind === "text") {
-    const input = el("input", { type: "text", value: f.value, spellcheck: false, "aria-label": f.label });
-    const commit = () => input.value !== f.value && save(f.key, input.value, row);
-    input.onkeydown = (e) => { if (e.key === "Enter") input.blur(); if (e.key === "Escape") { input.value = f.value; input.blur(); } };
-    input.onblur = commit;
-    return input;
-  }
-  if (f.kind === "swatches") {
-    return el("div", { className: "swatches" }, ...f.options.map((o) => {
-      const b = el("button", { className: o.value === f.value ? "on" : "", title: o.label, "aria-label": o.label });
-      if (o.color) b.style.background = o.color; else b.dataset.themeDefault = "";
-      b.onclick = () => o.value !== f.value && save(f.key, o.value, row);
-      return b;
-    }));
-  }
-  if (f.kind === "palettes") {
-    return el("div", { className: "palettes" }, ...f.options.map((o) => {
-      const strip = el("div", { className: "strip" }, ...(o.swatch || []).map((c) => {
-        const i = el("i"); i.style.background = c || "transparent"; return i;
-      }));
-      const b = el("button", { className: o.value === f.value ? "on" : "" }, strip, el("b", { textContent: o.label }), el("small", { textContent: o.help || "" }));
-      b.onclick = () => o.value !== f.value && save(f.key, o.value, row);
-      return b;
-    }));
-  }
-  return el("span", { className: "hint", textContent: String(f.value) });
+const matches = (q, ...texts) => !q || texts.some((t) => (t || "").toLowerCase().includes(q));
+const changed = (f) => "default" in f && JSON.stringify(f.default) !== JSON.stringify(f.value);
+
+// ---- the page wears the orcha theme in use ----
+const themeStyle = document.head.appendChild(document.createElement("style"));
+function paintTheme(c, accent) {
+  if (!c) return;
+  const mix = (a, b, p) => `color-mix(in srgb, ${a} ${p}%, ${b})`;
+  const a = accent || c.accent;
+  themeStyle.textContent = `:root:not(#_):not(#__), [data-theme]:not(#_):not(#__) {
+    --accent: ${a}; --text: ${c.text}; --muted: ${c.muted}; --raised: ${c.raised};
+    --pico-background-color: ${c.bg}; --pico-card-background-color: ${c.card}; --pico-card-sectioning-background-color: ${c.raised};
+    --pico-muted-border-color: ${mix(c.border, c.card, 40)}; --pico-color: ${c.text}; --pico-muted-color: ${c.muted};
+    --pico-h1-color: ${c.text}; --pico-h2-color: ${c.text}; --pico-h3-color: ${c.text};
+    --pico-form-element-background-color: ${c.raised}; --pico-form-element-border-color: ${mix(c.border, c.card, 60)};
+    --pico-form-element-color: ${c.text}; --pico-form-element-placeholder-color: ${c.muted};
+    --pico-form-element-active-background-color: ${c.raised}; --pico-form-element-active-border-color: ${a};
+    --pico-switch-background-color: ${mix(c.border, c.card, 80)}; --pico-switch-checked-background-color: ${a};
+    --pico-range-border-color: ${mix(c.border, c.card, 70)}; --pico-range-active-border-color: ${mix(c.border, c.card, 90)};
+    --pico-range-thumb-color: ${a}; --pico-range-thumb-active-color: ${a};
+    --pico-code-background-color: ${c.raised}; --pico-code-color: ${c.text};
+    --yellow: ${c.yellow}; --green: ${c.green}; --red: ${c.red};
+  }`;
 }
 
-function sketch() {
-  const side = value("sidebar_side") === "right" ? "right" : "left";
-  const panel = !!value("right_panel");
-  const fuel = value("fuel");
-  const process = value("process");
-  const widths = { narrow: "17%", normal: "21%", wide: "27%" };
-  const sideBox = el("div", { className: "side" }, "PROJECTS",
-    el("div", { className: "line hot" }), el("div", { className: "line" }), el("div", { className: "line" }),
-    process === "sidebar" || (process === "panel" && !panel) ? el("div", { className: "train" }) : null);
-  sideBox.style.setProperty("--side-w", widths[value("sidebar_width")] || "21%");
-  const panelBox = panel ? el("div", { className: "panel" }, "ACCOUNTS",
-    fuel === "panel" ? el("div", { className: "gauge" }, el("b")) : null,
-    el("div", { className: "line" }), el("div", { className: "line" }),
-    process === "panel" ? el("div", { className: "train" }) : null) : null;
-  const panes = el("div", { className: "panes" }, el("div", { className: "pane" }), el("div", { className: "pane" }));
-  const body = el("div", { className: "body" }, ...(side === "left" ? [sideBox, panes, panelBox] : [panelBox, panes, sideBox]));
-  const status = el("div", { className: "status" }, fuel === "status_bar" ? el("div", { className: "gauge" }, el("b")) : null);
-  const win = el("div", { className: "win" + (value("pane_paper") ? " paper" : "") },
-    el("div", { className: "bar" }, el("i"), el("i"), el("i"), el("span", { className: "chip", textContent: "⌕ commands" })),
-    body, status);
-  return el("div", { className: "preview" }, win, el("div", { className: "hint", textContent: "A sketch of your orcha window: it follows every change below." }));
+// ---- controls ----
+function Seg({ f, save }) {
+  return html`<div class="seg" role="group">${f.options.map((o) => html`
+    <button class=${o.value === f.value ? "on" : ""} onClick=${() => o.value !== f.value && save(f.key, o.value)}>${o.label}</button>`)}</div>`;
 }
 
-function fuelbar() {
-  const bar = el("div", { className: "fuelbar" });
-  bar.append(el("span", { className: "end", textContent: "0%", style: "left:6px" }));
-  bar.append(el("span", { className: "end", textContent: "100%", style: "right:6px" }));
-  const marks = [
-    ["checklist_percent", "checklist"],
-    ["low_fuel_percent", "offer"],
-    ["auto_handoff_percent", "move on"],
-  ];
-  for (const [key, label] of marks) {
-    const at = Number(value(key)) || 0;
-    if (!at) continue;
-    const mark = el("div", { className: "mark" }, el("span", { textContent: label + " " + at + "%" }));
-    mark.style.left = at + "%";
-    bar.append(mark);
-  }
-  return el("div", {}, bar, el("div", { className: "hint", textContent:
-    "As an account runs down (right to left), orcha first offers to ask the agent for a checklist, then offers a switch, then moves the chat on by itself. Each happens once, while the agent is between turns." }));
+function Range({ f, save }) {
+  const [v, setV] = useState(f.value);
+  useEffect(() => setV(f.value), [f.value]);
+  return html`<div class="range">
+    <input type="range" min=${f.min} max=${f.max} value=${v} aria-label=${f.label}
+      onInput=${(e) => setV(Number(e.target.value))} onChange=${(e) => save(f.key, Number(e.target.value))} />
+    <output>${v}${f.unit || ""}</output></div>`;
 }
 
-async function act(body, button) {
-  if (button) button.disabled = true;
-  try {
-    const data = await call("/api/background", body);
-    toast(data.note || "done");
-    if (body.what === "settings") return;
-    await refreshBackground();
-  } catch (err) {
-    toast(err.message, true);
-  } finally {
-    if (button) button.disabled = false;
+function Text({ f, save }) {
+  const [v, setV] = useState(f.value);
+  useEffect(() => setV(f.value), [f.value]);
+  return html`<input class="grow" type="text" value=${v} spellcheck=${false} aria-label=${f.label}
+    onInput=${(e) => setV(e.target.value)} onBlur=${() => v !== f.value && save(f.key, v)}
+    onKeyDown=${(e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") { setV(f.value); e.target.blur(); } }} />`;
+}
+
+const Strip = ({ colors }) => html`<div class="strip">${(colors || []).map((c) => html`<i style=${{ background: c || "transparent" }} />`)}</div>`;
+
+/** Themes and palettes: a dropdown, with the chosen one's colors beside it. */
+function Picker({ f, save }) {
+  const chosen = f.options.find((o) => o.value === f.value);
+  const groups = f.kind === "themes" ? [["dark", "Dark"], ["light", "Light"]] : [[null]];
+  return html`<${Strip} colors=${chosen?.swatch} />
+    <select class="grow" aria-label=${f.label} onChange=${(e) => save(f.key, e.target.value)}>
+      ${groups.map(([g, name]) => {
+        const opts = f.options.filter((o) => !g || o.help === g).map((o) => html`<option value=${o.value} selected=${o.value === f.value}>${o.label}</option>`);
+        return g ? html`<optgroup label=${name}>${opts}</optgroup>` : opts;
+      })}
+    </select>`;
+}
+
+function Control({ f, save }) {
+  switch (f.kind) {
+    case "toggle":
+      return html`<input type="checkbox" role="switch" checked=${!!f.value} aria-label=${f.label} onChange=${(e) => save(f.key, e.target.checked)} />`;
+    case "range": return html`<${Range} f=${f} save=${save} />`;
+    case "text": return html`<${Text} f=${f} save=${save} />`;
+    case "themes": case "palettes": return html`<${Picker} f=${f} save=${save} />`;
+    case "swatches":
+      return html`<div class="swatches">${f.options.map((o) => html`
+        <button class=${(o.value === f.value ? "on " : "") + (o.color ? "" : "auto")} title=${o.color ? o.label : "the theme's own"} aria-label=${o.label}
+          style=${o.color ? { background: o.color } : {}} onClick=${() => o.value !== f.value && save(f.key, o.value)} />`)}</div>`;
+    case "select":
+      if (f.options.length <= 4) return html`<${Seg} f=${f} save=${save} />`;
+      return html`<select class="grow" aria-label=${f.label} onChange=${(e) => save(f.key, e.target.value)}>
+        ${f.options.map((o) => html`<option value=${o.value} selected=${o.value === f.value}>${o.label}</option>`)}</select>`;
+    default: return html`<span class="muted">${String(f.value)}</span>`;
   }
 }
 
-/** A button that asks once more before doing something big. */
-function sure(label, body) {
-  const b = el("button", { className: "act danger", textContent: label });
-  b.onclick = () => {
-    if (b.dataset.armed) return act(body, b);
-    b.dataset.armed = "1";
-    b.textContent = "really? click again";
-    setTimeout(() => { delete b.dataset.armed; b.textContent = label; }, 4000);
+function Row({ f, save }) {
+  const c = changed(f);
+  return html`<div class="row">
+    <div class="label">
+      <b>${f.label}${c && html`<span class="dot" title="changed" />`}</b>
+      ${f.help && html`<small>${f.help}</small>`}
+    </div>
+    <div class="ctl">
+      <${Control} f=${f} save=${save} />
+      ${c && html`<button class="reset" title="back to the default" aria-label=${"reset " + f.label} onClick=${() => save(f.key, f.default)}>↺</button>`}
+    </div>
+    ${f.warn && html`<div class="warn">${f.warn}</div>`}
+  </div>`;
+}
+
+/** Rows under their sub-headings. */
+function Grouped({ fields, save, skip = [] }) {
+  const out = [];
+  let group = null;
+  for (const f of fields) {
+    if (skip.includes(f.group)) continue;
+    if (f.group !== group) { group = f.group; out.push(html`<div class="sub">${group}</div>`); }
+    out.push(html`<${Row} key=${f.key} f=${f} save=${save} />`);
+  }
+  return out;
+}
+
+// ---- layout: a miniature orcha window, drawn in the chosen theme ----
+function Sketch({ get }) {
+  const theme = get("theme");
+  const [bg = "#181e16", panel = "#262e22", text = "#e8f0d6", themeAccent = "#ff8fab", green = "#96d660", yellow = "#f2c53d"] =
+    theme?.options.find((o) => o.value === theme.value)?.swatch || [];
+  const accentField = get("accent");
+  const accent = accentField?.options.find((o) => o.value === accentField.value)?.color || themeAccent;
+  const v = (k) => get(k)?.value;
+  const panelOn = !!v("right_panel"), fuel = v("fuel"), proc = v("process");
+  const width = { narrow: "22%", normal: "27%", wide: "33%" }[v("sidebar_width")] || "27%";
+  const dim = (a) => `color-mix(in srgb, ${text} ${a}%, transparent)`;
+  const paneBg = v("pane_paper") ? panel : bg;
+  const train = html`<div class="train" style=${{ background: `repeating-linear-gradient(90deg, ${yellow} 0 7px, transparent 7px 10px)` }} />`;
+  const gauge = (pct, label) => html`<div class="gauge" style=${{ color: dim(70) }}>${label}<div style=${{ background: dim(15) }}><b style=${{ width: pct + "%", background: green }} /></div></div>`;
+  const projects = [["api", true], ["web", false], ["docs", false]].map(([name, on]) => html`
+    <div class="proj" style=${{ background: on ? `color-mix(in srgb, ${accent} 22%, transparent)` : "transparent", color: on ? text : dim(60) }}>
+      <b style=${{ background: on ? accent : dim(35) }} />${name}</div>`);
+  const side = html`<div class="side" style=${{ width, background: bg, color: dim(55) }}>PROJECTS ${projects}
+    ${(proc === "sidebar" || (proc === "panel" && !panelOn)) && train}</div>`;
+  const right = panelOn && html`<div class="panel" style=${{ background: bg, color: dim(55) }}>FUEL
+    ${fuel === "panel" && [gauge(72, "work"), gauge(38, "home")]}
+    ${proc === "panel" && train}</div>`;
+  const pane = (lines) => html`<div class="pane" style=${{ background: paneBg, boxShadow: `inset 0 0 0 1px ${dim(10)}` }}>
+    ${lines.map((w, i) => html`<div class="bar" style=${{ width: w + "%", background: i === 0 ? accent : dim(i === lines.length - 1 ? 30 : 18) }} />`)}</div>`;
+  const panes = html`<div class="panes" style=${{ background: bg }}>${pane([46, 80, 64, 72, 38])}${pane([40, 70, 86, 52])}</div>`;
+  return html`<div class="preview">
+    <div class="win">
+      <div class="titlebar" style=${{ background: bg }}>
+        <i style=${{ background: "#ff5f57" }} /><i style=${{ background: "#febc2e" }} /><i style=${{ background: "#28c840" }} />
+        <span style=${{ background: accent }}>⌕ commands</span>
+      </div>
+      <div class="body">${v("sidebar_side") === "right" ? [right, panes, side] : [side, panes, right]}</div>
+      <div class="status" style=${{ background: bg }}>${fuel === "status_bar" && gauge(72, "work")}</div>
+    </div>
+    <small>This is your orcha window in ${theme?.value}. It changes as you do.</small>
+  </div>`;
+}
+
+// ---- agents: the accounts, and what happens as one runs low ----
+function Accounts({ data, setData, toast }) {
+  const [name, setName] = useState("");
+  const [armed, setArmed] = useState("");
+  const [busy, setBusy] = useState("");
+  const act = async (action, body = {}) => {
+    setBusy(action + (body.id || ""));
+    try { const r = await call("/api/accounts/" + action, body); setData(r.state); toast(r.note); if (action === "add") setName(""); }
+    catch (err) { toast(err.message, true); }
+    setBusy("");
   };
-  return b;
+  const color = (left) => left < 15 ? "var(--red)" : left < 40 ? "var(--yellow)" : "var(--green)";
+  if (!data) return html`<p class="muted">Reading your accounts…</p>`;
+  return html`<div>
+    ${data.accounts.map((a) => {
+      const out = a.signed_in === false;
+      return html`<div class="acct">
+        <div class="who">
+          <b>${a.label}</b>${a.current && html`<span class="tag">in use</span>`}${a.default && !a.current && html`<span class="tag dim">default</span>`}
+          <small>${out ? "signed out" : a.error ? a.error : a.email || a.kind}</small>
+        </div>
+        <div class="meters">${a.windows.length ? a.windows.map((w) => html`
+          <div class="meter" title=${w.reset ? "refills " + w.reset : ""}><span>${w.label.toLowerCase()}</span>
+            <div><b style=${{ width: w.left + "%", background: color(w.left) }} /></div><span>${w.left}%</span></div>`)
+          : html`<small>${out ? "sign in to see what is left" : "no plan limits for this one"}</small>`}</div>
+        <div class="acts">
+          ${out ? html`<button class="btn" disabled=${!!busy} onClick=${() => act("login", { id: a.id })}>Sign in</button>`
+                : !a.default && html`<button class="btn ghost" disabled=${!!busy} onClick=${() => act("default", { id: a.id })} title="new agents start on this account">Use for new</button>`}
+          <button class="btn ghost" disabled=${!!busy} onClick=${() => {
+            if (armed === a.id) { setArmed(""); act("remove", { id: a.id }); } else { setArmed(a.id); setTimeout(() => setArmed(""), 4000); }
+          }}>${armed === a.id ? "Remove?" : "Remove"}</button>
+        </div>
+      </div>`;
+    })}
+    <div class="addrow">
+      <input type="text" placeholder="new Claude account, e.g. work" value=${name} onInput=${(e) => setName(e.target.value)}
+        onKeyDown=${(e) => e.key === "Enter" && name.trim() && act("add", { name })} aria-label="new account name" />
+      <button class="btn ghost" disabled=${!name.trim() || !!busy} onClick=${() => act("add", { name })}>Add and sign in</button>
+      <span style=${{ flex: 1 }} />
+      <button class="btn ghost" disabled=${!!busy} onClick=${() => act("refresh")}>${busy === "refresh" ? "Checking…" : "Check fuel now"}</button>
+    </div>
+  </div>`;
 }
 
-function button(label, body) {
-  const b = el("button", { className: "act", textContent: label });
-  b.onclick = () => act(body, b);
-  return b;
+function Stages({ get, save }) {
+  const v = (k) => Number(get(k)?.value || 0);
+  const stage = (key, when, title, help, canOff, fallback) => {
+    const f = get(key);
+    const on = v(key) > 0;
+    const set = (n) => save(key, Math.max(1, Math.min(f?.max || 60, n)));
+    return html`<div class=${"stage" + (on ? "" : " off")}>
+      <div class="stage-head"><span class="when">${when}</span>
+        ${canOff && html`<input type="checkbox" role="switch" checked=${on} aria-label=${title} onChange=${(e) => save(key, e.target.checked ? fallback() : 0)} />`}</div>
+      <div class="big">${on ? html`<button aria-label="less" onClick=${() => set(v(key) - 5)}>−</button><span>${v(key)}%</span><button aria-label="more" onClick=${() => set(v(key) + 5)}>+</button>` : html`<span>off</span>`}</div>
+      <b>${title}</b><small>${help}</small>
+      ${f?.warn && html`<div class="warn">${f.warn}</div>`}
+    </div>`;
+  };
+  return html`<div class="stages">
+    ${stage("checklist_percent", "first", "Offer a checklist", "the agent writes down what is done and what is next", true, () => Math.max(25, v("low_fuel_percent") + 10))}
+    <span class="arrow">→</span>
+    ${stage("low_fuel_percent", "then", "Ask where to continue", "orcha suggests another account or agent", false)}
+    <span class="arrow">→</span>
+    ${stage("auto_handoff_percent", "last", "Move on by itself", "the chat goes to the account with the most left", true, () => Math.max(1, Math.floor(v("low_fuel_percent") / 2)))}
+  </div>
+  <small>Each step runs once per account, while the agent is waiting for you.</small>`;
 }
 
-function bgRow(title, sub, ...actions) {
-  return el("div", { className: "bg-row" },
-    el("div", { className: "what" }, el("b", { textContent: title }), sub ? el("small", { textContent: sub }) : null),
-    ...actions);
+// ---- sections ----
+function SettingsSection({ section, state, accounts, setAccounts, toast, save, q }) {
+  const all = state.sections.flatMap((s) => s.fields);
+  const get = (key) => all.find((f) => f.key === key);
+  const hit = matches(q, section.title);
+  const fields = section.fields.filter((f) => hit || matches(q, f.label, f.help, f.key, f.group));
+  if (!fields.length) return null;
+  const head = html`<div class="head"><h2>${section.title}</h2><p>${section.intro}</p></div>`;
+  let body;
+  if (section.id === "layout" && !q) {
+    const panels = fields.filter((f) => f.group === "Panels");
+    const extras = fields.filter((f) => f.group === "Extras");
+    body = html`<div class="look"><${Sketch} get=${get} /><div class="rows">${panels.map((f) => html`<${Row} key=${f.key} f=${f} save=${save} />`)}</div></div>
+      <div class="sub">Extras</div>
+      <div class="twocol">${extras.filter((f) => f.kind === "toggle").map((f) => html`<${Row} key=${f.key} f=${f} save=${save} />`)}</div>
+      ${extras.filter((f) => f.kind !== "toggle").map((f) => html`<${Row} key=${f.key} f=${f} save=${save} />`)}`;
+  } else if (section.id === "agents" && !q) {
+    const low = fields.filter((f) => f.group === "When an account runs low");
+    body = html`<div class="sub">Accounts</div>
+      <${Accounts} data=${accounts} setData=${setAccounts} toast=${toast} />
+      <${Grouped} fields=${fields} save=${save} skip=${["When an account runs low"]} />
+      <div class="sub">When an account runs low</div>
+      <${Stages} get=${get} save=${save} />
+      ${low.filter((f) => f.key === "switch_mode").map((f) => html`<${Row} key=${f.key} f=${f} save=${save} />`)}`;
+  } else if (section.id === "advanced" && !q) {
+    body = html`<details class="more"><summary>Show ${fields.length} settings</summary><${Grouped} fields=${fields} save=${save} /></details>`;
+  } else {
+    body = html`<${Grouped} fields=${fields} save=${save} />`;
+  }
+  return html`<article id=${section.id}>${head}${body}</article>`;
 }
 
-function backgroundCard() {
-  const card = el("section", { className: "card", id: "background" }, el("h2", { textContent: "Running in background" }));
-  card.append(el("p", { className: "hint", textContent: "Quitting orcha only closes the window. These keep going until you stop them." }));
-  const bg = background;
-  if (!bg) { card.append(el("p", { className: "hint", textContent: "looking…" })); return card; }
-  if (!bg.server.running) { card.append(bgRow("Server", "not running")); return card; }
-  const agents = bg.agents || [];
-  const order = { blocked: 0, working: 1, done: 2, idle: 3, unknown: 3 };
+// ---- projects: rules and skills ----
+const Diff = ({ text }) => html`<pre class="diff">${text.split("\n").map((l) => html`<span class=${l.startsWith("+ ") ? "add" : l.startsWith("- ") ? "del" : ""}>${l + "\n"}</span>`)}</pre>`;
+
+function RuleItem({ rule, on, toggle }) {
+  const [open, setOpen] = useState(false);
+  return html`<div class="item">
+    <input type="checkbox" role="switch" checked=${on} aria-label=${rule.title} onChange=${(e) => toggle(rule.id, e.target.checked)} />
+    <div><b>${rule.title}</b><small>${rule.summary}</small></div>
+    <button class="text" onClick=${() => setOpen(!open)}>${open ? "hide" : "read"}</button>
+    ${open && html`<pre>${rule.body}</pre>`}
+  </div>`;
+}
+
+function Projects({ toast, q }) {
+  const [data, setData] = useState(null);
+  const [sel, setSel] = useState("__new");
+  const [info, setInfo] = useState(null);
+  const [chosen, setChosen] = useState([]);
+  const [diff, setDiff] = useState(null);
+  const [busy, setBusy] = useState("");
+
+  useEffect(() => {
+    call("/api/projects").then((d) => {
+      setData(d);
+      // `#projects:<folder>` (from orcha's new-project question) opens that one
+      const asked = decodeURIComponent((location.hash.match(/^#projects:(.+)$/) || [])[1] || "");
+      if (asked && d.projects.some((p) => p.path === asked)) setSel(asked);
+    }).catch((err) => toast(err.message, true));
+  }, []);
+  const load = useCallback(async (path) => {
+    setInfo(null); setDiff(null);
+    if (path === "__new") return;
+    try { const i = await call("/api/projects/show", { path }); setInfo(i); setChosen(i.applied); }
+    catch (err) { toast(err.message, true); }
+  }, []);
+  useEffect(() => { load(sel); }, [sel]);
+
+  if (q && !matches(q, "projects rules skills claude.md agents.md")) return null;
+  const head = html`<div class="head"><h2>Projects</h2>
+    <p>Rules are short instructions orcha writes into a project's CLAUDE.md, so every agent there follows them. Skills are add-ons an agent can use.</p></div>`;
+  if (!data) return html`<article id="projects">${head}<p class="muted">Looking for your projects…</p></article>`;
+
+  const order = (ids) => data.rules.map((r) => r.id).filter((id) => ids.includes(id));
+  const isNew = sel === "__new";
+  const file = info?.file.split("/").pop();
+  const changes = info ? data.rules.filter((r) => chosen.includes(r.id) !== info.applied.includes(r.id)).length : 0;
+
+  const toggleDefault = async (id, on) => {
+    const next = order(on ? [...data.defaults, id] : data.defaults.filter((x) => x !== id));
+    try { const r = await call("/api/projects/defaults", { rules: next }); setData({ ...data, defaults: next }); toast(r.note); }
+    catch (err) { toast(err.message, true); }
+  };
+  const toggleRule = (id, on) => { setChosen(order(on ? [...chosen, id] : chosen.filter((x) => x !== id))); setDiff(null); };
+  const preview = async () => { try { setDiff(await call("/api/projects/preview", { path: sel, rules: chosen })); } catch (err) { toast(err.message, true); } };
+  const write = async () => {
+    try { const r = await call("/api/projects/apply", { path: sel, rules: chosen }); toast(r.note); load(sel); }
+    catch (err) { toast(err.message, true); }
+  };
+  const install = async (skill, global) => {
+    setBusy(skill.name + global);
+    try { const r = await call("/api/projects/install", { path: sel, skill: skill.name, global }); toast(r.note); load(sel); }
+    catch (err) { toast(err.message, true); }
+    setBusy("");
+  };
+
+  return html`<article id="projects">${head}
+    <div class="pick">
+      <select aria-label="project" onChange=${(e) => setSel(e.target.value)}>
+        <option value="__new" selected=${isNew}>Every new project (defaults)</option>
+        <optgroup label="Your projects">
+          ${data.projects.map((p) => html`<option value=${p.path} selected=${sel === p.path}>${p.name}</option>`)}
+        </optgroup>
+      </select>
+      <small>${isNew ? "orcha offers these once when you add a project" : info ? info.file.replace(/^.*\/(?=[^/]+\/[^/]+$)/, "…/") + (info.file_exists ? "" : " (new file)") : "reading…"}</small>
+    </div>
+
+    <div class="sub">Rules</div>
+    ${isNew
+      ? data.rules.map((r) => html`<${RuleItem} key=${r.id} rule=${r} on=${data.defaults.includes(r.id)} toggle=${toggleDefault} />`)
+      : info && html`
+        ${data.rules.map((r) => html`<${RuleItem} key=${r.id} rule=${r} on=${chosen.includes(r.id)} toggle=${toggleRule} />`)}
+        <div class="apply">
+          <span class="grow">${changes ? `${changes} ${changes === 1 ? "change" : "changes"}, not written yet` : `${file} is up to date`}</span>
+          <button class="btn ghost" onClick=${() => { setChosen(order(data.defaults)); setDiff(null); }}>Use defaults</button>
+          <button class="btn" disabled=${!changes} onClick=${diff ? write : preview}>${diff ? "Write to " + file : "Preview"}</button>
+        </div>
+        ${diff && html`<${Diff} text=${diff.diff} />`}`}
+
+    ${!isNew && info && html`
+      <div class="sub">Skills</div>
+      <small>Installed with the skills CLI, which needs Node.js. "Here" puts it in this project, "For me" in every project.</small>
+      ${data.skills.map((s) => {
+        const where = info.skills[s.name] || {};
+        const status = where.project ? "in this project" : where.global ? "for you" : "";
+        return html`<div class="item">
+          <span class=${"chip" + (status ? " on" : "")}>${status || s.group}</span>
+          <div><b>${s.title}</b><small>${s.summary}. <a href=${"https://github.com/" + s.source} target="_blank" rel="noreferrer">${s.source}</a></small></div>
+          <div class="seg">
+            ${!where.project && html`<button class="btn ghost" disabled=${!!busy} onClick=${() => install(s, false)}>${busy === s.name + false ? "…" : "Here"}</button>`}
+            ${!where.global && html`<button class="btn ghost" disabled=${!!busy} onClick=${() => install(s, true)}>${busy === s.name + true ? "…" : "For me"}</button>`}
+          </div>
+        </div>`;
+      })}`}
+  </article>`;
+}
+
+// ---- running now ----
+function Background({ toast }) {
+  const [bg, setBg] = useState(null);
+  const [armed, setArmed] = useState(false);
+  const refresh = () => call("/api/background").then(setBg).catch(() => {});
+  usePoll(refresh, 4000);
+  const act = async (body) => {
+    try { const r = await call("/api/background", body); toast(r.note); if (body.what !== "settings") refresh(); }
+    catch (err) { toast(err.message, true); }
+  };
+  const head = html`<div class="head"><h2>Running now</h2><p>Quitting orcha closes the window. These keep going until you stop them.</p></div>`;
+  if (!bg) return html`<article id="background">${head}<p class="muted">Looking…</p></article>`;
   const names = { blocked: "needs you", working: "working", done: "done", idle: "idle", unknown: "idle" };
-  const counts = {};
-  for (const a of agents) counts[names[a.status] || a.status] = (counts[names[a.status] || a.status] || 0) + 1;
-  card.append(bgRow("Server", (bg.server.version ? "orcha engine " + bg.server.version + " · " : "") + agents.length + " agent" + (agents.length === 1 ? "" : "s"),
-    sure("Stop everything", { what: "server" })));
-  if (agents.length) {
-    card.append(el("div", { className: "counts" }, ...Object.entries(counts).map(([k, n]) =>
-      el("span", { className: "chip " + (k === "needs you" ? "blocked" : k), textContent: n + " " + k }))));
-  }
-  for (const a of [...agents].sort((x, y) => (order[x.status] ?? 4) - (order[y.status] ?? 4))) {
-    card.append(bgRow((a.project || a.cwd || a.pane_id) + " · " + (a.agent || "agent"), a.cwd,
-      el("span", { className: "chip " + (a.status === "unknown" ? "" : a.status), textContent: names[a.status] || a.status }),
-      button("Go to", { what: "focus", pane_id: a.pane_id })));
-  }
-  for (const p of bg.plugin_panes || []) {
-    const open = p.url ? el("a", { className: "act", href: p.url, target: "_blank", rel: "noreferrer", textContent: "Open" }) : null;
-    card.append(bgRow(p.plugin_id, (p.entrypoint || "server") + " in " + p.pane_id, open,
-      button("Stop", { what: "plugin_pane", pane_id: p.pane_id })));
-  }
-  if (bg.office) {
-    const running = bg.office.running;
-    card.append(bgRow("Easy Job", running ? "office running" + (bg.office.port ? " on port " + bg.office.port : "") : "added, not running",
-      el("span", { className: "chip" + (running ? " on" : ""), textContent: running ? "on" : "off" }),
-      running ? button("Stop", { what: "office" }) : null));
-  }
-  card.append(bgRow("This settings page", "closes by itself a few minutes after the tab is gone", button("Close now", { what: "settings" })));
-  return card;
+  const rank = { blocked: 0, working: 1, done: 2 };
+  const agents = [...bg.agents].sort((a, b) => (rank[a.status] ?? 3) - (rank[b.status] ?? 3));
+  const counts = agents.reduce((m, a) => { const k = names[a.status] || a.status; m[k] = (m[k] || 0) + 1; return m; }, {});
+  const chipFor = { "needs you": "blocked", working: "working", done: "done" };
+  return html`<article id="background">${head}
+    <div class="bgrow">
+      <div><b>orcha's engine</b><small>${bg.server.running ? `version ${bg.server.version || ""}, ${agents.length} agents` : "not running"}</small></div>
+      <span />
+      ${bg.server.running && html`<button class="btn danger" onClick=${() => { if (armed) act({ what: "server" }); else { setArmed(true); setTimeout(() => setArmed(false), 4000); } }}>
+        ${armed ? "Click again to stop all" : "Stop everything"}</button>`}
+    </div>
+    <div class="counts">${Object.entries(counts).map(([k, n]) => html`<span class=${"chip " + (chipFor[k] || "")}><span class="num">${n}</span> ${k}</span>`)}</div>
+    ${agents.map((a) => html`<div class="bgrow">
+      <div><b>${a.project || a.pane_id}</b><small>${a.agent || "agent"} in ${a.cwd}</small></div>
+      <span class=${"chip " + (chipFor[names[a.status]] || "")}>${names[a.status] || a.status}</span>
+      <button class="btn ghost" onClick=${() => act({ what: "focus", pane_id: a.pane_id })}>Go to</button>
+    </div>`)}
+    ${bg.plugin_panes.map((p) => html`<div class="bgrow">
+      <div><b>${p.plugin_id}</b><small>plugin server in ${p.pane_id}</small></div>
+      ${p.url ? html`<a class="btn ghost" role="button" href=${p.url} target="_blank" rel="noreferrer">Open</a>` : html`<span />`}
+      <button class="btn ghost" onClick=${() => act({ what: "plugin_pane", pane_id: p.pane_id })}>Stop</button>
+    </div>`)}
+    ${bg.office && html`<div class="bgrow">
+      <div><b>Easy Job</b><small>${bg.office.running ? "the office is open" + (bg.office.port ? ` on port ${bg.office.port}` : "") : "added, not running"}</small></div>
+      <span class=${"chip" + (bg.office.running ? " on" : "")}>${bg.office.running ? "on" : "off"}</span>
+      ${bg.office.running ? html`<button class="btn ghost" onClick=${() => act({ what: "office" })}>Stop</button>` : html`<span />`}
+    </div>`}
+    <div class="bgrow">
+      <div><b>This page</b><small>it closes by itself a few minutes after the tab is gone</small></div><span />
+      <button class="btn ghost" onClick=${() => act({ what: "settings" })}>Close now</button>
+    </div>
+  </article>`;
 }
 
-async function refreshBackground() {
-  try {
-    const next = await call("/api/background");
-    if (JSON.stringify(next) !== JSON.stringify(background)) {
-      background = next;
-      const old = document.getElementById("background");
-      if (old) old.replaceWith(backgroundCard());
-    }
-  } catch (_) {}
+// ---- the page ----
+function App() {
+  const [state, setState] = useState(null);
+  const [accounts, setAccounts] = useState(null);
+  const [gone, setGone] = useState(false);
+  const [mode, setMode] = useState(() => { try { return localStorage.getItem("orcha-settings-mode") || "dark"; } catch (_) { return "dark"; } });
+  const [q, setQ] = useState("");
+  const [note, setNote] = useState(null);
+  const [active, setActive] = useState("look");
+  const saving = useRef(false);
+  const search = useRef(null);
+
+  const toast = useCallback((text, bad, undo) => setNote({ text, bad, undo, at: Date.now() }), []);
+  useEffect(() => {
+    if (!note) return;
+    const id = setTimeout(() => setNote(null), note.bad ? 4500 : note.undo ? 6000 : 2200);
+    return () => clearTimeout(id);
+  }, [note]);
+
+  usePoll(async () => {
+    if (saving.current) return;
+    try { const next = await call("/api/state"); setState((old) => JSON.stringify(old) === JSON.stringify(next) ? old : next); setGone(false); }
+    catch (_) { setGone(true); }
+  }, 4000);
+  usePoll(() => call("/api/accounts").then(setAccounts).catch(() => {}), 60000);
+
+  const field = (key) => state?.sections.flatMap((s) => s.fields).find((f) => f.key === key);
+  const save = useCallback(async (key, value, quiet) => {
+    const before = field(key)?.value;
+    saving.current = true;
+    try {
+      const data = await call("/api/set", { key, value });
+      setState(data.state);
+      const label = field(key)?.label || key;
+      toast(data.note || (quiet ? `${label} is back` : `${label} saved`), false,
+        quiet || before === undefined ? null : () => save(key, before, true));
+    } catch (err) { toast(err.message, true); }
+    saving.current = false;
+  }, [state]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = mode;
+    try { localStorage.setItem("orcha-settings-mode", mode); } catch (_) {}
+    const accent = field("accent");
+    paintTheme(state?.page_theme?.[mode], accent?.options.find((o) => o.value === accent.value)?.color);
+  }, [state, mode]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      const typing = /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName || "");
+      if (e.key === "/" && !typing) { e.preventDefault(); search.current?.focus(); }
+      if (e.key === "Escape" && document.activeElement === search.current) { setQ(""); search.current.blur(); }
+    };
+    addEventListener("keydown", onKey);
+    return () => removeEventListener("keydown", onKey);
+  }, []);
+
+  const ids = state ? [...state.sections.map((s) => s.id), "projects", "background"] : [];
+  useEffect(() => {
+    const onScroll = () => {
+      let current = ids[0];
+      for (const id of ids) {
+        const node = document.getElementById(id);
+        if (node && node.getBoundingClientRect().top < innerHeight * 0.3) current = id;
+      }
+      if (innerHeight + scrollY >= document.documentElement.scrollHeight - 4) current = ids[ids.length - 1];
+      setActive(current);
+    };
+    addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => removeEventListener("scroll", onScroll);
+  }, [ids.join()]);
+  useEffect(() => { document.querySelector(`.tabs a[href="#${active}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" }); }, [active]);
+
+  const jumped = useRef(false);
+  useEffect(() => {
+    if (!state || jumped.current) return;
+    jumped.current = true;
+    const target = location.hash.startsWith("#projects") ? "projects" : location.hash.slice(1);
+    if (target) setTimeout(() => document.getElementById(target)?.scrollIntoView(), 50);
+  }, [state]);
+
+  const query = q.trim().toLowerCase();
+  const badge = (s) => {
+    const warns = s.fields.filter((f) => f.warn).length;
+    if (warns) return html`<i class="warn" title="something to check">!</i>`;
+    const n = s.fields.filter(changed).length;
+    return n ? html`<i title=${n + " changed from the default"}>${n}</i>` : "";
+  };
+  const noHits = query && !state?.sections.some((s) => matches(query, s.title) || s.fields.some((f) => matches(query, f.label, f.help, f.key, f.group)));
+
+  return html`
+    <header class="top"><div class="bar">
+      <div class="brand">orcha<span>settings</span></div>
+      <input ref=${search} class="search" type="search" placeholder="Search settings   /" value=${q} onInput=${(e) => setQ(e.target.value)} aria-label="Search settings" />
+      <span class="live">${gone ? "○ not connected" : html`<b>●</b> live`}</span>
+      <button class="ghostbtn" title="switch light or dark" onClick=${() => setMode(mode === "dark" ? "light" : "dark")}>${mode === "dark" ? "Dark" : "Light"}</button>
+    </div></header>
+    ${!state ? html`<p class="gone">${gone ? "This page has closed. Open it again with: orcha settings" : "Loading…"}</p>` : html`
+    <div class="page">
+      <nav class="tabs">
+        ${state.sections.map((s) => html`<a href=${"#" + s.id} class=${active === s.id ? "on" : ""}>${s.title}${badge(s)}</a>`)}
+        <a href="#projects" class=${active === "projects" ? "on" : ""}>Projects</a>
+        <a href="#background" class=${active === "background" ? "on" : ""}>Running now</a>
+      </nav>
+      <main>
+        ${state.sections.map((s) => html`<${SettingsSection} key=${s.id} section=${s} state=${state} accounts=${accounts} setAccounts=${setAccounts} toast=${toast} save=${save} q=${query} />`)}
+        <${Projects} toast=${toast} q=${query} />
+        ${!query && html`<${Background} toast=${toast} />`}
+        ${noHits && html`<p class="empty">Nothing matches “${q}”.</p>`}
+      </main>
+    </div>`}
+    ${note && html`<div class=${"toast" + (note.bad ? " bad" : "")} key=${note.at}>${note.text}
+      ${note.undo && html`<button onClick=${() => { const u = note.undo; setNote(null); u(); }}>Undo</button>`}</div>`}
+  `;
 }
 
-function applyAccent() {
-  const accent = field("accent");
-  const color = accent?.options.find((o) => o.value === accent.value)?.color;
-  document.documentElement.style.setProperty("--accent", color || "var(--pink)");
-}
-
-function render() {
-  applyAccent();
-  const focused = document.activeElement;
-  if (focused && focused.tagName === "INPUT" && focused.type === "text") return; // do not eat someone's typing
-  const main = $("#main");
-  const nav = $("#nav");
-  const scroll = scrollY;
-  main.replaceChildren();
-  nav.replaceChildren();
-  for (const section of state.sections) {
-    const card = el("section", { className: "card", id: section.id }, el("h2", { textContent: section.title }));
-    if (section.id === "look") card.append(sketch());
-    if (section.id === "handoff") card.append(fuelbar());
-    for (const f of section.fields) {
-      const row = el("div", { className: "row" });
-      row.append(el("div", { className: "label" }, el("b", { textContent: f.label }), f.help ? el("small", { textContent: f.help }) : null));
-      row.append(el("div", {}, control(f, row)));
-      card.append(row);
-    }
-    main.append(card);
-    nav.append(el("a", { href: "#" + section.id, textContent: section.title }));
-  }
-  main.append(backgroundCard());
-  nav.append(el("a", { href: "#background", textContent: "Background" }));
-  if (!state.has_config_tool) {
-    main.append(el("p", { className: "hint", textContent: "Palette, font, widgets and language come from orcha-config, which is not installed here." }));
-  }
-  scrollTo(0, scroll);
-  markNav();
-}
-
-function markNav() {
-  let current = state?.sections[0]?.id;
-  for (const section of [...(state?.sections || []), { id: "background" }]) {
-    const node = document.getElementById(section.id);
-    if (node && node.getBoundingClientRect().top < 140) current = section.id;
-  }
-  // the last card cannot reach the top: at the very bottom, it is the one
-  if (innerHeight + scrollY >= document.documentElement.scrollHeight - 4) current = "background";
-  for (const a of document.querySelectorAll("nav a")) a.classList.toggle("on", a.getAttribute("href") === "#" + current);
-}
-addEventListener("scroll", markNav, { passive: true });
-
-async function refresh(first) {
-  if (busy) return;
-  try {
-    const next = await call("/api/state");
-    $("#live").innerHTML = "<b>●</b> live · orcha " + next.version;
-    // only redraw when something changed (say, from orcha's own Settings)
-    if (first || JSON.stringify(next) !== JSON.stringify(state)) {
-      state = next;
-      render();
-    }
-  } catch (err) {
-    $("#live").textContent = "○ not connected";
-    if (first) {
-      $("#main").replaceChildren(el("div", { className: "card gone", textContent: "This page has closed. Open it again with: orcha settings" }));
-    }
-  }
-}
-refresh(true).then(() => {
-  refreshBackground();
-  if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
-});
-setInterval(refresh, 4000);
-setInterval(refreshBackground, 4000);
+render(html`<${App} />`, document.getElementById("app"));
 </script>
 </body>
 </html>

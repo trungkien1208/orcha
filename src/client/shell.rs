@@ -37,6 +37,7 @@ mod orcha_icons;
 mod orcha_palette;
 mod orcha_popup;
 mod orcha_projects;
+mod orcha_settings_model;
 pub(crate) mod orcha_settings_web;
 mod orcha_welcome;
 mod overlay_input;

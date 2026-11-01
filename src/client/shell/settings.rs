@@ -142,13 +142,9 @@ pub(super) fn integration_needs_install(info: &crate::api::schema::IntegrationIn
         || info.available && info.state == crate::api::schema::IntegrationState::NotInstalled
 }
 
-/// The terminal's fonts (Ghostty lists them) and the font and ligatures
-/// orcha-config set.
-fn load_appearance() -> OrchaAppearance {
-    if cfg!(test) {
-        return OrchaAppearance::default();
-    }
-    let fonts = std::process::Command::new("ghostty")
+/// The font families Ghostty can use, without orcha's own icon font.
+pub(super) fn ghostty_fonts() -> Vec<String> {
+    std::process::Command::new("ghostty")
         .arg("+list-fonts")
         .output()
         .ok()
@@ -160,7 +156,16 @@ fn load_appearance() -> OrchaAppearance {
                 .map(str::to_owned)
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+/// The terminal's fonts (Ghostty lists them) and the font and ligatures
+/// orcha-config set.
+fn load_appearance() -> OrchaAppearance {
+    if cfg!(test) {
+        return OrchaAppearance::default();
+    }
+    let fonts = ghostty_fonts();
     let config: serde_json::Value =
         std::fs::read_to_string(crate::config::config_dir().join("config.json"))
             .ok()

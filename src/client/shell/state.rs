@@ -239,6 +239,9 @@ pub(crate) struct OrchaUiState {
     pub(super) low_fuel_hint: Option<String>,
     /// Accounts the CONTINUE ON popup was already offered for (once each).
     pub(super) low_fuel_offered: HashSet<String>,
+    /// A project just added by hand: offer it working rules when nothing
+    /// else is on screen.
+    pub(super) rules_offer: Option<std::path::PathBuf>,
     /// Accounts whose agent was already asked for a hand-off checklist.
     pub(super) checklist_asked: HashSet<String>,
     /// Accounts whose chat was already moved on by itself.

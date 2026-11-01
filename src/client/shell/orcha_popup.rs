@@ -90,6 +90,13 @@ pub(crate) enum OrchaPopup {
         selected: usize,
         plugin: crate::orcha_app::OfferedPlugin,
     },
+    /// A project was just added: write the default working rules into it?
+    RulesOffer {
+        selected: usize,
+        folder: std::path::PathBuf,
+        file: String,
+        rules: Vec<String>,
+    },
     /// Fuel is low: ask the agent in `pane` for its hand-off checklist?
     /// Asked, never sent on its own, so a half-typed prompt is not sent with it.
     Checklist {
@@ -1553,6 +1560,35 @@ pub(super) fn plugin_offer_rows(
 }
 
 /// Remove, or keep it (the safe default).
+pub(super) fn rules_offer_rows(
+    file: &str,
+    rules: &[String],
+) -> [(String, String, &'static str); 4] {
+    let titles: Vec<&str> = crate::orcha_rules::RULES
+        .iter()
+        .filter(|rule| rules.iter().any(|id| id == rule.id))
+        .map(|rule| rule.title)
+        .collect();
+    [
+        (format!("Add them to {file}"), titles.join(" · "), "ADD"),
+        (
+            "Choose in the browser".to_owned(),
+            "pick rules and skills for this project, see the change first".to_owned(),
+            "CHOOSE",
+        ),
+        (
+            "Not now".to_owned(),
+            "Settings › Projects has them any time".to_owned(),
+            "LATER",
+        ),
+        (
+            "Never for this project".to_owned(),
+            "orcha will not ask about it again".to_owned(),
+            "NEVER",
+        ),
+    ]
+}
+
 pub(super) fn checklist_rows(kind: &str, file: &str) -> [(String, String, &'static str); 2] {
     [
         (
@@ -2210,6 +2246,26 @@ pub(super) fn render_popup(
             name,
         } => {
             let _ = render_plugin_update(buffer, *selected, update, name, &t, &mut hits);
+        }
+        OrchaPopup::RulesOffer {
+            selected,
+            folder,
+            file,
+            rules,
+        } => {
+            let name = folder
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let rows = rules_offer_rows(file, rules);
+            let _ = render_choice_rows(
+                buffer,
+                *selected,
+                &format!("Working rules for {name}?"),
+                &rows,
+                &t,
+                &mut hits,
+            );
         }
         OrchaPopup::Checklist {
             selected,

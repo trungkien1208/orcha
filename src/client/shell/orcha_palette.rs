@@ -130,8 +130,8 @@ const COMMANDS: [(PaletteCommand, &str, &str); 27] = [
     ),
     (
         PaletteCommand::Settings,
-        "Settings",
-        "theme, look, apps, notifications",
+        "Settings in the terminal",
+        "theme, look, apps, notifications, without leaving orcha",
     ),
     (
         PaletteCommand::SettingsWeb,
@@ -905,7 +905,7 @@ impl ClientShellState {
                 self.record_binding(binding(KeybindAction::Settings), outcome)
             }
             PaletteCommand::SettingsWeb => self.open_settings_web(),
-            PaletteCommand::Background => self.open_settings_web_at("background"),
+            PaletteCommand::Background => self.open_settings_web_at("background".to_owned()),
             PaletteCommand::Keybinds => self.record_binding(binding(KeybindAction::Help), outcome),
             PaletteCommand::ToggleRightPanel => {
                 let on = !self.config.right_panel;

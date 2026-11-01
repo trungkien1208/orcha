@@ -235,10 +235,19 @@ impl ClientShellState {
             return true;
         }
         if super::contains(hits.settings, point) {
-            self.record_binding(
-                crate::input::KeybindMatch::Action(crate::input::KeybindAction::Settings),
-                outcome,
-            );
+            // the page shows every setting at once; on another machine (SSH or a
+            // remote endpoint) the browser is not here, so the terminal Settings
+            if self.active_endpoint_id == ClientEndpointId::Local
+                && !super::orcha_settings_web::over_ssh()
+            {
+                self.open_settings_web();
+                outcome.repaint = true;
+            } else {
+                self.record_binding(
+                    crate::input::KeybindMatch::Action(crate::input::KeybindAction::Settings),
+                    outcome,
+                );
+            }
             return true;
         }
         if super::contains(hits.commands, point) {
@@ -725,6 +734,7 @@ impl ClientShellState {
             Some(super::orcha_popup::OrchaPopup::PluginUpdate { .. }) => 2,
             Some(super::orcha_popup::OrchaPopup::PluginRemove { .. }) => 2,
             Some(super::orcha_popup::OrchaPopup::Checklist { .. }) => 2,
+            Some(super::orcha_popup::OrchaPopup::RulesOffer { .. }) => 4,
             Some(super::orcha_popup::OrchaPopup::SwitchAccount { .. }) => 3,
             Some(super::orcha_popup::OrchaPopup::PluginOffer { plugin, .. }) => {
                 if plugin.autostart.is_some() {
@@ -758,6 +768,7 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::PluginUpdate { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginRemove { selected, .. }
                 | super::orcha_popup::OrchaPopup::Checklist { selected, .. }
+                | super::orcha_popup::OrchaPopup::RulesOffer { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginOffer { selected, .. }
                 | super::orcha_popup::OrchaPopup::SwitchAccount { selected, .. }
                 | super::orcha_popup::OrchaPopup::Palette { selected, .. }
@@ -789,6 +800,7 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::PluginUpdate { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginRemove { selected, .. }
                 | super::orcha_popup::OrchaPopup::Checklist { selected, .. }
+                | super::orcha_popup::OrchaPopup::RulesOffer { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginOffer { selected, .. }
                 | super::orcha_popup::OrchaPopup::SwitchAccount { selected, .. }
                 | super::orcha_popup::OrchaPopup::Palette { selected, .. }
@@ -943,6 +955,29 @@ impl ClientShellState {
                         crate::orcha_app::answer_plugin_offer(plugin.id, true);
                     }
                     None => {}
+                }
+                return;
+            }
+            super::orcha_popup::OrchaPopup::RulesOffer { folder, rules, .. } => {
+                self.orcha_ui.popup = None;
+                match index {
+                    0 => {
+                        self.show_notice("adding the working rules…".to_owned());
+                        let _ = crate::thread_spawn::spawn_named("orcha-rules", move || {
+                            if let Err(message) = crate::orcha_rules::apply(&folder, &rules) {
+                                tracing::warn!(%message, "orcha: project rules not written");
+                            }
+                        });
+                    }
+                    1 => {
+                        self.open_settings_web_at(format!("projects:{}", folder.to_string_lossy()))
+                    }
+                    3 => {
+                        if let Err(message) = crate::orcha_rules::decline(&folder) {
+                            tracing::warn!(%message, "orcha: could not remember the declined project");
+                        }
+                    }
+                    _ => tracing::info!(folder = %folder.display(), "orcha: project rules put off"),
                 }
                 return;
             }
@@ -1636,6 +1671,30 @@ impl ClientShellState {
         true
     }
 
+    /// An account that filled up again (a new plan window) is offered the
+    /// checklist, the switch and the move again the next time it runs low.
+    pub(super) fn forget_refilled_accounts(&mut self) {
+        let orcha = &self.config.orcha;
+        let Some(accounts) = self.accounts.data() else {
+            return;
+        };
+        let ui = &mut self.orcha_ui;
+        for account in accounts {
+            let Some(left) = account.lowest() else {
+                continue;
+            };
+            if left >= orcha.low_fuel_percent {
+                ui.low_fuel_offered.remove(&account.id);
+            }
+            if left >= orcha.checklist_percent {
+                ui.checklist_asked.remove(&account.id);
+            }
+            if left >= orcha.auto_handoff_percent {
+                ui.auto_handed_off.remove(&account.id);
+            }
+        }
+    }
+
     /// Running low, with the focused agent between turns: first (under
     /// `checklist_percent`) ask it to write a hand-off checklist, then
     /// (under `auto_handoff_percent`) move the chat to the best other
@@ -1747,6 +1806,34 @@ impl ClientShellState {
             "{left}% left · moved this chat to {}",
             target.label
         ));
+        true
+    }
+
+    /// A project just added by hand gets one question about working rules,
+    /// once nothing else is on screen and only when it has none yet.
+    pub(super) fn offer_project_rules(&mut self) -> bool {
+        if self.orcha_ui.popup.is_some() || self.overlay.is_some() {
+            return false;
+        }
+        let Some(folder) = self.orcha_ui.rules_offer.take() else {
+            return false;
+        };
+        // two small reads, once per added project
+        if !crate::orcha_rules::should_offer(&folder) {
+            tracing::info!(folder = %folder.display(), "orcha: no rules question for this project");
+            return false;
+        }
+        let file = crate::orcha_rules::instruction_file(&folder)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "CLAUDE.md".to_owned());
+        tracing::info!(folder = %folder.display(), "orcha: offering working rules");
+        self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::RulesOffer {
+            selected: 0,
+            folder,
+            file,
+            rules: crate::orcha_rules::defaults(),
+        });
         true
     }
 
@@ -2332,11 +2419,11 @@ impl ClientShellState {
     /// Opens every setting in the browser (starting its page when needed),
     /// off the input path.
     pub(super) fn open_settings_web(&mut self) {
-        self.open_settings_web_at("");
+        self.open_settings_web_at(String::new());
     }
 
     /// The same page, scrolled to `section`.
-    pub(super) fn open_settings_web_at(&mut self, section: &'static str) {
+    pub(super) fn open_settings_web_at(&mut self, section: String) {
         if super::orcha_settings_web::over_ssh() {
             // the browser is on the other machine; the address holds a token, so not in a notice
             self.show_notice(
@@ -2346,7 +2433,7 @@ impl ClientShellState {
         }
         self.show_notice("opening settings in the browser…".to_owned());
         let _ = crate::thread_spawn::spawn_named("orcha-settings-web", move || {
-            if let Err(message) = super::orcha_settings_web::open_quietly(section) {
+            if let Err(message) = super::orcha_settings_web::open_quietly(&section) {
                 tracing::warn!(%message, "the settings page did not open");
             }
         });

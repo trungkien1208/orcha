@@ -168,7 +168,9 @@ orcha uninstall   # remove orcha (asks before touching your settings)
 orcha settings    # every setting on one page in your browser
 ```
 
-**Settings in the browser.** `orcha settings`, COMMANDS › Settings in the browser, or `b` in Settings opens a page with every setting: look (with a sketch of your window that follows each change), terminal palette and font, apps, notifications, accounts, widgets, project and language, plugins. A change applies at once, in every open orcha window.
+**Settings in the browser.** Click `⚙ settings` in the header, or run `orcha settings`. One page, in orcha's look and your theme's colors: colors and font, the layout with a live sketch of your window, your accounts and how much each one has left, what happens when one runs low, working rules and skills for each project, and what keeps running in the background. Press `/` to search. Changes show up at once in every orcha window. The page lives on 127.0.0.1 behind a one-time token and closes by itself a few minutes after you close the tab.
+
+**Working rules for your projects.** When you add a project, orcha offers to write a few rules into its CLAUDE.md, like "plan in slices first" or "verify before saying done", so every agent there follows them. Nothing is written until you say yes, and Settings › Projects can change them later.
 
 **Hand-off before an account runs dry.** In Settings › Hand-off, three marks on a fuel bar: under the first, orcha offers (with the agent between turns) to have it write a checklist of what is done and what is next to `.orcha/handoff.md`; under the second it offers to switch; under the third it moves the chat to the account with the most fuel by itself. The first and last are off until you set them. Pick there too whether switching keeps the chat running, restarts the agent, or opens a new pane. A hand-off points the next agent at the checklist.
 

@@ -949,6 +949,17 @@ impl ClientShellState {
             return;
         };
         let trimmed = rename.input.trim();
+        // orcha: a project added by hand is offered working rules once it exists
+        let added_folder = match &rename.target {
+            ClientRenameTarget::NewProjectFolder => Some(trimmed.to_owned()),
+            ClientRenameTarget::NewWorkspace { cwd, .. } => cwd.clone(),
+            _ => None,
+        };
+        if let Some(folder) = added_folder.filter(|folder| !folder.is_empty()) {
+            if crate::orcha_app::is_orcha() && self.active_endpoint_id == ClientEndpointId::Local {
+                self.orcha_ui.rules_offer = Some(std::path::PathBuf::from(folder));
+            }
+        }
         let method = match rename.target {
             ClientRenameTarget::NewWorkspace {
                 source_workspace_id,
