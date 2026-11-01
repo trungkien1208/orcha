@@ -2093,6 +2093,14 @@ impl ClientShellState {
         {
             self.orcha_ui.update_check = Some(rx);
         }
+        let (tx, rx) = std::sync::mpsc::channel();
+        if crate::thread_spawn::spawn_named("orcha-plugin-update-check", move || {
+            let _ = tx.send(crate::orcha_plugin_updates::check(false).0);
+        })
+        .is_ok()
+        {
+            self.orcha_ui.plugin_update_check = Some(rx);
+        }
     }
 
     /// The header's update button: shows a newer release, then the update
@@ -2117,6 +2125,10 @@ impl ClientShellState {
             return true;
         }
         let ui = &mut self.orcha_ui;
+        if let Some(Ok(updates)) = ui.plugin_update_check.as_ref().map(|rx| rx.try_recv()) {
+            ui.plugin_update_check = None;
+            ui.plugin_updates = updates;
+        }
         if let Some(Ok(news)) = ui.whats_new_check.as_ref().map(|rx| rx.try_recv()) {
             ui.whats_new_check = None;
             ui.whats_new = news;

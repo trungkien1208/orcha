@@ -39,6 +39,7 @@ mod orcha_app;
 mod orcha_handoff;
 mod orcha_import;
 mod orcha_office;
+mod orcha_plugin_updates;
 mod pane;
 use ghostty_vt::pane_graphics_files;
 mod persist;

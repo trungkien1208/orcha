@@ -171,6 +171,11 @@ pub(crate) struct OrchaUiState {
     /// A "what's new" waiting for the screen to be free of other popups.
     pub(super) whats_new: Option<crate::orcha_app::Release>,
     pub(super) update_available: Option<String>,
+    /// GitHub plugins and whether a newer version is out (checked with
+    /// Orcha's own release, at most daily).
+    pub(super) plugin_update_check:
+        Option<std::sync::mpsc::Receiver<Vec<crate::orcha_plugin_updates::PluginUpdate>>>,
+    pub(super) plugin_updates: Vec<crate::orcha_plugin_updates::PluginUpdate>,
     /// `orcha update` running behind the UI; true when it worked.
     pub(super) update_run: Option<std::sync::mpsc::Receiver<bool>>,
     /// The header's update button text, while there is one.
