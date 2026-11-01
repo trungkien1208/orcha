@@ -609,6 +609,19 @@
       .office-cmd { margin: 14px 0 0; padding: 10px 12px; border: 2px solid var(--line); background: var(--status-bg); color: var(--status-ink); font: 13px/1.6 var(--mono); white-space: pre-wrap; }
       .office-cmd span { opacity: .6; }
       .office-note { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+      .weight { margin: 18px 0 0; }
+      .weight h3 { margin: 0 0 4px; font: 900 12px/1.2 var(--mono); letter-spacing: .04em; text-transform: uppercase; }
+      .weight > p { margin: 0 0 10px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+      .weight-rows { display: grid; gap: 8px; }
+      .weight-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) 150px; align-items: center; gap: 10px; font: 800 12px/1.2 var(--mono); }
+      .weight-bar { height: 18px; border: 2px solid var(--line); background: var(--card); }
+      .weight-bar i { display: block; height: 100%; width: var(--w); background: var(--soft); }
+      .weight-row.ours .weight-bar i { background: var(--green); }
+      .weight-row.big .weight-bar i { background: var(--pink); }
+      .weight-row span:last-child { color: var(--muted); font-weight: 700; }
+      .weight-row.ours span:last-child { color: var(--ink); font-weight: 900; }
+      .weight-note { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+      @media (max-width: 700px) { .weight-row { grid-template-columns: 52px minmax(0, 1fr) 112px; font-size: 11px; } }
       .office-links { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 14px; }
       .office-links a { min-height: 40px; padding: 0 14px; font-size: 12px; }
       .office-links .second-link { gap: 10px; text-decoration: none; }
@@ -991,6 +1004,16 @@
                 <li><b>One-line install and <code>orcha update</code></b> on macOS and Windows.</li>
               </ul>
             </div>
+          </div>
+          <div class="weight" aria-label="Memory used while idle">
+            <h3>How heavy is it?</h3>
+            <p>Memory used on a Mac, sitting idle. Your agents get the rest.</p>
+            <div class="weight-rows">
+              <div class="weight-row ours"><span>orcha</span><span class="weight-bar"><i style="--w:10%"></i></span><span>~40 MB · CPU &lt;1%</span></div>
+              <div class="weight-row"><span>herdr</span><span class="weight-bar"><i style="--w:10%"></i></span><span>30–50 MB · CPU &lt;1%</span></div>
+              <div class="weight-row big"><span>Orca</span><span class="weight-bar"><i style="--w:88%"></i></span><span>300–400 MB · CPU ~6%</span></div>
+            </div>
+            <p class="weight-note">Download: orcha 25 MB, herdr 22 MB, Orca 517 MB. Measured November 2026 on Apple Silicon, 10-second samples, Orca with no agent running yet. With busy agents orcha uses a few points more CPU than plain herdr, because it draws more on screen. <a href="https://github.com/trungkien1208/orcha#how-heavy-is-it" target="_blank" rel="noreferrer">Full numbers ↗</a></p>
           </div>
           <p class="sheet-punch">herdr is the engine. Orca is the inspiration. orcha puts them together in your terminal.</p>
         </section>
