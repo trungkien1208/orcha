@@ -8,7 +8,8 @@
 <p align="center">
   <a href="#install"><b>Install</b></a> ·
   <a href="https://trungkien1208.github.io/orcha/">Website</a> ·
-  <a href="#why-orcha">Why orcha</a> ·
+  <a href="#why-orcha-and-not-orca-or-herdr">Why orcha</a> ·
+  <a href="#easy-job-a-pixel-art-office-for-your-agents">Easy Job</a> ·
   <a href="#commands">Commands</a> ·
   <a href="https://github.com/trungkien1208/orcha/issues">Feedback</a>
 </p>
@@ -22,7 +23,7 @@
 
 <p align="center"><b>All your agents. One terminal. Zero tab chaos.</b><br/>Run Claude Code, Codex and Cursor side by side and see at a glance who's working and who needs you.<br/>The best ideas from Orca, brought to the terminal.</p>
 
-<p align="center"><a href="https://github.com/trungkien1208/orcha/releases/tag/orcha-0.9.9"><b>0.9.9 beta · what's new</b></a></p>
+<p align="center"><a href="https://github.com/trungkien1208/orcha/releases/latest"><b>What's new</b></a> · now with <a href="#easy-job-a-pixel-art-office-for-your-agents">Easy Job</a>, a pixel-art office for your agents</p>
 
 ## Install
 
@@ -52,6 +53,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 1. Open your terminal in a project folder.
 2. Type `orcha` and press Enter.
 3. That's it. orcha finds the agents you're already signed in to, and the first time it offers to bring in your projects from Orca, VS Code, Cursor or JetBrains.
+
+The installer asks one question: do you want Easy Job, the pixel office (see below)? The answer is no unless you type `y`.
 
 Any terminal works. For the nicest look, use [Ghostty](https://ghostty.org) on macOS or [WezTerm](https://wezfurlong.org/wezterm/) on Windows.
 
@@ -83,14 +86,49 @@ Any terminal works. For the nicest look, use [Ghostty](https://ghostty.org) on m
   </tr>
 </table>
 
-## Why orcha, if you like Orca?
+## Why orcha, and not Orca or herdr?
 
-Orca is great, and orcha borrows plenty of its ideas. orcha is for people who would rather stay in the terminal:
+All three run several coding agents at once. They just sit in different places:
 
-- **Light.** One 24 MB file with no web browser hiding inside (the Orca app is over 500 MB). While it runs, orcha uses about 40 MB of memory, so your agents get the rest.
-- **Lives in your terminal.** Open it in Ghostty, WezTerm, iTerm2, tmux or the terminal inside your editor. Your font, colors and shortcuts stay yours.
-- **Works over SSH.** Leave agents running on your Mac mini, `ssh` in from your laptop and type `orcha`. Nothing extra to install on the laptop.
-- **Easy to try.** The first time you open it, orcha offers to bring in your Orca projects, so you can use both and pick what you like.
+| | Orca | herdr | orcha |
+|---|---|---|---|
+| **What it is** | A desktop app | A terminal engine for agents | herdr with a cockpit already built on top |
+| **Where it runs** | Its own window | Your terminal | Your terminal, or over SSH |
+| **Best for** | People who like windows and buttons | People who like to script and shape their own setup | People who want it all set up the first time they type `orcha` |
+
+**Coming from Orca?** You keep the ideas you like: projects in a sidebar, every agent's status at a glance, a branch per task. You lose the 500 MB app: orcha is one 24 MB file that uses about 40 MB of memory, lives in the terminal you already use (Ghostty, WezTerm, iTerm2, tmux, your editor) and works over `ssh`. It even brings your Orca projects over on day one, so you can try both.
+
+**Coming from herdr?** orcha *is* herdr underneath, so nothing you rely on goes away, and your settings and workspaces come along (herdr itself stays as it is). On top you get what you would otherwise build yourself:
+
+- a ready-made look with projects, live agent status and git on the side
+- fuel gauges for each account's plan, and **CONTINUE ON** to move a chat to another account or agent before one runs dry
+- one search for every action (`⌕ commands`)
+- a one-line install and `orcha update` on macOS and Windows
+- Easy Job, a whole pixel office for your agents, one `y` away
+
+In short: herdr is the engine, Orca is the inspiration, orcha is the two put together in your terminal.
+
+## Easy Job: a pixel-art office for your agents
+
+<p align="center">
+  <img src="docs/orcha/images/easy-job-floor.png" alt="Easy Job: three projects at their benches on a pixel-art office floor, the boss in the aisle, and an agent asking whether it can run the tests" width="100%" />
+</p>
+
+Easy Job turns what orcha is running into a little office. Each project gets a bench, each agent gets a desk, and you walk the floor as the boss.
+
+- **See everyone at a glance.** A blue screen means working, a raised hand means it needs you, a green screen means done.
+- **Answer from the floor.** Click an agent to read its chat, tap one of the answers it offers, or give it the next task. Press `n` to jump to the next raised hand.
+- **Everything from orcha, in one page.** Change an agent's model, switch its account or hand the chat to a new agent.
+- **Stays on your machine.** No account, no telemetry, no internet while it runs. When an agent finishes for good, two HR bouncers carry it out. Exit interviews are short.
+
+Add it any time (the installer and orcha also offer it once, and only add it if you say yes):
+
+```sh
+orcha office install   # add Easy Job
+orcha office           # open it
+```
+
+New Easy Job versions come out on their own schedule: orcha tells you when one is ready, and one click updates it. No need to wait for a new orcha.
 
 ## Commands
 
@@ -99,17 +137,16 @@ orcha             # open orcha (or come back to it)
 orcha update      # get the latest version
 orcha uninstall   # remove orcha (asks before touching your settings)
 
-orcha office          # open Easy Job, a pixel-art office for your agents
+orcha office          # open Easy Job, the pixel office for your agents
 orcha office install  # add Easy Job
 orcha office update   # get the newest Easy Job
 orcha office remove   # remove Easy Job (asks first, keeps ~/.easy-job unless you say so)
 ```
 
-orcha also shows a green button when an update is ready.
+orcha also shows a green button when an update is ready, and `orcha update` brings your plugins (like Easy Job) along.
 
 ## Good to know
 
-- Already use herdr? Your settings and workspaces come along, and herdr stays as it is.
 - Agent logos show up in Ghostty, WezTerm and iTerm2. Other terminals show simple symbols instead.
 - Something looks wrong? [Open an issue](https://github.com/trungkien1208/orcha/issues) with your OS, terminal, orcha version and a screenshot. Beta feedback shapes 1.0.
 

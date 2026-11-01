@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#1f1c19" />
-    <meta name="description" content="The best parts of Orca, moved into your terminal. Run Claude Code, Codex and Cursor side by side, see who needs you, and swap accounts before anyone runs dry. macOS and Windows." />
+    <meta name="description" content="The best parts of Orca on herdr’s engine, in your terminal. Run Claude Code, Codex and Cursor side by side, see who needs you, swap accounts before anyone runs dry, and watch them work in Easy Job, a pixel office. macOS and Windows." />
     <title>Orcha: all your agents, one terminal</title>
     <link rel="icon" type="image/svg+xml" href="assets/orcha-mark.svg" />
     <link rel="icon" type="image/png" sizes="512x512" href="assets/orcha-mark.png" />
@@ -575,6 +575,49 @@
       @keyframes blink { to { visibility: hidden; } }
       @keyframes pulse { 50% { opacity: .55; } }
       @keyframes arrive { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+      /* Why orcha + Easy Job sheet */
+      .eyebrow-link { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+      .eyebrow-link mark { padding: 1px 5px; background: var(--yellow); color: #111; }
+      .eyebrow-link:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+      .second-link { display: inline-flex; align-items: center; min-height: 46px; padding: 0 16px; border: 3px solid var(--line); background: var(--card); color: var(--ink); box-shadow: 4px 4px 0 var(--shadow); font: 900 13px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; cursor: pointer; }
+      .second-link:hover { transform: translate(-1px, -1px); box-shadow: 5px 5px 0 var(--shadow); }
+      .second-link:active, .primary-link:active { transform: translate(2px, 2px); box-shadow: none; }
+      .sheet { width: min(860px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 3px solid var(--line); background: var(--bg); color: var(--ink); box-shadow: 8px 8px 0 var(--shadow); overflow: hidden; }
+      .sheet[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+      .sheet::backdrop { background: rgb(17 17 17 / .55); }
+      .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-bottom: 3px solid var(--line); background: var(--frame); }
+      .sheet-tabs { display: flex; gap: 8px; }
+      .sheet-tab { min-height: 34px; padding: 0 12px; border: 2px solid var(--line); background: var(--card); color: var(--muted); font: 900 11px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; cursor: pointer; }
+      .sheet-tab[aria-selected="true"] { background: var(--yellow); color: #111; box-shadow: 2px 2px 0 var(--shadow); }
+      .sheet-close { width: 34px; height: 34px; border: 2px solid var(--line); background: var(--card); color: var(--ink); font: 900 14px/1 var(--mono); cursor: pointer; }
+      .sheet-body { min-height: 0; overflow-y: auto; padding: 18px 20px 22px; overscroll-behavior: contain; }
+      .sheet-body h2 { margin: 0 0 6px; font: 900 clamp(20px, 2.4vw, 28px)/1.1 var(--sans); letter-spacing: -.02em; }
+      .sheet-body > section > p { max-width: 62ch; margin: 0 0 14px; color: var(--muted); font-size: 15px; line-height: 1.5; }
+      .pick-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0 18px; }
+      .pick { padding: 12px; border: 3px solid var(--line); background: var(--card); box-shadow: 4px 4px 0 var(--shadow); }
+      .pick.ours { background: var(--green); color: #111; }
+      .pick h3 { margin: 0 0 4px; font: 900 13px/1.1 var(--mono); letter-spacing: .04em; text-transform: uppercase; }
+      .pick .kind { margin: 0 0 8px; font: 800 11px/1.3 var(--mono); opacity: .75; }
+      .pick p:last-child { margin: 0; font-size: 13.5px; line-height: 1.45; }
+      .from-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+      .from-grid h3 { margin: 0 0 6px; font: 900 12px/1.2 var(--mono); letter-spacing: .04em; text-transform: uppercase; }
+      .from-grid ul, .office-list { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+      .from-grid li, .office-list li { margin-bottom: 4px; }
+      .from-grid b, .office-list b { color: var(--ink); }
+      .sheet-punch { margin: 18px 0 0; padding: 10px 12px; border: 2px dashed var(--line); font: 800 13px/1.4 var(--mono); }
+      .office-shot { display: block; width: 100%; height: auto; margin: 4px 0 14px; border: 3px solid var(--line); box-shadow: 4px 4px 0 var(--shadow); }
+      .office-cmd { margin: 14px 0 0; padding: 10px 12px; border: 2px solid var(--line); background: var(--status-bg); color: var(--status-ink); font: 13px/1.6 var(--mono); white-space: pre-wrap; }
+      .office-cmd span { opacity: .6; }
+      .office-note { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+      @media (max-width: 700px) {
+        .pick-grid, .from-grid { grid-template-columns: minmax(0, 1fr); }
+        .sheet-body { padding: 14px 14px 18px; }
+        .second-link, .primary-link { min-height: 40px; padding: 0 12px; font-size: 11px; }
+      }
+      @media (max-width: 560px) {
+        .intro-cta .agent-list { display: none; }
+      }
+
       @media (prefers-reduced-motion: reduce) {
         *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
         .intro-overlay { display: none !important; }
@@ -866,11 +909,12 @@
         </section>
 
         <section class="intro" aria-labelledby="headline">
-          <p class="eyebrow"><a href="https://github.com/trungkien1208/orcha/releases/tag/orcha-0.9.9" target="_blank" rel="noreferrer">0.9.9 beta · still warm ↗</a></p>
+          <p class="eyebrow"><button class="eyebrow-link" type="button" data-open-sheet="office"><mark>New</mark> Easy Job, a pixel office for your agents <span aria-hidden="true">→</span></button></p>
           <h1 id="headline">All your agents.<br />One terminal.<br /><mark>Zero tab chaos.</mark></h1>
           <p class="lede">We loved how Orca runs a whole crew of agents at once, so we moved the good parts into the terminal. <b>Claude, Codex and Cursor</b> work side by side, you see who’s cooking and who’s stuck, and you can swap accounts before anyone runs dry.</p>
           <div class="intro-cta">
             <a class="primary-link" href="https://github.com/trungkien1208/orcha#install" target="_blank" rel="noreferrer">Come on in <span aria-hidden="true">↗</span></a>
+            <button class="second-link" type="button" data-open-sheet="why">Why orcha?</button>
             <span class="agent-list">MACOS · WINDOWS<br />BRING YOUR OWN TERMINAL</span>
           </div>
           <div class="feature-grid" aria-label="Orcha features">
@@ -896,6 +940,73 @@
 
       <footer class="footer"><span>Open source · built on herdr · Mac (Apple Silicon &amp; Intel) · Windows x64</span><span>Found a wobble? <a href="https://github.com/trungkien1208/orcha/issues" target="_blank" rel="noreferrer">Tell us.</a></span></footer>
     </div>
+    <dialog class="sheet" id="sheet" aria-label="Why orcha, and Easy Job">
+      <div class="sheet-head">
+        <div class="sheet-tabs" role="tablist">
+          <button class="sheet-tab" type="button" role="tab" id="tab-why" aria-controls="panel-why" data-tab="why">Why orcha?</button>
+          <button class="sheet-tab" type="button" role="tab" id="tab-office" aria-controls="panel-office" data-tab="office">Easy Job</button>
+        </div>
+        <button class="sheet-close" type="button" id="sheet-close" aria-label="Close">✕</button>
+      </div>
+      <div class="sheet-body">
+        <section id="panel-why" role="tabpanel" aria-labelledby="tab-why">
+          <h2>Orca, herdr or orcha?</h2>
+          <p>All three run a whole crew of coding agents. They just live in different places.</p>
+          <div class="pick-grid">
+            <article class="pick">
+              <h3>Orca</h3>
+              <p class="kind">a desktop app</p>
+              <p>Windows and buttons, if you like those. Over 500 MB, and it stays on the computer it runs on.</p>
+            </article>
+            <article class="pick">
+              <h3>herdr</h3>
+              <p class="kind">the engine, in your terminal</p>
+              <p>Lean and scriptable. It runs the agents; you build the cockpit around it.</p>
+            </article>
+            <article class="pick ours">
+              <h3>orcha</h3>
+              <p class="kind">herdr + the cockpit, ready</p>
+              <p>One 24 MB file in the terminal you already use, over SSH too. Set up the first time you type <code>orcha</code>.</p>
+            </article>
+          </div>
+          <div class="from-grid">
+            <div>
+              <h3>Coming from Orca?</h3>
+              <ul>
+                <li><b>The good ideas stay:</b> projects in a sidebar, who’s working and who needs you, a branch per task.</li>
+                <li><b>The weight goes:</b> about 40 MB of memory, so your agents get the rest.</li>
+                <li><b>Your terminal, your rules:</b> Ghostty, WezTerm, iTerm2, tmux or your editor’s terminal.</li>
+                <li><b>Try both:</b> orcha brings your Orca projects over on day one.</li>
+              </ul>
+            </div>
+            <div>
+              <h3>Coming from herdr?</h3>
+              <ul>
+                <li><b>It is herdr underneath,</b> so nothing you rely on goes away. Settings and workspaces come along.</li>
+                <li><b>Fuel and CONTINUE ON:</b> see each plan’s fuel, move a chat to another account before it runs dry.</li>
+                <li><b>One search for every action,</b> plus git and live status on the side.</li>
+                <li><b>One-line install and <code>orcha update</code></b> on macOS and Windows.</li>
+              </ul>
+            </div>
+          </div>
+          <p class="sheet-punch">herdr is the engine. Orca is the inspiration. orcha puts them together in your terminal.</p>
+        </section>
+        <section id="panel-office" role="tabpanel" aria-labelledby="tab-office" hidden>
+          <h2>Easy Job: a pixel office for your agents</h2>
+          <p>Easy Job turns what orcha is running into a little office. Each project gets a bench, each agent a desk, and you walk the floor as the boss.</p>
+          <img class="office-shot" src="assets/easy-job-floor.png" alt="Easy Job: three projects at their benches on a pixel-art office floor, the boss in the aisle, and an agent asking whether it can run the tests" loading="lazy" width="1600" height="900" />
+          <ul class="office-list">
+            <li><b>See everyone at a glance:</b> blue screen working, raised hand needs you, green screen done.</li>
+            <li><b>Answer from the floor:</b> read an agent’s chat, tap one of its answers or give it the next task. Press <code>n</code> for the next raised hand.</li>
+            <li><b>Stays on your machine:</b> no account, no telemetry, no internet while it runs.</li>
+            <li><b>HR included:</b> when an agent is done for good, two bouncers carry it out. Exit interviews are short.</li>
+          </ul>
+          <pre class="office-cmd"><span>$</span> orcha office install   <span># add it (the installer also asks, once)</span>
+<span>$</span> orcha office           <span># open it</span></pre>
+          <p class="office-note">Easy Job updates on its own schedule: orcha tells you when a new one is out, and one click updates it. Nothing is added or updated without your yes.</p>
+        </section>
+      </div>
+    </dialog>
     <script>
       // Pixel art for the intro: one character per pixel.
       const pixelArt = (rows, palette, extra = "") => {
@@ -970,6 +1081,28 @@
         skipIntro.focus({ preventScroll: true });
         introTimer = window.setTimeout(finishIntro, 3400);
       }
+
+
+      // Why orcha + Easy Job sheet
+      const sheet = document.querySelector("#sheet");
+      const showSheetTab = (name) => {
+        sheet.querySelectorAll("[data-tab]").forEach((tab) => {
+          const on = tab.dataset.tab === name;
+          tab.setAttribute("aria-selected", String(on));
+          document.getElementById(tab.getAttribute("aria-controls")).hidden = !on;
+        });
+        sheet.querySelector(".sheet-body").scrollTop = 0;
+      };
+      document.querySelectorAll("[data-open-sheet]").forEach((button) => {
+        button.addEventListener("click", () => {
+          showSheetTab(button.dataset.openSheet);
+          if (!sheet.open) sheet.showModal();
+        });
+      });
+      sheet.querySelectorAll("[data-tab]").forEach((tab) => tab.addEventListener("click", () => showSheetTab(tab.dataset.tab)));
+      document.querySelector("#sheet-close").addEventListener("click", () => sheet.close());
+      // a click on the dimmed backdrop closes it
+      sheet.addEventListener("click", (event) => { if (event.target === sheet) sheet.close(); });
 
       const themeButton = document.querySelector("#theme-toggle");
       const themeLabel = document.querySelector("#theme-label");
