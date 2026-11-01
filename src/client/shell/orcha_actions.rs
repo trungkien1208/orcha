@@ -724,6 +724,7 @@ impl ClientShellState {
             Some(super::orcha_popup::OrchaPopup::Update { .. }) => 3,
             Some(super::orcha_popup::OrchaPopup::PluginUpdate { .. }) => 2,
             Some(super::orcha_popup::OrchaPopup::PluginRemove { .. }) => 2,
+            Some(super::orcha_popup::OrchaPopup::Checklist { .. }) => 2,
             Some(super::orcha_popup::OrchaPopup::SwitchAccount { .. }) => 3,
             Some(super::orcha_popup::OrchaPopup::PluginOffer { plugin, .. }) => {
                 if plugin.autostart.is_some() {
@@ -756,6 +757,7 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::Update { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginUpdate { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginRemove { selected, .. }
+                | super::orcha_popup::OrchaPopup::Checklist { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginOffer { selected, .. }
                 | super::orcha_popup::OrchaPopup::SwitchAccount { selected, .. }
                 | super::orcha_popup::OrchaPopup::Palette { selected, .. }
@@ -786,6 +788,7 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::Update { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginUpdate { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginRemove { selected, .. }
+                | super::orcha_popup::OrchaPopup::Checklist { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginOffer { selected, .. }
                 | super::orcha_popup::OrchaPopup::SwitchAccount { selected, .. }
                 | super::orcha_popup::OrchaPopup::Palette { selected, .. }
@@ -940,6 +943,26 @@ impl ClientShellState {
                         crate::orcha_app::answer_plugin_offer(plugin.id, true);
                     }
                     None => {}
+                }
+                return;
+            }
+            super::orcha_popup::OrchaPopup::Checklist {
+                pane,
+                kind,
+                file,
+                left,
+                ..
+            } => {
+                self.orcha_ui.popup = None;
+                if index == 0 {
+                    let prompt = checklist_prompt(left, &file);
+                    let _ = crate::thread_spawn::spawn_named("orcha-checklist", move || {
+                        crate::orcha_handoff::send_prompt(&pane, &prompt);
+                    });
+                    tracing::info!(left, %file, %kind, "orcha: asked the agent for a hand-off checklist");
+                    self.show_notice(format!("asked {kind} to write its checklist to {file}"));
+                } else {
+                    tracing::info!(left, %kind, "orcha: hand-off checklist declined");
                 }
                 return;
             }
@@ -1658,15 +1681,16 @@ impl ClientShellState {
         let current_kind = current.kind.clone();
         if left < orcha.checklist_percent && !self.orcha_ui.checklist_asked.contains(&id) {
             self.orcha_ui.checklist_asked.insert(id);
-            let prompt = checklist_prompt(left, &orcha.checklist_file);
+            // asked, not typed in: a prompt half-written in the pane would go along
             let file = orcha.checklist_file.clone();
-            let _ = crate::thread_spawn::spawn_named("orcha-checklist", move || {
-                crate::orcha_handoff::send_prompt(&pane, &prompt);
+            tracing::info!(left, %file, %kind, "orcha: offering a hand-off checklist");
+            self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::Checklist {
+                selected: 0,
+                pane,
+                kind,
+                left,
+                file,
             });
-            tracing::info!(left, %file, %kind, "orcha: asked the agent for a hand-off checklist");
-            self.show_notice(format!(
-                "{left}% left · asked {kind} to write its checklist to {file}"
-            ));
             return true;
         }
         if left >= orcha.auto_handoff_percent || self.orcha_ui.auto_handed_off.contains(&id) {
@@ -2313,6 +2337,13 @@ impl ClientShellState {
 
     /// The same page, scrolled to `section`.
     pub(super) fn open_settings_web_at(&mut self, section: &'static str) {
+        if super::orcha_settings_web::over_ssh() {
+            // the browser is on the other machine; the address holds a token, so not in a notice
+            self.show_notice(
+                "over SSH: run `orcha settings` in a pane for the address to forward".to_owned(),
+            );
+            return;
+        }
         self.show_notice("opening settings in the browser…".to_owned());
         let _ = crate::thread_spawn::spawn_named("orcha-settings-web", move || {
             if let Err(message) = super::orcha_settings_web::open_quietly(section) {

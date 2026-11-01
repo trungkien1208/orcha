@@ -310,7 +310,7 @@ function fuelbar() {
     bar.append(mark);
   }
   return el("div", {}, bar, el("div", { className: "hint", textContent:
-    "As an account runs down (right to left), orcha first asks for a checklist, then offers a switch, then moves the chat on by itself. Each happens once, while the agent is between turns." }));
+    "As an account runs down (right to left), orcha first offers to ask the agent for a checklist, then offers a switch, then moves the chat on by itself. Each happens once, while the agent is between turns." }));
 }
 
 async function act(body, button) {

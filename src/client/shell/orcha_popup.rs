@@ -90,6 +90,15 @@ pub(crate) enum OrchaPopup {
         selected: usize,
         plugin: crate::orcha_app::OfferedPlugin,
     },
+    /// Fuel is low: ask the agent in `pane` for its hand-off checklist?
+    /// Asked, never sent on its own, so a half-typed prompt is not sent with it.
+    Checklist {
+        selected: usize,
+        pane: String,
+        kind: String,
+        left: u8,
+        file: String,
+    },
     /// Remove a plugin? Keep is preselected.
     PluginRemove {
         selected: usize,
@@ -1544,6 +1553,21 @@ pub(super) fn plugin_offer_rows(
 }
 
 /// Remove, or keep it (the safe default).
+pub(super) fn checklist_rows(kind: &str, file: &str) -> [(String, String, &'static str); 2] {
+    [
+        (
+            format!("Ask {kind} now"),
+            format!("it writes what is done and what is next to {file}"),
+            "ASK",
+        ),
+        (
+            "Not now".to_owned(),
+            "orcha will not ask again for this account".to_owned(),
+            "LATER",
+        ),
+    ]
+}
+
 pub(super) fn plugin_remove_rows(name: &str) -> [(String, String, &'static str); 2] {
     [
         (
@@ -2186,6 +2210,23 @@ pub(super) fn render_popup(
             name,
         } => {
             let _ = render_plugin_update(buffer, *selected, update, name, &t, &mut hits);
+        }
+        OrchaPopup::Checklist {
+            selected,
+            kind,
+            left,
+            file,
+            ..
+        } => {
+            let rows = checklist_rows(kind, file);
+            let _ = render_choice_rows(
+                buffer,
+                *selected,
+                &format!("{left}% left · ask {kind} for a hand-off checklist?"),
+                &rows,
+                &t,
+                &mut hits,
+            );
         }
         OrchaPopup::PluginRemove { selected, name, .. } => {
             let rows = plugin_remove_rows(name);

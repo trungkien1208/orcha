@@ -28,8 +28,12 @@ const MAX_BODY: usize = 64 * 1024;
 pub(crate) fn run(args: &[String]) -> i32 {
     match args.first().map(String::as_str) {
         None | Some("open") => match open_quietly("") {
-            Ok(url) => {
+            Ok(Opened::Browser(url)) => {
                 println!("Settings are open in your browser: {url}");
+                0
+            }
+            Ok(Opened::Remote(url)) => {
+                println!("{}", remote_hint(&url));
                 0
             }
             Err(message) => {
@@ -63,8 +67,31 @@ pub(crate) fn run(args: &[String]) -> i32 {
 
 /// Opens the page, starting its background server first when needed.
 /// Blocking for up to a few seconds: call it off the input path.
+pub(crate) enum Opened {
+    Browser(String),
+    /// Over SSH: the browser is on another machine, so only the address.
+    Remote(String),
+}
+
+pub(crate) fn over_ssh() -> bool {
+    ["SSH_CONNECTION", "SSH_TTY"]
+        .iter()
+        .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()))
+}
+
+/// What to do with the address when orcha runs on another machine.
+pub(crate) fn remote_hint(url: &str) -> String {
+    let port = url
+        .strip_prefix("http://127.0.0.1:")
+        .and_then(|rest| rest.split('/').next())
+        .unwrap_or("PORT");
+    format!(
+        "orcha runs over SSH: forward the page first, then open it on your own machine.\n  ssh -L {port}:127.0.0.1:{port} <this host>\n  {url}"
+    )
+}
+
 /// `section` (say "background") scrolls the page to it.
-pub(crate) fn open_quietly(section: &str) -> Result<String, String> {
+pub(crate) fn open_quietly(section: &str) -> Result<Opened, String> {
     let server = match running() {
         Some(server) => server,
         None => start()?,
@@ -73,8 +100,11 @@ pub(crate) fn open_quietly(section: &str) -> Result<String, String> {
     if !section.is_empty() {
         url = format!("{url}#{section}");
     }
+    if over_ssh() {
+        return Ok(Opened::Remote(url));
+    }
     crate::platform::open_url(&url).map_err(|err| format!("could not open {url}: {err}"))?;
-    Ok(url)
+    Ok(Opened::Browser(url))
 }
 
 struct Server {
@@ -170,7 +200,7 @@ fn serve() -> i32 {
     };
     let token = new_token();
     let state = json!({"pid": std::process::id(), "port": port, "token": token});
-    if let Err(err) = std::fs::write(state_path(), state.to_string()) {
+    if let Err(err) = write_private(&state_path(), state.to_string().as_bytes()) {
         eprintln!("could not save the settings page's address: {err}");
         return 1;
     }
@@ -197,6 +227,25 @@ fn serve() -> i32 {
         let _ = std::fs::remove_file(state_path());
     }
     0
+}
+
+/// Writes a file only this user can read: it holds the page's token.
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    // an older file keeps its old mode through open: set it again
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    file.write_all(bytes)
 }
 
 struct Request {
@@ -580,7 +629,7 @@ fn state() -> Value {
     ]}));
 
     sections.push(json!({"id": "handoff", "title": "Hand-off", "fields": [
-        json!({"key": "checklist_percent", "label": "Ask for a checklist below", "help": "the agent writes what is done and what is next while it still can; 0: never",
+        json!({"key": "checklist_percent", "label": "Ask for a checklist below", "help": "orcha asks you, then the agent writes what is done and what is next while it still can; 0: never",
             "kind": "range", "min": 0, "max": 60, "unit": "%", "value": orcha.checklist_percent}),
         json!({"key": "low_fuel_percent", "label": "Offer to switch below", "help": "orcha asks where to continue",
             "kind": "range", "min": 1, "max": 50, "unit": "%", "value": orcha.low_fuel_percent}),
@@ -1025,6 +1074,71 @@ mod tests {
         assert!(apply("checklist_file", &json!("../outside.md")).is_err());
         assert!(background_action(&json!({"what": "nope"})).is_err());
         assert!(background_action(&json!({"what": "focus"})).is_err());
+    }
+
+    /// Sends one raw request to `handle` and returns the status line.
+    fn status_of(raw: String) -> String {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let client = std::thread::spawn(move || {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            stream
+                .write_all(raw.replace("{port}", &port.to_string()).as_bytes())
+                .unwrap();
+            let mut reply = String::new();
+            let _ = stream.read_to_string(&mut reply);
+            reply
+        });
+        let (stream, _) = listener.accept().unwrap();
+        let hosts = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
+        handle(stream, "secret", &hosts);
+        client
+            .join()
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    #[test]
+    fn the_page_and_the_api_need_the_token_and_this_host() {
+        let get = |path: &str, host: &str, token: &str| {
+            status_of(format!(
+                "GET {path} HTTP/1.1\r\nHost: {host}\r\nX-Orcha-Token: {token}\r\n\r\n"
+            ))
+        };
+        assert!(get("/?t=secret", "127.0.0.1:{port}", "").contains("200"));
+        assert!(get("/?t=wrong", "127.0.0.1:{port}", "").contains("403"));
+        assert!(get("/", "127.0.0.1:{port}", "").contains("403"));
+        // a site that points its name at 127.0.0.1 sends its own host
+        assert!(get("/?t=secret", "evil.example:{port}", "").contains("403"));
+        assert!(get("/api/background", "127.0.0.1:{port}", "").contains("403"));
+        assert!(get("/api/background", "127.0.0.1:{port}", "wrong").contains("403"));
+        assert!(get("/nope", "127.0.0.1:{port}", "secret").contains("404"));
+        let set = |body: &str| {
+            status_of(format!(
+                "POST /api/set HTTP/1.1\r\nHost: localhost:{{port}}\r\nX-Orcha-Token: secret\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            ))
+        };
+        assert!(set(r#"{"key":"nope","value":1}"#).contains("400"));
+    }
+
+    #[test]
+    fn an_oversized_body_gets_no_answer() {
+        let reply = status_of(format!(
+            "POST /api/set HTTP/1.1\r\nHost: 127.0.0.1:{{port}}\r\nX-Orcha-Token: secret\r\nContent-Length: {}\r\n\r\n",
+            MAX_BODY + 1
+        ));
+        assert!(reply.is_empty());
+    }
+
+    #[test]
+    fn the_remote_hint_names_the_port_to_forward() {
+        let hint = remote_hint("http://127.0.0.1:64344/?t=abc");
+        assert!(hint.contains("ssh -L 64344:127.0.0.1:64344"));
+        assert!(hint.contains("http://127.0.0.1:64344/?t=abc"));
     }
 
     #[test]
