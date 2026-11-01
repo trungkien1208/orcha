@@ -606,11 +606,18 @@ pub(super) fn prompt_agent_and_confirm(
             continue;
         }
         if now >= ready_deadline {
+            let message = if agent.agent_status == crate::api::schema::AgentStatus::Blocked {
+                format!(
+                    "agent {target} is waiting on a question; see agent.question and agent.answer"
+                )
+            } else {
+                format!("agent {target} did not become ready for input")
+            };
             return encode(&ErrorResponse {
                 id: request_id,
                 error: ErrorBody {
                     code: "agent_not_ready".into(),
-                    message: format!("agent {target} did not become ready for input"),
+                    message,
                 },
             });
         }

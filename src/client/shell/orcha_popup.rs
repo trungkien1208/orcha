@@ -75,6 +75,16 @@ pub(crate) enum OrchaPopup {
         selected: usize,
         release: crate::orcha_app::Release,
     },
+    /// How a Claude chat moves to another account: keep it running on the
+    /// new sign-in, or restart Claude on the account (same chat).
+    SwitchAccount {
+        selected: usize,
+        id: String,
+        label: String,
+        pane: String,
+        /// Why a restart cannot pick this account, when it cannot.
+        restart_blocked: Option<String>,
+    },
     /// A plugin installed on this machine that Orcha can add (only on consent).
     PluginOffer {
         selected: usize,
@@ -1387,6 +1397,100 @@ fn render_notes(buffer: &mut Buffer, body: Rect, y: u16, notes: &[String], t: &B
 }
 
 /// UPDATE: what the new version brings, then update now, later or skip it.
+/// The rows of the account switch choice: (title, detail, button, usable).
+pub(super) fn switch_account_rows(
+    label: &str,
+    restart_blocked: Option<&str>,
+) -> [(String, String, &'static str, bool); 3] {
+    [
+        (
+            "Keep Claude running, swap the sign-in".to_owned(),
+            "no restart; other Claude chats on this sign-in move too".to_owned(),
+            "SWAP",
+            true,
+        ),
+        (
+            format!("Restart Claude on {label}"),
+            restart_blocked.map_or_else(
+                || "only this chat moves; it picks up where it was".to_owned(),
+                str::to_owned,
+            ),
+            "RESTART",
+            restart_blocked.is_none(),
+        ),
+        (
+            "Cancel".to_owned(),
+            "keep the current account".to_owned(),
+            "CANCEL",
+            true,
+        ),
+    ]
+}
+
+fn render_switch_account(
+    buffer: &mut Buffer,
+    selected: usize,
+    label: &str,
+    restart_blocked: Option<&str>,
+    t: &Brutal,
+    hits: &mut PopupHits,
+) -> Option<()> {
+    let rows = switch_account_rows(label, restart_blocked);
+    let frame = popup_frame(
+        buffer,
+        72,
+        rows_height(rows.len()),
+        "SWITCH ACCOUNT",
+        &format!("move this chat to {label}"),
+        &[("↵", "choose"), ("↑↓", "move")],
+        "esc cancel",
+        t,
+        hits,
+    )?;
+    let mut y = frame.body.y;
+    for (index, (title, detail, button_label, usable)) in rows.iter().enumerate() {
+        if y + ROW > frame.body.bottom() {
+            break;
+        }
+        let rect = Rect::new(frame.body.x, y, frame.body.width, ROW);
+        let fill = row_box(buffer, rect, index == 0, index == selected, t);
+        put_text(
+            buffer,
+            rect.x + 2,
+            y,
+            rect.width.saturating_sub(16),
+            title,
+            Style::default()
+                .fg(if *usable { t.ink } else { t.muted })
+                .bg(fill)
+                .add_modifier(Modifier::BOLD),
+        );
+        put_text(
+            buffer,
+            rect.x + 2,
+            y + 1,
+            rect.width.saturating_sub(16),
+            detail,
+            Style::default().fg(t.muted).bg(fill),
+        );
+        if index == selected && *usable {
+            let action = button(
+                buffer,
+                rect.right() - 1,
+                y,
+                button_label,
+                ButtonKind::Primary,
+                fill,
+                t,
+            );
+            hits.actions.push((action, index));
+        }
+        hits.rows.push((rect, index));
+        y += ROW;
+    }
+    Some(())
+}
+
 /// What a row of the plugin offer does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PluginOfferChoice {
@@ -1884,6 +1988,21 @@ pub(super) fn render_popup(
         OrchaPopup::NewWorkspace { selected, project } => {
             let _ = render_new_workspace(buffer, *selected, project.as_deref(), &t, &mut hits);
         }
+        OrchaPopup::SwitchAccount {
+            selected,
+            label,
+            restart_blocked,
+            ..
+        } => {
+            let _ = render_switch_account(
+                buffer,
+                *selected,
+                label,
+                restart_blocked.as_deref(),
+                &t,
+                &mut hits,
+            );
+        }
         OrchaPopup::PluginOffer { selected, plugin } => {
             let _ = render_plugin_offer(buffer, *selected, plugin, &t, &mut hits);
         }
@@ -1957,5 +2076,20 @@ mod plugin_offer_tests {
             ..plugin
         };
         assert_eq!(super::plugin_offer_rows(&plain).len(), 3);
+    }
+}
+
+#[cfg(test)]
+mod switch_account_tests {
+    #[test]
+    fn restart_is_offered_unless_the_account_cannot_be_picked() {
+        let rows = super::switch_account_rows("Claude · work", None);
+        assert!(rows[0].0.contains("swap the sign-in"));
+        assert!(rows[1].0.contains("Restart Claude on Claude · work"));
+        assert!(rows[1].3);
+        let blocked =
+            super::switch_account_rows("Claude · work", Some("shares the default sign-in"));
+        assert!(!blocked[1].3);
+        assert_eq!(blocked[1].1, "shares the default sign-in");
     }
 }

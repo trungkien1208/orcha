@@ -434,6 +434,11 @@ enum AccountAction {
         id: String,
         pane: String,
     },
+    /// Stops Claude in `pane` and starts it on `id`, same chat.
+    Restart {
+        id: String,
+        pane: String,
+    },
     Login {
         id: String,
         pane: Option<String>,
@@ -470,6 +475,8 @@ impl AccountAction {
             Self::Switch { id, pane } => {
                 accounts::switch(&id, &pane).map(|()| format!("this chat continues on {id}"))
             }
+            Self::Restart { id, pane } => accounts::restart_on(&id, &pane)
+                .map(|()| format!("Claude restarted on {id}, same chat")),
             Self::Login { id, pane } => {
                 accounts::login(&id, pane.as_deref()).map(|()| "sign in in the new pane".to_owned())
             }
@@ -709,6 +716,7 @@ impl ClientShellState {
             Some(super::orcha_popup::OrchaPopup::OpenWith { choices, .. }) => choices.len(),
             Some(super::orcha_popup::OrchaPopup::FoundAccounts { chosen, .. }) => chosen.len(),
             Some(super::orcha_popup::OrchaPopup::Update { .. }) => 3,
+            Some(super::orcha_popup::OrchaPopup::SwitchAccount { .. }) => 3,
             Some(super::orcha_popup::OrchaPopup::PluginOffer { plugin, .. }) => {
                 if plugin.autostart.is_some() {
                     4
@@ -739,6 +747,7 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::FoundAccounts { selected, .. }
                 | super::orcha_popup::OrchaPopup::Update { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginOffer { selected, .. }
+                | super::orcha_popup::OrchaPopup::SwitchAccount { selected, .. }
                 | super::orcha_popup::OrchaPopup::Palette { selected, .. }
                 | super::orcha_popup::OrchaPopup::Import { selected, .. },
             ) => *selected = index,
@@ -766,6 +775,7 @@ impl ClientShellState {
                 | super::orcha_popup::OrchaPopup::FoundAccounts { selected, .. }
                 | super::orcha_popup::OrchaPopup::Update { selected, .. }
                 | super::orcha_popup::OrchaPopup::PluginOffer { selected, .. }
+                | super::orcha_popup::OrchaPopup::SwitchAccount { selected, .. }
                 | super::orcha_popup::OrchaPopup::Palette { selected, .. }
                 | super::orcha_popup::OrchaPopup::Import { selected, .. },
             ) => *selected,
@@ -851,6 +861,47 @@ impl ClientShellState {
             }
             super::orcha_popup::OrchaPopup::Broadcast { .. } => {
                 self.send_broadcast();
+                return;
+            }
+            super::orcha_popup::OrchaPopup::SwitchAccount {
+                id,
+                pane,
+                restart_blocked,
+                label,
+                selected,
+            } => {
+                match index {
+                    0 => self.start_account_action(AccountAction::Switch {
+                        id: id.clone(),
+                        pane,
+                    }),
+                    1 => {
+                        if let Some(reason) = restart_blocked {
+                            self.show_notice(reason.clone());
+                            // keep the choice open; the other row still works
+                            self.orcha_ui.popup =
+                                Some(super::orcha_popup::OrchaPopup::SwitchAccount {
+                                    selected,
+                                    id,
+                                    label,
+                                    pane,
+                                    restart_blocked: Some(reason),
+                                });
+                            return;
+                        }
+                        self.start_account_action(AccountAction::Restart {
+                            id: id.clone(),
+                            pane,
+                        });
+                    }
+                    _ => {
+                        self.orcha_ui.popup = None;
+                        return;
+                    }
+                }
+                self.orcha_ui.popup = None;
+                self.accounts.mark_current(&id, std::time::Instant::now());
+                self.update_low_fuel_hint();
                 return;
             }
             super::orcha_popup::OrchaPopup::PluginOffer { plugin, .. } => {
@@ -1040,6 +1091,20 @@ impl ClientShellState {
                         )
                     };
                 if custom.trim().is_empty() {
+                    // A Claude chat can keep running on the new sign-in or
+                    // restart on it: ask which.
+                    if let (AccountAction::Switch { id, pane }, "claude") =
+                        (&native, account.kind.as_str())
+                    {
+                        self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::SwitchAccount {
+                            selected: 0,
+                            id: id.clone(),
+                            label: account.label.clone(),
+                            pane: pane.clone(),
+                            restart_blocked: crate::orcha_accounts::restart_blocker(id),
+                        });
+                        return;
+                    }
                     self.start_account_action(native);
                 } else {
                     let pairs: Vec<(&str, &str)> = pairs

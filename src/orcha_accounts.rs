@@ -1537,6 +1537,93 @@ fn send_keys(pane: &str, keys: &str) {
         .status();
 }
 
+/// The Claude config folder holding `id`'s sign-in now (None: the default
+/// `~/.claude`), or why a restarted Claude cannot run on it. Only reads.
+fn restart_folder(accounts: &[AccountConfig], id: &str) -> Result<Option<String>, String> {
+    let account = find(accounts, id).ok_or("unknown account")?;
+    if account.kind != "claude" {
+        return Err("only Claude restarts on another account".to_owned());
+    }
+    match claude_slot(accounts, id) {
+        Some(OrchaSecretSlot::Folder(dir)) => Ok(dir),
+        Some(OrchaSecretSlot::Service(service)) => read_string_map(slot_dirs_file())
+            .get(&service)
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| set_aside(account)),
+        _ => Err(set_aside(account)),
+    }
+}
+
+fn set_aside(account: &AccountConfig) -> String {
+    format!(
+        "{}'s sign-in is set aside, in no folder; swap the sign-in instead",
+        account.label
+    )
+}
+
+/// Why `id` cannot run a restarted Claude, or None when it can.
+pub(crate) fn restart_blocker(id: &str) -> Option<String> {
+    restart_folder(&accounts(), id).err()
+}
+
+/// The shell line that starts Claude with its config in `dir` (None: the
+/// default folder), resuming `session`.
+fn claude_restart_line(dir: Option<&str>, session: Option<&str>) -> String {
+    let resume = session
+        .filter(|session| {
+            session
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+        })
+        .map(|session| format!(" --resume {session}"))
+        .unwrap_or_default();
+    match (cfg!(windows), dir) {
+        (false, Some(dir)) => format!(
+            "CLAUDE_CONFIG_DIR='{}' claude{resume}",
+            dir.replace('\'', "'\\''")
+        ),
+        (false, None) => format!("env -u CLAUDE_CONFIG_DIR claude{resume}"),
+        (true, Some(dir)) => format!(
+            "$env:CLAUDE_CONFIG_DIR='{}'; claude{resume}",
+            dir.replace('\'', "''")
+        ),
+        (true, None) => format!(
+            "Remove-Item Env:CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue; claude{resume}"
+        ),
+    }
+}
+
+/// Stops the Claude in `pane` and starts it again on `id`, resuming the same
+/// conversation. Only this pane moves; other Claude sessions keep theirs.
+pub(crate) fn restart_on(id: &str, pane: &str) -> Result<(), String> {
+    let accounts = accounts();
+    let account = find(&accounts, id).ok_or("unknown account")?;
+    let dir = restart_folder(&accounts, id)?;
+    let session = pane_info(pane).and_then(|info| {
+        let session = info.get("agent_session")?;
+        session
+            .get("id")
+            .or_else(|| session.get("value"))?
+            .as_str()
+            .map(str::to_owned)
+    });
+    prepare_folder(account);
+    // Ctrl+C twice leaves Claude; then the shell starts it on the account
+    for _ in 0..2 {
+        send_keys(pane, "ctrl+c");
+        std::thread::sleep(std::time::Duration::from_millis(400));
+    }
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    run_in_pane(
+        pane,
+        &claude_restart_line(dir.as_deref(), session.as_deref()),
+    )?;
+    forget_limits(id);
+    select(id);
+    Ok(())
+}
+
 /// Continues `pane`'s conversation on another account. Claude: the running
 /// session moves without a restart. Others: stop the agent and resume the
 /// same conversation there.
@@ -2502,5 +2589,30 @@ mod live {
                     .collect::<Vec<_>>()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod restart_line_tests {
+    use super::*;
+
+    #[test]
+    fn restart_line_resumes_in_the_account_folder() {
+        if cfg!(windows) {
+            return;
+        }
+        assert_eq!(
+            claude_restart_line(Some("/a/work"), Some("0b46-77")),
+            "CLAUDE_CONFIG_DIR='/a/work' claude --resume 0b46-77"
+        );
+        assert_eq!(
+            claude_restart_line(None, None),
+            "env -u CLAUDE_CONFIG_DIR claude"
+        );
+        assert_eq!(
+            claude_restart_line(Some("/a/it's"), Some("bad; rm")),
+            "CLAUDE_CONFIG_DIR='/a/it'\\''s' claude",
+            "quotes stay quoted and an odd session id is dropped"
+        );
     }
 }

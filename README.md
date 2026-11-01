@@ -83,6 +83,15 @@ Any terminal works. For the nicest look, use [Ghostty](https://ghostty.org) on m
   </tr>
 </table>
 
+## Why orcha, if you like Orca?
+
+Orca is great, and orcha borrows plenty of its ideas. orcha is for people who would rather stay in the terminal:
+
+- **Light.** One 24 MB file with no web browser hiding inside (the Orca app is over 500 MB). While it runs, orcha uses about 40 MB of memory, so your agents get the rest.
+- **Lives in your terminal.** Open it in Ghostty, WezTerm, iTerm2, tmux or the terminal inside your editor. Your font, colors and shortcuts stay yours.
+- **Works over SSH.** Leave agents running on your Mac mini, `ssh` in from your laptop and type `orcha`. Nothing extra to install on the laptop.
+- **Easy to try.** The first time you open it, orcha offers to bring in your Orca projects, so you can use both and pick what you like.
+
 ## Commands
 
 ```sh

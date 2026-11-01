@@ -258,11 +258,8 @@ pub(crate) fn plan(
             })
         }
         AccountSwitchMode::Restart => {
-            if cfg!(windows) {
-                return Ok(refuse(
-                    "restart is not available on Windows yet; use keep".into(),
-                    true,
-                ));
+            if let Some(reason) = crate::orcha_accounts::restart_blocker(&params.account_id) {
+                return Ok(refuse(reason, true));
             }
             Ok(AccountPlan {
                 allowed: true,
@@ -331,7 +328,7 @@ fn switch(
                 std::thread::sleep(QUEUE_POLL);
                 match agent_get(&request_id, &queued.pane_id, &api_tx) {
                     Ok(agent) if !is_busy(&agent) => {
-                        if let Err((_, message)) = apply(&request_id, &queued, &agent, &api_tx) {
+                        if let Err((_, message)) = apply(&request_id, &queued, &api_tx) {
                             tracing::warn!(%message, "queued account switch failed");
                         }
                         return;
@@ -353,7 +350,7 @@ fn switch(
             pane_id: None,
         });
     }
-    let pane_id = apply(request_id, &params, &agent, api_tx)?;
+    let pane_id = apply(request_id, &params, api_tx)?;
     Ok(ResponseResult::AccountSwitched {
         outcome: "applied".into(),
         plan,
@@ -364,7 +361,6 @@ fn switch(
 fn apply(
     request_id: &str,
     params: &AccountsSwitchParams,
-    agent: &AgentInfo,
     api_tx: &ApiRequestSender,
 ) -> Result<String, AccountError> {
     let pane_id = match params.mode {
@@ -374,13 +370,8 @@ fn apply(
             params.pane_id.clone()
         }
         AccountSwitchMode::Restart => {
-            restart_claude(
-                request_id,
-                &params.pane_id,
-                &params.account_id,
-                agent,
-                api_tx,
-            )?;
+            crate::orcha_accounts::restart_on(&params.account_id, &params.pane_id)
+                .map_err(|message| ("switch_failed", message))?;
             params.pane_id.clone()
         }
         AccountSwitchMode::Handoff => crate::api::handoff::handoff_to_account(
@@ -392,57 +383,6 @@ fn apply(
     };
     note_change("switched");
     Ok(pane_id)
-}
-
-/// Stops Claude in the pane and resumes the same conversation in the
-/// account's sign-in folder.
-fn restart_claude(
-    request_id: &str,
-    pane_id: &str,
-    account_id: &str,
-    agent: &AgentInfo,
-    api_tx: &ApiRequestSender,
-) -> Result<(), AccountError> {
-    let configs = crate::orcha_accounts::accounts();
-    let account = crate::orcha_accounts::find_account(&configs, account_id)
-        .ok_or(("account_not_found", format!("no account {account_id}")))?;
-    crate::orcha_accounts::prepare_folder(account);
-    let env = match account.dir.as_deref() {
-        Some(dir) => format!("CLAUDE_CONFIG_DIR={} ", shell_quote(dir)),
-        None => "env -u CLAUDE_CONFIG_DIR ".into(),
-    };
-    let resume = agent
-        .agent_session
-        .as_ref()
-        .and_then(|session| session.id.as_deref())
-        .map(|session| format!(" --resume {}", shell_quote(session)))
-        .unwrap_or_default();
-    for _ in 0..2 {
-        app_request(
-            request_id,
-            Method::PaneSendKeys(crate::api::schema::PaneSendKeysParams {
-                pane_id: pane_id.to_string(),
-                keys: vec!["ctrl+c".into()],
-            }),
-            api_tx,
-        )?;
-        std::thread::sleep(Duration::from_millis(400));
-    }
-    std::thread::sleep(Duration::from_secs(1));
-    app_request(
-        request_id,
-        Method::PaneSendInput(crate::api::schema::PaneSendInputParams {
-            pane_id: pane_id.to_string(),
-            text: format!("{env}claude{resume}"),
-            keys: vec!["Enter".into()],
-        }),
-        api_tx,
-    )?;
-    Ok(())
-}
-
-fn shell_quote(text: &str) -> String {
-    format!("'{}'", text.replace('\'', "'\\''"))
 }
 
 fn is_busy(agent: &AgentInfo) -> bool {
@@ -643,11 +583,6 @@ mod tests {
         assert_eq!(change_reason(&base, &fuel), Some("fuel_refreshed"));
     }
 
-    #[test]
-    fn shell_quote_keeps_quotes_safe() {
-        assert_eq!(shell_quote("a'b"), "'a'\\''b'");
-    }
-
     /// Answers `agent.get` with an agent of `kind`.
     fn spawn_agent(kind: &'static str) -> ApiRequestSender {
         let (api_tx, mut api_rx) =
@@ -740,11 +675,10 @@ mod tests {
             assert!(keep.allowed && keep.session_linked && !keep.needs_idle);
             let handoff = plan_for("claude", "claude-a", AccountSwitchMode::Handoff);
             assert!(handoff.allowed && handoff.needs_idle && !handoff.session_linked);
-            if !cfg!(windows) {
-                let restart = plan_for("claude", "claude-a", AccountSwitchMode::Restart);
-                assert!(restart.allowed && restart.needs_idle);
-                assert!(!restart.session_linked, "no session id is known");
-            }
+            // claude-a has never signed in here: its sign-in is in no folder.
+            let restart = plan_for("claude", "claude-a", AccountSwitchMode::Restart);
+            assert!(!restart.allowed);
+            assert!(restart.reason.unwrap().contains("set aside"));
         });
     }
 

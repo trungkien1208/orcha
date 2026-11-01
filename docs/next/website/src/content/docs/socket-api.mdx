@@ -1293,7 +1293,7 @@ seconds. `error` explains a missing reading, such as an expired sign-in.
 | `mode` | What happens | Notes |
 | --- | --- | --- |
 | `keep` | The account's sign-in goes under the running agent; the conversation goes on. | Claude only. Every Claude reading the same sign-in folder moves too (`also_moves`). |
-| `restart` | The agent stops and resumes the same conversation on the account. | Claude, macOS and Linux. `session_linked: false` when no session id is known. |
+| `restart` | Claude stops and starts again in the folder that holds the account's sign-in, resuming the same conversation. Only this pane moves. | Claude. `session_linked: false` when no session id is known; refused when the account's sign-in is set aside in no folder (swap it with `keep` instead). |
 | `handoff` | A new agent starts on the account with hand-off notes of this conversation. | Works when the old agent is out of fuel. |
 
 Other agents have one account each, so their plans are `allowed: false`.
