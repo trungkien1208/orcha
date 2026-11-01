@@ -282,11 +282,13 @@ fn session_command() -> Command {
 
 fn integration_command() -> Command {
     Command::new("integration")
+        .visible_alias("integrations")
         .about("Manage built-in agent integrations")
         .subcommand(
             Command::new("install")
-                .about("Install an integration")
-                .arg(integration_target_arg()),
+                .about("Install an integration, or every outdated one with --outdated")
+                .arg(integration_target_arg().required(false))
+                .arg(flag("outdated")),
         )
         .subcommand(
             Command::new("uninstall")

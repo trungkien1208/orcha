@@ -470,7 +470,12 @@ herdr integration uninstall cursor
 herdr integration uninstall mastracode
 herdr integration uninstall grok
 herdr integration status [--outdated-only]
+herdr integration install --outdated
 ```
+
+`herdr integration install --outdated` reinstalls every installed integration
+older than this build; up-to-date hooks are left unchanged. `integrations` is
+accepted as an alias of `integration`.
 
 ## Plugins
 

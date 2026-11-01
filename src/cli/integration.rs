@@ -86,6 +86,9 @@ fn describe_integration_state(
 }
 
 fn integration_install(args: &[String]) -> std::io::Result<i32> {
+    if matches!(args, [flag] if flag == "--outdated") {
+        return integration_install_outdated();
+    }
     let Some(target) = parse_integration_target(args, "install")? else {
         return Ok(2);
     };
@@ -104,6 +107,34 @@ fn integration_install(args: &[String]) -> std::io::Result<i32> {
             Ok(1)
         }
     }
+}
+
+/// Reinstalls every installed integration whose hook is older than this
+/// build's. Installing an up-to-date hook writes the same bytes again, so
+/// agents that review changed hooks (Codex) ask only after a real update.
+fn integration_install_outdated() -> std::io::Result<i32> {
+    let mut failed = false;
+    let mut any = false;
+    for status in crate::integration::installed_integration_statuses() {
+        if status.state != crate::integration::IntegrationStatusKind::Outdated {
+            continue;
+        }
+        any = true;
+        match crate::integration::install_target(status.target) {
+            Ok(messages) => print_integration_messages(messages),
+            Err(err) => {
+                failed = true;
+                eprintln!(
+                    "{}: {err}",
+                    crate::integration::integration_target_label(status.target)
+                );
+            }
+        }
+    }
+    if !any {
+        println!("every installed integration is up to date");
+    }
+    Ok(if failed { 1 } else { 0 })
 }
 
 fn integration_uninstall(args: &[String]) -> std::io::Result<i32> {

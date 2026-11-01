@@ -5473,3 +5473,20 @@ fn cursor_hook_reports_the_conversation_id_and_transcript() {
     clear_integration_path_env();
     let _ = fs::remove_dir_all(base);
 }
+
+#[test]
+fn reinstalling_writes_the_same_hook_so_agents_do_not_ask_to_review_it() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let codex_dir = base.join("codex");
+    fs::create_dir_all(&codex_dir).unwrap();
+    std::env::set_var(CODEX_HOME_ENV_VAR, &codex_dir);
+    let first = install_codex().unwrap();
+    let hook = fs::read(&first.hook_path).unwrap();
+    let hooks = fs::read(&first.hooks_path).unwrap();
+    let second = install_codex().unwrap();
+    assert_eq!(fs::read(&second.hook_path).unwrap(), hook);
+    assert_eq!(fs::read(&second.hooks_path).unwrap(), hooks);
+    clear_integration_path_env();
+    let _ = fs::remove_dir_all(base);
+}

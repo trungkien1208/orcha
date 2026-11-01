@@ -1118,9 +1118,20 @@ Integration hooks report it on session start: Claude and Codex send their
 `session_id` and `transcript_path`; Codex now reports a new session even
 before its rollout file exists and adds the path on the next report; Cursor
 reports its `conversation_id` (the chat id) and `transcript_path` when Cursor
-supplies one. Reinstall the Codex and Cursor integrations to get this. The
-transcript path is kept in memory only and returns with the next session report
-after a server restart.
+supplies one. All three also send the session's `model`. The transcript path
+is kept in memory only and returns with the next session report after a server
+restart.
+
+Update the hooks once after upgrading:
+
+```bash
+orcha integrations install --outdated
+```
+
+It reinstalls every integration older than the running build and leaves
+up-to-date ones byte for byte unchanged. Codex asks you to review changed hooks
+(`/hooks`, then trust them) the first time it starts after an update; until then
+it skips them.
 
 Feature flag: `agent_session.transcript_path`.
 
