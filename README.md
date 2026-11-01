@@ -114,7 +114,7 @@ In short: herdr is the engine, Orca is the inspiration, orcha is the two put tog
   <img src="docs/orcha/images/easy-job-floor.png" alt="Easy Job: three projects at their benches on a pixel-art office floor, the boss in the aisle, and an agent asking whether it can run the tests" width="100%" />
 </p>
 
-Easy Job turns what orcha is running into a little office. Each project gets a bench, each agent gets a desk, and you walk the floor as the boss.
+Easy Job turns what orcha is running into a little office. Each project gets a bench, each agent gets a desk, and you walk the floor as the boss. **[Try the sample office in your browser](https://trungkien1208.github.io/orcha-plugin-office/)**, no install needed. Its code lives at [trungkien1208/orcha-plugin-office](https://github.com/trungkien1208/orcha-plugin-office).
 
 - **See everyone at a glance.** A blue screen means working, a raised hand means it needs you, a green screen means done.
 - **Answer from the floor.** Click an agent to read its chat, tap one of the answers it offers, or give it the next task. Press `n` to jump to the next raised hand.

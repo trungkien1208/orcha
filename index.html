@@ -609,6 +609,9 @@
       .office-cmd { margin: 14px 0 0; padding: 10px 12px; border: 2px solid var(--line); background: var(--status-bg); color: var(--status-ink); font: 13px/1.6 var(--mono); white-space: pre-wrap; }
       .office-cmd span { opacity: .6; }
       .office-note { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+      .office-links { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 14px; }
+      .office-links a { min-height: 40px; padding: 0 14px; font-size: 12px; }
+      .office-links .second-link { gap: 10px; text-decoration: none; }
       @media (max-width: 700px) {
         .pick-grid, .from-grid { grid-template-columns: minmax(0, 1fr); }
         .sheet-body { padding: 14px 14px 18px; }
@@ -994,6 +997,10 @@
         <section id="panel-office" role="tabpanel" aria-labelledby="tab-office" hidden>
           <h2>Easy Job: a pixel office for your agents</h2>
           <p>Easy Job turns what orcha is running into a little office. Each project gets a bench, each agent a desk, and you walk the floor as the boss.</p>
+          <div class="office-links">
+            <a class="primary-link" href="https://trungkien1208.github.io/orcha-plugin-office/" target="_blank" rel="noreferrer">Try the sample office <span aria-hidden="true">↗</span></a>
+            <a class="second-link" href="https://github.com/trungkien1208/orcha-plugin-office" target="_blank" rel="noreferrer">Easy Job on GitHub <span aria-hidden="true">↗</span></a>
+          </div>
           <img class="office-shot" src="assets/easy-job-floor.png" alt="Easy Job: three projects at their benches on a pixel-art office floor, the boss in the aisle, and an agent asking whether it can run the tests" loading="lazy" width="1600" height="900" />
           <ul class="office-list">
             <li><b>See everyone at a glance:</b> blue screen working, raised hand needs you, green screen done.</li>
