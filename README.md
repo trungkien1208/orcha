@@ -108,6 +108,35 @@ All three run several coding agents at once. They just sit in different places:
 
 In short: herdr is the engine, Orca is the inspiration, orcha is the two put together in your terminal.
 
+### How heavy is it?
+
+Measured on a Mac, sitting idle with nothing to do:
+
+| | Memory | CPU | Download |
+|---|---|---|---|
+| **orcha** 0.11 | **about 40 MB** | **under 1%** | **25 MB** |
+| herdr 0.9.5 | about 30 to 50 MB | under 1% | 22 MB |
+| Orca 1.4 | 300 to 400 MB | about 6% | 517 MB |
+
+So orcha uses roughly a tenth of Orca's memory, and about the same as plain herdr. Your agents get the rest.
+
+<details>
+<summary>How we measured, and the busy numbers</summary>
+
+macOS on Apple Silicon, November 2026. For orcha and herdr we count the background server plus the window you look at, in a 200 × 56 terminal, with 1, 5 and 15 panes. For Orca we count all of its processes, with no agent running yet. Each number is a 10-second sample, and macOS compresses memory, so expect about ±10 MB between runs.
+
+With every pane printing 30 lines a second, like busy agents:
+
+| Panes | orcha memory | orcha CPU | herdr memory | herdr CPU |
+|---|---|---|---|---|
+| 1 | 43 MB | 13% | 44 MB | 12% |
+| 5 | 46 to 52 MB | 18 to 26% | 46 to 49 MB | 14 to 18% |
+| 15 | 49 MB | 21% | 50 MB | 19% |
+
+orcha draws more on screen than plain herdr (projects, PROCESS, the side panel), so it uses a few points more CPU while agents print. Making that smaller is on the list.
+
+</details>
+
 ## Easy Job: a pixel-art office for your agents
 
 <p align="center">
