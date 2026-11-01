@@ -287,6 +287,7 @@ impl ClientShellState {
                 self.orcha_ui.folded_projects.remove(&id);
                 self.orcha_ui.open_projects.insert(id);
             }
+            self.persist_chrome_preferences(outcome);
             outcome.repaint = true;
             return true;
         }

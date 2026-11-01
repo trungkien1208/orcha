@@ -32,12 +32,14 @@ pub(super) enum PaletteCommand {
     Settings,
     Keybinds,
     ToggleRightPanel,
+    OpenAllProjects,
+    FoldAllProjects,
     Setup,
     Quit,
 }
 
 /// (command, title, what it does)
-const COMMANDS: [(PaletteCommand, &str, &str); 23] = [
+const COMMANDS: [(PaletteCommand, &str, &str); 25] = [
     (
         PaletteCommand::NewAgent,
         "New agent",
@@ -138,6 +140,16 @@ const COMMANDS: [(PaletteCommand, &str, &str); 23] = [
         PaletteCommand::ToggleRightPanel,
         "Show or hide the right panel",
         "fuel and git beside the panes",
+    ),
+    (
+        PaletteCommand::OpenAllProjects,
+        "Open all projects",
+        "show every project's agents in the sidebar",
+    ),
+    (
+        PaletteCommand::FoldAllProjects,
+        "Fold all projects",
+        "one line per project in the sidebar",
     ),
     (PaletteCommand::Setup, "Setup", "the first-run setup again"),
     (
@@ -674,6 +686,31 @@ impl ClientShellState {
             PaletteCommand::ToggleRightPanel => {
                 let on = !self.config.right_panel;
                 self.save_settings_edit(crate::config::ConfigEdit::RightPanel(on), outcome);
+            }
+            PaletteCommand::OpenAllProjects | PaletteCommand::FoldAllProjects => {
+                let open = command == PaletteCommand::OpenAllProjects;
+                let ids: Vec<String> = self
+                    .snapshot
+                    .as_deref()
+                    .map(|snapshot| {
+                        snapshot
+                            .workspaces
+                            .iter()
+                            .map(|workspace| workspace.workspace_id.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                for id in ids {
+                    if open {
+                        self.orcha_ui.folded_projects.remove(&id);
+                        self.orcha_ui.open_projects.insert(id);
+                    } else {
+                        self.orcha_ui.open_projects.remove(&id);
+                        self.orcha_ui.folded_projects.insert(id);
+                    }
+                }
+                self.persist_chrome_preferences(outcome);
+                outcome.repaint = true;
             }
             PaletteCommand::Setup => self.open_welcome(outcome),
             PaletteCommand::Quit => self.record_binding(binding(KeybindAction::Detach), outcome),

@@ -806,6 +806,8 @@ fn render_project(
         }
     }
     let arrow = Rect::new(rect.x + 1, rect.y, 2, 1);
+    // the click area is wider than the arrow: the edge column counts too
+    let toggle = Rect::new(rect.x, rect.y, 3, 1);
     put_text(
         buffer,
         arrow.x,
@@ -816,7 +818,7 @@ fn render_project(
     );
     hits.orcha
         .project_toggles
-        .push((arrow, workspace.workspace_id.clone()));
+        .push((toggle, workspace.workspace_id.clone()));
     let name_x = rect.x + 3;
     let right = rect.right().saturating_sub(1);
     let available = right.saturating_sub(name_x);

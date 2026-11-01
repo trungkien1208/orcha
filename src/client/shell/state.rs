@@ -1260,7 +1260,11 @@ impl ClientShellState {
             selection_repaint_deadline: None,
             git_panel: Default::default(),
             file_tree: Default::default(),
-            orcha_ui: Default::default(),
+            orcha_ui: OrchaUiState {
+                open_projects: preferences.open_projects.iter().cloned().collect(),
+                folded_projects: preferences.folded_projects.iter().cloned().collect(),
+                ..Default::default()
+            },
             accounts: Default::default(),
             hits: ShellHitMap::default(),
             endpoints: vec![local_endpoint()],
@@ -1780,6 +1784,7 @@ impl ClientShellState {
         }
         if self.config.sidebar_tree {
             super::orcha_projects::normalize_project_labels(&mut snapshot);
+            self.keep_left_project_open(&snapshot);
         }
         self.snapshot = Some(snapshot);
         self.reconcile_pending_workspace_highlight();
@@ -2027,6 +2032,26 @@ impl ClientShellState {
     }
 
     /// A short message in the copy-feedback toast, shown for three seconds.
+    /// A project that was open because it was selected stays open after
+    /// another project is selected, until it is folded on purpose.
+    fn keep_left_project_open(&mut self, next: &ClientShellSnapshot) {
+        let focused = |snapshot: &ClientShellSnapshot| {
+            snapshot
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.focused)
+                .map(|workspace| workspace.workspace_id.clone())
+        };
+        let Some(previous) = self.snapshot.as_deref().and_then(focused) else {
+            return;
+        };
+        if focused(next).as_ref() != Some(&previous)
+            && !self.orcha_ui.folded_projects.contains(&previous)
+        {
+            self.orcha_ui.open_projects.insert(previous);
+        }
+    }
+
     pub(crate) fn show_notice(&mut self, message: String) {
         self.copy_feedback = Some(crate::app::state::CopyFeedback { message });
         self.copy_feedback_deadline =

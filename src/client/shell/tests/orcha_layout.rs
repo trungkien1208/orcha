@@ -1352,3 +1352,26 @@ fn branch_and_changes_fold_from_their_titles() {
     assert!(text.contains("▸ CHANGES"));
     assert!(!text.contains("theme.ts"), "folded: the files are gone");
 }
+
+#[test]
+fn a_project_left_open_stays_open_when_another_is_selected() {
+    let mut state = orcha_state(true, true);
+    let mut next = snapshot();
+    let mut second = next.workspaces[0].clone();
+    second.workspace_id = "ws_2".into();
+    second.number = 2;
+    next.workspaces[0].focused = false;
+    second.focused = true;
+    next.workspaces.push(second.clone());
+    state.set_snapshot(Box::new(next.clone()));
+    assert!(state.orcha_ui.open_projects.contains("ws_1"));
+
+    // a project folded on purpose stays folded
+    state.orcha_ui.open_projects.clear();
+    state.orcha_ui.folded_projects.insert("ws_2".into());
+    let mut back = next;
+    back.workspaces[0].focused = true;
+    back.workspaces[1].focused = false;
+    state.set_snapshot(Box::new(back));
+    assert!(!state.orcha_ui.open_projects.contains("ws_2"));
+}
