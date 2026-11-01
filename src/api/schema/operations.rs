@@ -204,6 +204,8 @@ mod tests {
             "plugin.disable",
             "plugin.action.invoke",
             "plugin.run_action",
+            "plugin.pane.stop",
+            "plugin.pane.restart",
             "plugin.pane.open",
             "plugin.pane.focus",
             "plugin.pane.close",

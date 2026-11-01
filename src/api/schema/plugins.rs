@@ -522,3 +522,18 @@ pub struct PluginAutostartEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pane_id: Option<String>,
 }
+
+/// A plugin pane that is running now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PluginPaneListEntry {
+    pub plugin_id: String,
+    pub entrypoint: String,
+    pub pane_id: String,
+    pub workspace_id: String,
+    /// It starts with the server (`plugin.autostart.set`).
+    #[serde(default)]
+    pub autostart: bool,
+    /// The first web address the pane printed, preferring local ones.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}

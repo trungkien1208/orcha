@@ -55,6 +55,90 @@ fn save(entries: &[PluginAutostartEntry]) -> Result<(), AutostartError> {
     })
 }
 
+/// Stops a running plugin pane. One that starts with the server stops
+/// starting too, or the supervisor would open it again within seconds.
+pub(super) fn stop_pane(
+    pane_id: &str,
+    api_tx: &ApiRequestSender,
+) -> Result<ResponseResult, AutostartError> {
+    let entry = running_entry(pane_id, api_tx)?;
+    if entry.autostart {
+        let mut entries = load();
+        entries.retain(|saved| {
+            !(saved.plugin_id == entry.plugin_id && saved.entrypoint == entry.entrypoint)
+        });
+        save(&entries)?;
+    }
+    close(pane_id, api_tx)?;
+    Ok(ResponseResult::PluginPaneClosed {
+        pane_id: pane_id.to_string(),
+    })
+}
+
+/// Starts a running plugin pane again: closed, then opened in the same
+/// workspace without focus (one that starts with the server comes back by
+/// itself).
+pub(super) fn restart_pane(
+    pane_id: &str,
+    api_tx: &ApiRequestSender,
+) -> Result<ResponseResult, AutostartError> {
+    let entry = running_entry(pane_id, api_tx)?;
+    close(pane_id, api_tx)?;
+    if entry.autostart {
+        WAKE.store(true, Ordering::Relaxed);
+        return Ok(ResponseResult::Ok {});
+    }
+    app(
+        "restart",
+        Method::PluginPaneOpen(crate::api::schema::PluginPaneOpenParams {
+            plugin_id: entry.plugin_id,
+            entrypoint: entry.entrypoint,
+            placement: Some(PluginPanePlacement::Tab),
+            width: None,
+            height: None,
+            workspace_id: Some(entry.workspace_id),
+            target_pane_id: None,
+            direction: None,
+            cwd: None,
+            focus: false,
+            env: HashMap::new(),
+        }),
+        api_tx,
+    )?;
+    Ok(ResponseResult::Ok {})
+}
+
+fn running_entry(
+    pane_id: &str,
+    api_tx: &ApiRequestSender,
+) -> Result<crate::api::schema::PluginPaneListEntry, AutostartError> {
+    let listed = app(
+        "plugin-pane",
+        Method::PluginPaneList(Default::default()),
+        api_tx,
+    )?;
+    let panes: Vec<crate::api::schema::PluginPaneListEntry> =
+        serde_json::from_value(listed["result"]["plugin_panes"].clone()).unwrap_or_default();
+    panes
+        .into_iter()
+        .find(|pane| pane.pane_id == pane_id)
+        .ok_or((
+            "plugin_pane_not_found",
+            format!("{pane_id} is not a running plugin pane"),
+        ))
+}
+
+fn close(pane_id: &str, api_tx: &ApiRequestSender) -> Result<(), AutostartError> {
+    app(
+        "plugin-pane",
+        Method::PluginPaneClose(crate::api::schema::PluginPaneCloseParams {
+            pane_id: pane_id.to_string(),
+        }),
+        api_tx,
+    )
+    .map(|_| ())
+}
+
 /// Stops starting every pane of `plugin_id` (it was unlinked).
 pub(crate) fn forget(plugin_id: &str) {
     let mut entries = load();

@@ -184,16 +184,36 @@ fn fuzzy_score(text: &str, query: &str) -> Option<usize> {
     Some(score)
 }
 
-/// A linked plugin's action, listed after the built-in commands.
+/// A linked plugin's row, listed after the built-in commands: one of its
+/// actions, or a control for one of its running panes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct PluginPaletteAction {
-    pub plugin_id: String,
-    pub action_id: String,
     pub title: String,
     pub detail: String,
+    pub run: PluginRun,
 }
 
-/// Plugin actions from the last refresh; read when COMMANDS opens.
+/// What a plugin row does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum PluginRun {
+    Invoke {
+        plugin_id: String,
+        action_id: String,
+    },
+    /// Close a running pane (and stop starting it with Orcha).
+    Stop {
+        pane_id: String,
+    },
+    Restart {
+        pane_id: String,
+    },
+    /// Open the address the pane printed in the browser.
+    OpenUrl {
+        url: String,
+    },
+}
+
+/// Plugin rows from the last refresh; read when COMMANDS opens.
 static PLUGIN_ACTIONS: std::sync::Mutex<Vec<PluginPaletteAction>> =
     std::sync::Mutex::new(Vec::new());
 
@@ -204,36 +224,110 @@ fn plugin_actions() -> Vec<PluginPaletteAction> {
         .unwrap_or_default()
 }
 
-/// Asks the server for plugin actions off the input thread.
+/// Asks the server for plugin actions and running plugin panes off the
+/// input thread.
 fn refresh_plugin_actions() {
     let _ = crate::thread_spawn::spawn_named("orcha-palette-plugins", || {
-        let Some(result) = crate::orcha_handoff::herdr_json(&["plugin", "action", "list"]) else {
-            return;
-        };
-        let actions = result
-            .get("actions")
-            .and_then(serde_json::Value::as_array)
-            .map(|actions| {
-                actions
-                    .iter()
-                    .filter_map(|action| {
-                        let text = |key: &str| action.get(key)?.as_str().map(str::to_owned);
-                        Some(PluginPaletteAction {
-                            plugin_id: text("plugin_id")?,
-                            action_id: text("action_id")?,
-                            title: text("title")?,
-                            detail: text("description").unwrap_or_else(|| {
-                                format!("{} plugin", text("plugin_id").unwrap_or_default())
-                            }),
-                        })
-                    })
-                    .collect()
+        let call = |method: &str| crate::orcha_handoff::herdr_json(&["api", "call", method]);
+        let names: std::collections::HashMap<String, String> = call("plugin.list")
+            .and_then(|result| result.get("plugins").cloned())
+            .and_then(|plugins| plugins.as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|plugin| {
+                let id = plugin
+                    .get("plugin_id")
+                    .or(plugin.get("id"))?
+                    .as_str()?
+                    .to_owned();
+                let name = plugin
+                    .get("name")
+                    .and_then(|name| name.as_str())
+                    .unwrap_or(&id)
+                    .to_owned();
+                Some((id, name))
             })
-            .unwrap_or_default();
+            .collect();
+        let mut rows = plugin_action_rows(call("plugin.action.list").as_ref());
+        rows.extend(plugin_pane_rows(call("plugin.pane.list").as_ref(), &names));
         if let Ok(mut known) = PLUGIN_ACTIONS.lock() {
-            *known = actions;
+            *known = rows;
         }
     });
+}
+
+fn plugin_action_rows(result: Option<&serde_json::Value>) -> Vec<PluginPaletteAction> {
+    result
+        .and_then(|result| result.get("actions"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|action| {
+            let text = |key: &str| action.get(key)?.as_str().map(str::to_owned);
+            let plugin_id = text("plugin_id")?;
+            Some(PluginPaletteAction {
+                title: text("title")?,
+                detail: text("description").unwrap_or_else(|| format!("{plugin_id} plugin")),
+                run: PluginRun::Invoke {
+                    action_id: text("action_id")?,
+                    plugin_id,
+                },
+            })
+        })
+        .collect()
+}
+
+/// Open link, restart and stop for each running plugin pane.
+pub(super) fn plugin_pane_rows(
+    result: Option<&serde_json::Value>,
+    names: &std::collections::HashMap<String, String>,
+) -> Vec<PluginPaletteAction> {
+    let mut rows = Vec::new();
+    for pane in result
+        .and_then(|result| result.get("plugin_panes"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let text = |key: &str| {
+            pane.get(key)
+                .and_then(|value| value.as_str())
+                .map(str::to_owned)
+        };
+        let (Some(plugin_id), Some(pane_id)) = (text("plugin_id"), text("pane_id")) else {
+            continue;
+        };
+        let name = names
+            .get(&plugin_id)
+            .cloned()
+            .unwrap_or_else(|| plugin_id.clone());
+        let entrypoint = text("entrypoint").unwrap_or_default();
+        let autostart = pane.get("autostart").and_then(|value| value.as_bool()) == Some(true);
+        if let Some(url) = text("url") {
+            rows.push(PluginPaletteAction {
+                title: format!("Open {name}"),
+                detail: url.clone(),
+                run: PluginRun::OpenUrl { url },
+            });
+        }
+        rows.push(PluginPaletteAction {
+            title: format!("Restart {name}"),
+            detail: format!("its {entrypoint} pane starts again in the background"),
+            run: PluginRun::Restart {
+                pane_id: pane_id.clone(),
+            },
+        });
+        rows.push(PluginPaletteAction {
+            title: format!("Stop {name}"),
+            detail: if autostart {
+                format!("closes its {entrypoint} pane; it no longer starts with Orcha")
+            } else {
+                format!("closes its {entrypoint} pane")
+            },
+            run: PluginRun::Stop { pane_id },
+        });
+    }
+    rows
 }
 
 /// A row's title and detail: built-in commands first, then plugin actions.
@@ -625,19 +719,47 @@ impl ClientShellState {
         };
         if let Some(action) = plugin_action(index) {
             self.orcha_ui.popup = None;
-            self.show_notice(format!("running {}", action.title));
-            // Through the server, like any plugin action; never blocks input.
+            self.show_notice(match &action.run {
+                PluginRun::Invoke { .. } => format!("running {}", action.title),
+                PluginRun::OpenUrl { url } => format!("opening {url}"),
+                PluginRun::Restart { .. } | PluginRun::Stop { .. } => {
+                    format!("{}…", action.title.to_lowercase())
+                }
+            });
+            // Through the server like any plugin request; never blocks input.
             let _ = crate::thread_spawn::spawn_named("orcha-palette-plugin-run", move || {
-                let _ = crate::orcha_handoff::herdr(&[
-                    "plugin",
-                    "action",
-                    "invoke",
-                    &action.action_id,
-                    "--plugin",
-                    &action.plugin_id,
-                ])
-                .stdout(std::process::Stdio::null())
-                .status();
+                let params = |pane_id: &str| serde_json::json!({ "pane_id": pane_id }).to_string();
+                match action.run {
+                    PluginRun::Invoke {
+                        plugin_id,
+                        action_id,
+                    } => {
+                        let _ = crate::orcha_handoff::herdr(&[
+                            "plugin", "action", "invoke", &action_id, "--plugin", &plugin_id,
+                        ])
+                        .stdout(std::process::Stdio::null())
+                        .status();
+                    }
+                    PluginRun::Stop { pane_id } => {
+                        let _ = crate::orcha_handoff::herdr_json(&[
+                            "api",
+                            "call",
+                            "plugin.pane.stop",
+                            &params(&pane_id),
+                        ]);
+                    }
+                    PluginRun::Restart { pane_id } => {
+                        let _ = crate::orcha_handoff::herdr_json(&[
+                            "api",
+                            "call",
+                            "plugin.pane.restart",
+                            &params(&pane_id),
+                        ]);
+                    }
+                    PluginRun::OpenUrl { url } => {
+                        let _ = crate::platform::open_url(&url);
+                    }
+                }
             });
             return;
         }
@@ -761,16 +883,44 @@ mod plugin_palette_tests {
     #[test]
     fn plugin_actions_follow_the_built_in_commands_and_match_queries() {
         *PLUGIN_ACTIONS.lock().unwrap() = vec![PluginPaletteAction {
-            plugin_id: "easy-job".into(),
-            action_id: "open".into(),
             title: "Open Easy Job".into(),
             detail: "Open the Easy Job office".into(),
+            run: PluginRun::Invoke {
+                plugin_id: "easy-job".into(),
+                action_id: "open".into(),
+            },
         }];
         assert_eq!(matches("").len(), COMMANDS.len() + 1);
         let found = matches("easy job");
         assert_eq!(found.first(), Some(&COMMANDS.len()));
-        assert_eq!(plugin_action(COMMANDS.len()).unwrap().action_id, "open");
+        assert!(matches!(
+            plugin_action(COMMANDS.len()).unwrap().run,
+            PluginRun::Invoke { ref action_id, .. } if action_id == "open"
+        ));
         assert!(command(COMMANDS.len()).is_none());
         PLUGIN_ACTIONS.lock().unwrap().clear();
+    }
+
+    #[test]
+    fn running_plugin_panes_get_open_restart_and_stop_rows() {
+        let panes = serde_json::json!({"plugin_panes": [
+            {"plugin_id": "easy-job", "entrypoint": "server", "pane_id": "w7:p2",
+             "workspace_id": "w7", "autostart": true, "url": "http://127.0.0.1:4317/"}
+        ]});
+        let names =
+            std::collections::HashMap::from([("easy-job".to_owned(), "Easy Job".to_owned())]);
+        let rows = plugin_pane_rows(Some(&panes), &names);
+        let titles: Vec<_> = rows.iter().map(|row| row.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            ["Open Easy Job", "Restart Easy Job", "Stop Easy Job"]
+        );
+        assert!(rows[2].detail.contains("no longer starts with Orcha"));
+        assert_eq!(
+            rows[0].run,
+            PluginRun::OpenUrl {
+                url: "http://127.0.0.1:4317/".into()
+            }
+        );
     }
 }

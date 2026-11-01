@@ -1280,6 +1280,9 @@ impl App {
             Method::PluginPaneClose(params) => {
                 return self.handle_plugin_pane_close(request.id, params);
             }
+            Method::PluginPaneList(_) => {
+                return self.handle_plugin_pane_list(request.id);
+            }
             Method::PluginRunAction(params) => {
                 // The same as plugin.action.invoke with an explicit plugin.
                 return self.handle_api_request_after_internal_events_drained(

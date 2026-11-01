@@ -639,6 +639,22 @@ fn serve_request(
             };
             finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
         }
+        Method::PluginPaneStop(params) | Method::PluginPaneRestart(params) => {
+            let result = if matches!(method, "plugin.pane.stop") {
+                crate::api::plugin_autostart::stop_pane(&params.pane_id, api_tx)
+            } else {
+                crate::api::plugin_autostart::restart_pane(&params.pane_id, api_tx)
+            };
+            let response = match result {
+                Ok(result) => serde_json::to_string(&SuccessResponse {
+                    id: request_id.clone(),
+                    result,
+                })
+                .unwrap_or_default(),
+                Err((code, message)) => error_response_json(request_id.clone(), code, message),
+            };
+            finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
+        }
         Method::PluginAutostartList(_) => {
             let response = serde_json::to_string(&SuccessResponse {
                 id: request_id.clone(),

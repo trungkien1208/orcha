@@ -18,6 +18,26 @@ use manifest::{
     effective_platforms, ensure_platform_supported, normalize_action_id, normalize_plugin_source,
 };
 
+/// The first web address in `text`, preferring a local one (a server a
+/// plugin started prints where to open it).
+pub(crate) fn first_url(text: &str) -> Option<String> {
+    let urls: Vec<String> = text
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, '<' | '>' | '"' | '\'' | '(' | ')'))
+        .filter(|word| word.starts_with("http://") || word.starts_with("https://"))
+        .map(|word| {
+            word.trim_end_matches(['.', ',', ';', ':', '!', '?', ']'])
+                .to_owned()
+        })
+        .filter(|url| url.len() > "https://".len())
+        .collect();
+    let local = |url: &&String| {
+        ["://127.0.0.1", "://localhost", "://0.0.0.0", "://[::1]"]
+            .iter()
+            .any(|host| url.contains(host))
+    };
+    urls.iter().find(local).or_else(|| urls.first()).cloned()
+}
+
 #[cfg(test)]
 use crate::api::schema::{PluginCommandStatus, PluginInvocationContext};
 pub(crate) use manifest::load_plugin_manifest;
@@ -580,6 +600,47 @@ impl App {
         )
     }
 
+    /// Running plugin panes, with the first web address each one printed.
+    pub(super) fn handle_plugin_pane_list(&mut self, id: String) -> String {
+        let mut plugin_panes = Vec::new();
+        for (pane_id, record) in &self.state.plugin_panes {
+            let Some(ws_idx) = self
+                .state
+                .workspaces
+                .iter()
+                .position(|ws| ws.pane_state(*pane_id).is_some())
+            else {
+                continue;
+            };
+            let Some(pane) = self.pane_metadata(ws_idx, *pane_id) else {
+                continue;
+            };
+            let url = self
+                .lookup_runtime(ws_idx, *pane_id)
+                .and_then(|(runtime, _)| {
+                    let snapshot = crate::app::api_helpers::read_terminal_snapshot(
+                        runtime,
+                        crate::api::schema::ReadSource::Scrollback,
+                        crate::api::schema::ReadFormat::Text,
+                        Some(400),
+                    );
+                    first_url(&snapshot.text)
+                });
+            plugin_panes.push(crate::api::schema::PluginPaneListEntry {
+                plugin_id: record.plugin_id.clone(),
+                entrypoint: record.entrypoint.clone(),
+                autostart: pane
+                    .tokens
+                    .contains_key(crate::api::plugin_autostart::PANE_TOKEN),
+                pane_id: pane.pane_id,
+                workspace_id: pane.workspace_id,
+                url,
+            });
+        }
+        plugin_panes.sort_by(|a, b| (&a.plugin_id, &a.pane_id).cmp(&(&b.plugin_id, &b.pane_id)));
+        encode_success(id, ResponseResult::PluginPaneList { plugin_panes })
+    }
+
     pub(super) fn handle_plugin_pane_close(
         &mut self,
         id: String,
@@ -804,6 +865,24 @@ fn manifest_actions(
                 .iter()
                 .map(|action| manifest_action_info(&plugin.plugin_id, &plugin.platforms, action))
         })
+}
+
+#[cfg(test)]
+mod url_tests {
+    #[test]
+    fn first_url_prefers_local_addresses() {
+        let text =
+            "docs at https://example.com/help.\nEasy Job running · http://127.0.0.1:4317/#t=abc\n";
+        assert_eq!(
+            super::first_url(text).as_deref(),
+            Some("http://127.0.0.1:4317/#t=abc")
+        );
+        assert_eq!(
+            super::first_url("see (https://example.com/a).").as_deref(),
+            Some("https://example.com/a")
+        );
+        assert_eq!(super::first_url("no address here"), None);
+    }
 }
 
 #[cfg(test)]

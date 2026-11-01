@@ -7543,6 +7543,54 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "plugin.pane.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "plugin.pane.stop",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PluginPaneCloseParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "plugin.pane.restart",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PluginPaneCloseParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -10884,6 +10932,42 @@
           ],
           "type": "object"
         },
+        "PluginPaneListEntry": {
+          "description": "A plugin pane that is running now.",
+          "properties": {
+            "autostart": {
+              "default": false,
+              "description": "It starts with the server (`plugin.autostart.set`).",
+              "type": "boolean"
+            },
+            "entrypoint": {
+              "type": "string"
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "plugin_id": {
+              "type": "string"
+            },
+            "url": {
+              "description": "The first web address the pane printed, preferring local ones.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plugin_id",
+            "entrypoint",
+            "pane_id",
+            "workspace_id"
+          ],
+          "type": "object"
+        },
         "PluginPanePlacement": {
           "enum": [
             "overlay",
@@ -12481,6 +12565,25 @@
               "required": [
                 "type",
                 "logs"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "plugin_panes": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/PluginPaneListEntry"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "plugin_pane_list",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "plugin_panes"
               ],
               "type": "object"
             },

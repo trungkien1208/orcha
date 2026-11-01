@@ -170,6 +170,9 @@ operations::define_operations! {
     PluginAutostartSet(PluginAutostartSetParams) => "plugin.autostart.set", false, false;
     PluginAutostartList(EmptyParams) => "plugin.autostart.list", false, false;
     AgentTranscriptSubscribe(AgentTranscriptSubscribeParams) => "agent.transcript.subscribe", false, false;
+    PluginPaneList(EmptyParams) => "plugin.pane.list", false, false;
+    PluginPaneStop(PluginPaneCloseParams) => "plugin.pane.stop", true, false;
+    PluginPaneRestart(PluginPaneCloseParams) => "plugin.pane.restart", true, false;
 }
 
 #[cfg(test)]
