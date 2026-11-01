@@ -177,6 +177,7 @@ mod tests {
             "agent.view.set",
             "agent.view.clear",
             "agent.focus",
+            "agent.mark_seen",
             "agent.start",
             "agent.prompt",
             "agent.send_keys",

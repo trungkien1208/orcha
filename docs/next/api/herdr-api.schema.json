@@ -1700,6 +1700,24 @@
           },
           "type": "object"
         },
+        "AgentMarkSeenParams": {
+          "properties": {
+            "completion_seq": {
+              "description": "The `completion_seq` the user saw. A newer completion stays unseen.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "pane_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id",
+            "completion_seq"
+          ],
+          "type": "object"
+        },
         "AgentModelsParams": {
           "properties": {
             "kind": {
@@ -7198,6 +7216,22 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agent.mark_seen",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/AgentMarkSeenParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -7660,6 +7694,15 @@
             },
             "screen_detection_skipped": {
               "type": "boolean"
+            },
+            "seen_seq": {
+              "description": "The `completion_seq` the user has seen, in Herdr or through `agent.mark_seen`.",
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "state_change_seq": {
               "default": 0,
@@ -10537,6 +10580,27 @@
                 "session_version",
                 "session_epoch",
                 "changes"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "agent": {
+                  "$ref": "#/schemas/success_response/$defs/AgentInfo"
+                },
+                "marked": {
+                  "description": "False when a newer completion arrived after `completion_seq`.",
+                  "type": "boolean"
+                },
+                "type": {
+                  "const": "agent_seen",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "marked",
+                "agent"
               ],
               "type": "object"
             },

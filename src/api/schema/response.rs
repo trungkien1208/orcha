@@ -63,6 +63,11 @@ pub enum ResponseResult {
         session_epoch: String,
         changes: Vec<super::session::SessionChange>,
     },
+    AgentSeen {
+        /// False when a newer completion arrived after `completion_seq`.
+        marked: bool,
+        agent: AgentInfo,
+    },
     AgentHandedOff {
         /// The new pane the conversation continues in.
         pane_id: String,

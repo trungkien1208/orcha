@@ -107,7 +107,7 @@ Raw socket method names use dot notation:
 | Popup | `popup.close` |
 | Layout | `layout.export`, `layout.apply`, `layout.set_split_ratio` |
 | Accounts | `accounts.list`, `accounts.plan`, `accounts.switch`, `accounts.login`, `accounts.add`, `accounts.remove`, `accounts.rename`, `accounts.set_default`, `accounts.env` |
-| Agent | `agent.models`, `agent.configure`, `agent.handoff`, `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
+| Agent | `agent.models`, `agent.configure`, `agent.handoff`, `agent.mark_seen`, `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
 | Events | `events.subscribe`, `events.wait` |
 | Integrations | `integration.install`, `integration.uninstall` |
 | Plugins | `plugin.link`, `plugin.list`, `plugin.unlink`, `plugin.enable`, `plugin.disable`, `plugin.action.list`, `plugin.action.invoke`, `plugin.log.list`, `plugin.pane.open`, `plugin.pane.focus`, `plugin.pane.close` |
@@ -1298,6 +1298,21 @@ is not asked anything, so this works when it is out of fuel.
 
 `to` takes `kind`, `account_id` or both; `notes` is `full` (default) or
 `summary`. The new pane does not take focus.
+
+### agent.mark_seen
+
+Marks an agent's finished work as seen without focusing it, so `done` becomes
+`idle` in Herdr and in every client. Pass the `completion_seq` the user saw; if
+the agent finished again since, nothing changes and `marked` is `false`.
+
+```json
+{"id":"v1","method":"agent.mark_seen","params":{"pane_id":"w1:p2","completion_seq":118}}
+{"id":"v1","result":{"type":"agent_seen","marked":true,"agent":{"agent_status":"idle","completion_seq":118,"seen_seq":118,…}}}
+```
+
+Agent records carry `seen_seq`, the `completion_seq` the user has seen (in
+Herdr or through this method). A `pane.agent_status_changed` event reports the
+change.
 
 ## Protocol stability
 

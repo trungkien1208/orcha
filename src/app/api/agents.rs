@@ -61,6 +61,60 @@ impl App {
         encode_success(id, ResponseResult::AgentInfo { agent })
     }
 
+    /// Marks an agent's completed work as seen without focusing it.
+    pub(super) fn handle_agent_mark_seen(
+        &mut self,
+        id: String,
+        params: crate::api::schema::AgentMarkSeenParams,
+    ) -> String {
+        let resolved = match self.resolve_agent_target(&params.pane_id) {
+            Ok(resolved) => resolved,
+            Err(err) => return encode_error_body(id, self.agent_target_error_body(err)),
+        };
+        let (ws_idx, pane_id) = (resolved.ws_idx, resolved.pane_id);
+        let Some(terminal) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.pane_state(pane_id))
+            .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id))
+        else {
+            return agent_not_found(id, &params.pane_id);
+        };
+        let completion = terminal.last_agent_completion_seq;
+        let marked = completion.is_some_and(|completion| completion <= params.completion_seq);
+        if marked {
+            let before = self.agent_info(ws_idx, pane_id).map(|agent| agent.agent_status);
+            if let Some(pane) = self.state.workspaces[ws_idx].pane_state_mut(pane_id) {
+                pane.seen = true;
+            }
+            self.state.pending_agent_notifications.remove(&pane_id);
+            self.state.mark_session_dirty();
+            if let Some(agent) = self.agent_info(ws_idx, pane_id) {
+                if before != Some(agent.agent_status) {
+                    self.emit_event(crate::api::schema::EventEnvelope {
+                        event: crate::api::schema::EventKind::PaneAgentStatusChanged,
+                        data: crate::api::schema::EventData::PaneAgentStatusChanged {
+                            pane_id: agent.pane_id.clone(),
+                            workspace_id: agent.workspace_id.clone(),
+                            agent_status: agent.agent_status,
+                            agent: agent.agent.clone(),
+                            title: agent.title.clone(),
+                            display_agent: agent.display_agent.clone(),
+                            state_labels: agent.state_labels.clone(),
+                            state_change_seq: Some(agent.state_change_seq),
+                            session_version: Some(self.session_journal.version()),
+                        },
+                    });
+                }
+            }
+        }
+        let Some(agent) = self.agent_info(ws_idx, pane_id) else {
+            return agent_not_found(id, &params.pane_id);
+        };
+        encode_success(id, ResponseResult::AgentSeen { marked, agent })
+    }
+
     pub(super) fn handle_agent_rename(&mut self, id: String, params: AgentRenameParams) -> String {
         let agent = match self.rename_agent_target(&params.target, params.name) {
             Ok(agent) => agent,

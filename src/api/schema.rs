@@ -162,6 +162,7 @@ operations::define_operations! {
     AccountsSetDefault(AccountTarget) => "accounts.set_default", false, false;
     AgentHandoff(AgentHandoffParams) => "agent.handoff", false, false;
     AccountsEnv(AccountTarget) => "accounts.env", false, false;
+    AgentMarkSeen(AgentMarkSeenParams) => "agent.mark_seen", true, false;
 }
 
 #[cfg(test)]

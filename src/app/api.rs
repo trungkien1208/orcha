@@ -1270,6 +1270,9 @@ impl App {
             Method::PluginPaneClose(params) => {
                 return self.handle_plugin_pane_close(request.id, params);
             }
+            Method::AgentMarkSeen(params) => {
+                return self.handle_agent_mark_seen(request.id, params);
+            }
             Method::PaneReportAgentModel(params) => {
                 return self.handle_pane_report_agent_model(request.id, params);
             }

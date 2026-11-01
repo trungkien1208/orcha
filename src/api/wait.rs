@@ -1019,6 +1019,7 @@ mod prompt_confirm_tests {
             interactive_ready: true,
             state_change_seq: seq,
             completion_seq: None,
+            seen_seq: None,
             cwd: None,
             foreground_cwd: None,
             revision: 0,

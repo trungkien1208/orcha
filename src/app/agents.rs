@@ -493,6 +493,10 @@ impl App {
             interactive_ready: terminal.managed_agent_interactive_ready(),
             state_change_seq: terminal.last_agent_state_change_seq.unwrap_or(0),
             completion_seq: terminal.last_agent_completion_seq,
+            seen_seq: pane_state
+                .seen
+                .then_some(terminal.last_agent_completion_seq)
+                .flatten(),
             cwd: pane.cwd,
             model: model_state.model,
             effort: model_state.effort,

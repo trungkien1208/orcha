@@ -8658,3 +8658,70 @@ fn model_changed_fires_when_the_agent_record_model_changes() {
         "an unchanged model does not fire again"
     );
 }
+
+#[test]
+fn mark_seen_clears_done_without_moving_focus() {
+    use api::schema::{AgentMarkSeenParams, Method, PaneAgentState, PaneReportAgentParams};
+
+    let (writer, _control_rx, _render_rx) = test_client_writer();
+    let (mut server, pane_id) = completion_guard_server(writer);
+    let public_pane_id = server.app.public_pane_id(0, pane_id).unwrap();
+    let report = |seq, state| {
+        Method::PaneReportAgent(PaneReportAgentParams {
+            pane_id: public_pane_id.clone(),
+            source: "prime-agent".into(),
+            agent: "prime-agent".into(),
+            state,
+            message: None,
+            seq: Some(seq),
+            agent_session_id: None,
+            agent_session_path: None,
+            resume_argv: None,
+        })
+    };
+    completion_guard_api_report(&mut server, report(1, PaneAgentState::Working));
+    completion_guard_api_report(&mut server, report(2, PaneAgentState::Idle));
+    let agent = |server: &HeadlessServer| {
+        server
+            .app
+            .session_snapshot()
+            .agents
+            .into_iter()
+            .find(|agent| agent.pane_id == public_pane_id)
+            .unwrap()
+    };
+    let done = agent(&server);
+    assert_eq!(done.agent_status, api::schema::AgentStatus::Done);
+    let completion = done.completion_seq.expect("completed work");
+    assert_eq!(done.seen_seq, None);
+    let focused_before = server.app.session_snapshot().focused_pane_id;
+
+    let mark = |server: &mut HeadlessServer, completion_seq| {
+        let response = server.app.handle_api_request(api::schema::Request {
+            id: "seen".into(),
+            method: Method::AgentMarkSeen(AgentMarkSeenParams {
+                pane_id: public_pane_id.clone(),
+                completion_seq,
+            }),
+        });
+        serde_json::from_str::<serde_json::Value>(&response).unwrap()
+    };
+    assert_eq!(mark(&mut server, completion - 1)["result"]["marked"], false);
+    assert_eq!(agent(&server).agent_status, api::schema::AgentStatus::Done);
+
+    let seen = mark(&mut server, completion);
+    assert_eq!(seen["result"]["marked"], true);
+    assert_eq!(seen["result"]["agent"]["agent_status"], "idle");
+    assert_eq!(agent(&server).seen_seq, Some(completion));
+    assert_eq!(server.app.session_snapshot().focused_pane_id, focused_before);
+    assert!(server
+        .app
+        .event_hub
+        .events_after(0)
+        .iter()
+        .any(|(_, event)| matches!(
+            &event.data,
+            api::schema::EventData::PaneAgentStatusChanged { agent_status, .. }
+                if *agent_status == api::schema::AgentStatus::Idle
+        )));
+}

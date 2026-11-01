@@ -267,6 +267,9 @@ pub struct AgentInfo {
     /// The current idle transition completed work, independently of who has viewed it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion_seq: Option<u64>,
+    /// The `completion_seq` the user has seen, in Herdr or through `agent.mark_seen`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seen_seq: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -363,4 +366,11 @@ pub struct AgentHandoffTarget {
     pub kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AgentMarkSeenParams {
+    pub pane_id: String,
+    /// The `completion_seq` the user saw. A newer completion stays unseen.
+    pub completion_seq: u64,
 }
