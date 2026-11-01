@@ -6,17 +6,21 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 pub(crate) const PLUGIN_ID: &str = "easy-job";
-const USAGE: &str = "usage: orcha office [install|update|remove]";
+const USAGE: &str = "usage: orcha office [status|stop|install|update|remove]";
 
 pub(crate) fn run(args: &[String]) -> i32 {
     match args.first().map(String::as_str) {
         None | Some("open") => open(),
+        Some("status") => status(),
+        Some("stop") => stop(),
         Some("install") => install(),
         Some("update") => update(),
         Some("remove") | Some("uninstall") => remove(),
         Some("--help") | Some("-h") | Some("help") => {
             println!("{USAGE}");
             println!("  orcha office          open Easy Job");
+            println!("  orcha office status   is it added, and is it running");
+            println!("  orcha office stop     stop its server, keep it installed");
             println!("  orcha office install  add Easy Job from GitHub");
             println!("  orcha office update   get the newest Easy Job");
             println!("  orcha office remove   remove Easy Job (asks first)");
@@ -109,10 +113,16 @@ fn pick_data_home(next: PathBuf, previous: PathBuf) -> PathBuf {
 
 /// The server's pid from the state file Easy Job keeps, when it still runs.
 fn bridge_pid() -> Option<u32> {
+    bridge().map(|(pid, _)| pid)
+}
+
+/// The running server's pid and port, from the state file Easy Job keeps.
+fn bridge() -> Option<(u32, Option<u64>)> {
     let path = data_home()?.join("bridge.json");
     let state: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
     let pid = u32::try_from(state.get("pid")?.as_u64()?).ok()?;
-    crate::platform::process_exists(pid).then_some(pid)
+    let port = state.get("port").and_then(serde_json::Value::as_u64);
+    crate::platform::process_exists(pid).then_some((pid, port))
 }
 
 fn plugin_root() -> Option<PathBuf> {
@@ -232,6 +242,35 @@ fn open() -> i32 {
             1
         }
     }
+}
+
+fn status() -> i32 {
+    match install_state() {
+        Install::Missing => println!("Easy Job: not added (orcha office install)"),
+        Install::Broken => println!("Easy Job: files gone (orcha office install)"),
+        Install::Ready => match bridge() {
+            Some((pid, Some(port))) => {
+                println!("Easy Job: running on http://127.0.0.1:{port} (pid {pid})")
+            }
+            Some((pid, None)) => println!("Easy Job: running (pid {pid})"),
+            None => println!("Easy Job: added, not running (orcha office)"),
+        },
+    }
+    0
+}
+
+fn stop() -> i32 {
+    if !installed() {
+        return not_added();
+    }
+    if bridge_pid().is_none() {
+        println!("Easy Job is not running. Nothing to stop.");
+        return 0;
+    }
+    stop_bridge();
+    stop_panes();
+    println!("Easy Job stopped. Open it again with: orcha office");
+    0
 }
 
 fn install() -> i32 {

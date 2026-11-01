@@ -178,10 +178,11 @@ orcha server stop                                          # stops everything, a
 
 ```sh
 orcha office          # open it (starts it if it is off)
+orcha office status   # is it added, is it running, and on which address
+orcha office stop     # close it, keep it installed
 orcha office install  # add it
 orcha office update   # get the newest one; a running office restarts on it
-orcha office remove   # remove it (asks first, keeps ~/.easy-job unless you say so)
-orcha plugin action invoke stop --plugin easy-job   # close it, keep it installed
+orcha office remove   # remove it (asks first, keeps its data unless you say so)
 ```
 
 In orcha itself, the header shows `● office` while Easy Job runs and `○ office` when it is off: click it to open. COMMANDS (`⌕ commands`) has Open, Stop, Update and Uninstall for Easy Job and every other plugin.
