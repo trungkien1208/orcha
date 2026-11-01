@@ -615,3 +615,24 @@ fn normalize_local_identifier(value: &str, max_chars: usize) -> Option<String> {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'_' | b'-')))
     .then(|| value.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn min_herdr_version_names_the_herdr_core_not_the_orcha_release() {
+        // Easy Job's manifest names 0.9.0, and every Orcha 0.9.x and later
+        // runs Herdr core 0.9.5 or newer.
+        assert_eq!(
+            validate_min_herdr_version(Some("0.9.0")).as_deref(),
+            Ok("0.9.0")
+        );
+        assert!(
+            crate::update::Version::parse("0.9.5").unwrap() <= crate::update::Version::current()
+        );
+        // An Orcha release number is not a Herdr version.
+        let (code, _) = validate_min_herdr_version(Some("99.0.0")).unwrap_err();
+        assert_eq!(code, "plugin_requires_newer_herdr");
+    }
+}
