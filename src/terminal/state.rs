@@ -143,6 +143,9 @@ pub struct TerminalState {
     /// Model settings reported or observed, with the session id they belong
     /// to (empty before a session is known). Runtime only.
     pub agent_model: Option<(String, crate::agent_models::ObservedModel)>,
+    /// What the agent is doing in its current working stretch, with the
+    /// state-change sequence it belongs to. Runtime only.
+    pub agent_activity: Option<(u64, crate::agent_models::Activity)>,
     reported_resume: Option<crate::agent_resume::ReportedAgentResume>,
     reported_resume_revision: u64,
     pub terminal_title: Option<String>,
@@ -185,6 +188,7 @@ impl TerminalState {
             persisted_agent_session: None,
             agent_transcript: None,
             agent_model: None,
+            agent_activity: None,
             reported_resume: None,
             reported_resume_revision: 0,
             terminal_title: None,

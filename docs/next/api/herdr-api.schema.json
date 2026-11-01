@@ -148,6 +148,16 @@
           ],
           "type": "string"
         },
+        "AgentStage": {
+          "description": "What an agent is doing, finer than its status.",
+          "enum": [
+            "thinking",
+            "running_tool",
+            "waiting",
+            "done"
+          ],
+          "type": "string"
+        },
         "AgentStatus": {
           "enum": [
             "idle",
@@ -767,6 +777,16 @@
                     "null"
                   ]
                 },
+                "stage": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/schemas/event/$defs/AgentStage"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "state_change_seq": {
                   "format": "uint64",
                   "minimum": 0,
@@ -782,6 +802,12 @@
                   "type": "object"
                 },
                 "title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "tool": {
                   "type": [
                     "string",
                     "null"
@@ -1882,6 +1908,16 @@
             "keys"
           ],
           "type": "object"
+        },
+        "AgentStage": {
+          "description": "What an agent is doing, finer than its status.",
+          "enum": [
+            "thinking",
+            "running_tool",
+            "waiting",
+            "done"
+          ],
+          "type": "string"
         },
         "AgentStartParams": {
           "properties": {
@@ -3629,6 +3665,32 @@
             "pane_id",
             "source",
             "agent"
+          ],
+          "type": "object"
+        },
+        "PaneReportAgentStageParams": {
+          "properties": {
+            "pane_id": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "stage": {
+              "$ref": "#/schemas/request/$defs/AgentStage",
+              "description": "`thinking` or `running_tool`; waiting and done follow from the status."
+            },
+            "tool": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "pane_id",
+            "source",
+            "stage"
           ],
           "type": "object"
         },
@@ -7308,6 +7370,22 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pane.report_agent_stage",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneReportAgentStageParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -7323,6 +7401,16 @@
     },
     "subscription_event": {
       "$defs": {
+        "AgentStage": {
+          "description": "What an agent is doing, finer than its status.",
+          "enum": [
+            "thinking",
+            "running_tool",
+            "waiting",
+            "done"
+          ],
+          "type": "string"
+        },
         "AgentStatus": {
           "enum": [
             "idle",
@@ -7362,6 +7450,16 @@
                 "null"
               ]
             },
+            "stage": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/subscription_event/$defs/AgentStage"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "state_change_seq": {
               "description": "The agent record's `state_change_seq` after this change; larger is newer.",
               "format": "uint64",
@@ -7378,6 +7476,12 @@
               "type": "object"
             },
             "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool": {
               "type": [
                 "string",
                 "null"
@@ -7781,6 +7885,17 @@
                 "null"
               ]
             },
+            "stage": {
+              "anyOf": [
+                {
+                  "$ref": "#/schemas/success_response/$defs/AgentStage"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`thinking`, `running_tool`, `waiting` (on a question) or `done`."
+            },
             "state_change_seq": {
               "default": 0,
               "format": "uint64",
@@ -7826,6 +7941,13 @@
                 "pattern": "^[A-Za-z0-9_-]{1,32}$"
               },
               "type": "object"
+            },
+            "tool": {
+              "description": "The tool running, with `stage: running_tool`.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "workspace_id": {
               "type": "string"
@@ -8086,6 +8208,16 @@
           "enum": [
             "id",
             "path"
+          ],
+          "type": "string"
+        },
+        "AgentStage": {
+          "description": "What an agent is doing, finer than its status.",
+          "enum": [
+            "thinking",
+            "running_tool",
+            "waiting",
+            "done"
           ],
           "type": "string"
         },
@@ -8724,6 +8856,16 @@
                     "null"
                   ]
                 },
+                "stage": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/schemas/success_response/$defs/AgentStage"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "state_change_seq": {
                   "format": "uint64",
                   "minimum": 0,
@@ -8739,6 +8881,12 @@
                   "type": "object"
                 },
                 "title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "tool": {
                   "type": [
                     "string",
                     "null"

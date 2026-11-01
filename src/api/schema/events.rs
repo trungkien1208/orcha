@@ -441,6 +441,10 @@ pub struct PaneAgentStatusChangedEvent {
     /// record with this version or lower predates it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<super::common::AgentStage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -586,6 +590,10 @@ pub enum EventData {
         state_change_seq: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_version: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stage: Option<super::common::AgentStage>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool: Option<String>,
     },
     LayoutUpdated {
         layout: super::panes::PaneLayoutSnapshot,

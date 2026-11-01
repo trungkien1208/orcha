@@ -760,3 +760,13 @@ pub struct PaneReportAgentModelParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fast: Option<bool>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PaneReportAgentStageParams {
+    pub pane_id: String,
+    pub source: String,
+    /// `thinking` or `running_tool`; waiting and done follow from the status.
+    pub stage: super::common::AgentStage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+}

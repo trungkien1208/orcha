@@ -61,6 +61,71 @@ impl App {
         encode_success(id, ResponseResult::AgentInfo { agent })
     }
 
+    /// Records what a working agent is doing and announces a change with a
+    /// `pane.agent_status_changed` event (same status, new stage).
+    pub(super) fn handle_pane_report_agent_stage(
+        &mut self,
+        id: String,
+        params: crate::api::schema::PaneReportAgentStageParams,
+    ) -> String {
+        use crate::agent_models::Activity;
+        use crate::api::schema::AgentStage;
+        let Some((ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
+            return agent_not_found(id, &params.pane_id);
+        };
+        let activity = match params.stage {
+            AgentStage::Thinking => Activity::Thinking,
+            AgentStage::RunningTool => Activity::RunningTool(params.tool.unwrap_or_default()),
+            AgentStage::Waiting | AgentStage::Done => {
+                return encode_error(
+                    id,
+                    "invalid_params",
+                    "waiting and done follow from the agent's status; report thinking or running_tool",
+                );
+            }
+        };
+        let Some(before) = self.agent_info(ws_idx, pane_id) else {
+            return agent_not_found(id, &params.pane_id);
+        };
+        let Some(terminal) = self
+            .state
+            .workspaces
+            .get(ws_idx)
+            .and_then(|ws| ws.pane_state(pane_id))
+            .map(|pane| pane.attached_terminal_id.clone())
+            .and_then(|terminal_id| self.state.terminals.get_mut(&terminal_id))
+        else {
+            return agent_not_found(id, &params.pane_id);
+        };
+        let Some(seq) = terminal.last_agent_state_change_seq else {
+            return encode_success(id, ResponseResult::AgentModelReported { changed: false });
+        };
+        terminal.agent_activity = Some((seq, activity));
+        let Some(agent) = self.agent_info(ws_idx, pane_id) else {
+            return agent_not_found(id, &params.pane_id);
+        };
+        let changed = (before.stage, &before.tool) != (agent.stage, &agent.tool);
+        if changed {
+            self.emit_event(crate::api::schema::EventEnvelope {
+                event: crate::api::schema::EventKind::PaneAgentStatusChanged,
+                data: crate::api::schema::EventData::PaneAgentStatusChanged {
+                    pane_id: agent.pane_id.clone(),
+                    workspace_id: agent.workspace_id.clone(),
+                    agent_status: agent.agent_status,
+                    agent: agent.agent.clone(),
+                    title: agent.title.clone(),
+                    display_agent: agent.display_agent.clone(),
+                    state_labels: agent.state_labels.clone(),
+                    state_change_seq: Some(agent.state_change_seq),
+                    session_version: Some(self.session_journal.version()),
+                    stage: agent.stage,
+                    tool: agent.tool.clone(),
+                },
+            });
+        }
+        encode_success(id, ResponseResult::AgentModelReported { changed })
+    }
+
     /// Marks an agent's completed work as seen without focusing it.
     pub(super) fn handle_agent_mark_seen(
         &mut self,
@@ -106,6 +171,8 @@ impl App {
                             state_labels: agent.state_labels.clone(),
                             state_change_seq: Some(agent.state_change_seq),
                             session_version: Some(self.session_journal.version()),
+                            stage: agent.stage,
+                            tool: agent.tool.clone(),
                         },
                     });
                 }

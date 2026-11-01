@@ -246,6 +246,16 @@ pub enum PaneAgentState {
     Unknown,
 }
 
+/// What an agent is doing, finer than its status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentStage {
+    Thinking,
+    RunningTool,
+    Waiting,
+    Done,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentStatus {

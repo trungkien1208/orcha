@@ -165,6 +165,7 @@ operations::define_operations! {
     AgentMarkSeen(AgentMarkSeenParams) => "agent.mark_seen", true, false;
     AgentQuestionGet(AgentQuestionParams) => "agent.question", false, false;
     AgentAnswer(AgentAnswerParams) => "agent.answer", false, false;
+    PaneReportAgentStage(PaneReportAgentStageParams) => "pane.report_agent_stage", false, false;
 }
 
 #[cfg(test)]

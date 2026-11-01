@@ -316,6 +316,8 @@ impl ActiveSubscription {
                         state_labels: probe.state_labels,
                         state_change_seq: None,
                         session_version: None,
+                        stage: None,
+                        tool: None,
                     });
 
                 Ok(Self::AgentStatusChanged(Box::new(
@@ -591,6 +593,8 @@ impl ActiveAgentStatusChangedSubscription {
             state_labels,
             state_change_seq,
             session_version,
+            stage,
+            tool,
         } = event.data
         else {
             return None;
@@ -624,6 +628,8 @@ impl ActiveAgentStatusChangedSubscription {
                 state_labels,
                 state_change_seq,
                 session_version,
+                stage,
+                tool,
             }),
         })
     }
@@ -695,6 +701,8 @@ impl ActiveAgentStatusChangedSubscription {
                 state_labels: pane.state_labels,
                 state_change_seq: None,
                 session_version: None,
+                stage: None,
+                tool: None,
             }),
         })
     }
@@ -799,6 +807,8 @@ impl ActiveAgentStatusSetSubscription {
                     state_labels,
                     state_change_seq,
                     session_version,
+                    stage,
+                    tool,
                 } => {
                     if !self.in_scope(&pane_id, &workspace_id) {
                         continue;
@@ -832,6 +842,8 @@ impl ActiveAgentStatusSetSubscription {
                             state_labels,
                             state_change_seq,
                             session_version,
+                            stage,
+                            tool,
                         }),
                     ));
                 }
@@ -910,6 +922,8 @@ fn status_event_from_pane(pane: crate::api::schema::PaneInfo) -> PaneAgentStatus
         state_labels: pane.state_labels,
         state_change_seq: None,
         session_version: None,
+        stage: None,
+        tool: None,
     }
 }
 
@@ -1095,6 +1109,8 @@ mod tests {
                 state_labels: HashMap::new(),
                 state_change_seq: None,
                 session_version: None,
+                stage: None,
+                tool: None,
             },
         }
     }
@@ -1230,6 +1246,8 @@ mod tests {
                 state_labels: HashMap::new(),
                 state_change_seq: None,
                 session_version: None,
+                stage: None,
+                tool: None,
             },
         }
     }
@@ -1449,6 +1467,8 @@ mod tests {
                         state_labels: HashMap::new(),
                         state_change_seq: None,
                         session_version: None,
+                        stage: None,
+                        tool: None,
                     }),
                     request_prefix: "batch".into(),
                 },
@@ -1582,6 +1602,8 @@ mod tests {
                 state_labels: HashMap::new(),
                 state_change_seq: None,
                 session_version: None,
+                stage: None,
+                tool: None,
             }),
             request_prefix: "test".into(),
         };
@@ -1629,6 +1651,8 @@ mod tests {
                 state_labels: HashMap::new(),
                 state_change_seq: None,
                 session_version: None,
+                stage: None,
+                tool: None,
             }),
             request_prefix: "test".into(),
         };

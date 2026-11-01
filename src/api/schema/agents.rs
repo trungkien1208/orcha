@@ -275,6 +275,12 @@ pub struct AgentInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub foreground_cwd: Option<String>,
     pub revision: u64,
+    /// `thinking`, `running_tool`, `waiting` (on a question) or `done`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<super::common::AgentStage>,
+    /// The tool running, with `stage: running_tool`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
     /// Model of the current session, as the agent reported it; null when unknown.
     #[serde(default)]
     pub model: Option<String>,

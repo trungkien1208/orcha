@@ -59,6 +59,34 @@ pub(crate) fn agent_model_state(terminal: &crate::terminal::TerminalState) -> Ag
     }
 }
 
+/// The agent's stage: what it reported for this working stretch, else
+/// derived from its status.
+pub(crate) fn agent_stage(
+    status: crate::api::schema::AgentStatus,
+    terminal: &crate::terminal::TerminalState,
+) -> (Option<crate::api::schema::AgentStage>, Option<String>) {
+    use crate::agent_models::Activity;
+    use crate::api::schema::{AgentStage, AgentStatus};
+    match status {
+        AgentStatus::Working => match terminal
+            .agent_activity
+            .as_ref()
+            .filter(|(seq, _)| Some(*seq) == terminal.last_agent_state_change_seq)
+        {
+            Some((_, Activity::RunningTool(tool))) => {
+                (Some(AgentStage::RunningTool), Some(tool.clone()))
+            }
+            _ => (Some(AgentStage::Thinking), None),
+        },
+        AgentStatus::Blocked => (Some(AgentStage::Waiting), None),
+        AgentStatus::Done | AgentStatus::Idle => (
+            terminal.last_agent_completion_seq.map(|_| AgentStage::Done),
+            None,
+        ),
+        AgentStatus::Unknown => (None, None),
+    }
+}
+
 impl App {
     /// Emits `pane.agent_model_changed` when an agent record's model state
     /// changes, whatever changed it. Checked only after new events.
@@ -498,6 +526,8 @@ impl App {
                 .then_some(terminal.last_agent_completion_seq)
                 .flatten(),
             cwd: pane.cwd,
+            stage: agent_stage(pane.agent_status, terminal).0,
+            tool: agent_stage(pane.agent_status, terminal).1,
             model: model_state.model,
             effort: model_state.effort,
             fast: model_state.fast,

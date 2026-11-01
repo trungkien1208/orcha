@@ -8782,3 +8782,68 @@ async fn scrollback_reads_never_scroll_an_idle_full_screen_agent() {
     assert_eq!(value["result"]["read"]["source"], "scrollback");
     assert!(server.pending_alt_screen_reads.is_empty());
 }
+
+#[test]
+fn agent_stage_follows_status_and_reported_activity() {
+    use api::schema::{
+        AgentStage, Method, PaneAgentState, PaneReportAgentParams, PaneReportAgentStageParams,
+    };
+
+    let (writer, _control_rx, _render_rx) = test_client_writer();
+    let (mut server, pane_id) = completion_guard_server(writer);
+    let public_pane_id = server.app.public_pane_id(0, pane_id).unwrap();
+    let state = |seq, state| {
+        Method::PaneReportAgent(PaneReportAgentParams {
+            pane_id: public_pane_id.clone(),
+            source: "prime-agent".into(),
+            agent: "prime-agent".into(),
+            state,
+            message: None,
+            seq: Some(seq),
+            agent_session_id: None,
+            agent_session_path: None,
+            resume_argv: None,
+        })
+    };
+    let stage = |server: &HeadlessServer| {
+        let agent = server
+            .app
+            .session_snapshot()
+            .agents
+            .into_iter()
+            .find(|agent| agent.pane_id == public_pane_id)
+            .unwrap();
+        (agent.stage, agent.tool)
+    };
+
+    completion_guard_api_report(&mut server, state(1, PaneAgentState::Working));
+    assert_eq!(stage(&server), (Some(AgentStage::Thinking), None));
+
+    completion_guard_api_report(
+        &mut server,
+        Method::PaneReportAgentStage(PaneReportAgentStageParams {
+            pane_id: public_pane_id.clone(),
+            source: "test".into(),
+            stage: AgentStage::RunningTool,
+            tool: Some("Bash".into()),
+        }),
+    );
+    assert_eq!(
+        stage(&server),
+        (Some(AgentStage::RunningTool), Some("Bash".into()))
+    );
+    assert!(server.app.event_hub.events_after(0).iter().any(|(_, event)| matches!(
+        &event.data,
+        api::schema::EventData::PaneAgentStatusChanged { stage: Some(AgentStage::RunningTool), tool: Some(tool), .. }
+            if tool == "Bash"
+    )));
+
+    completion_guard_api_report(&mut server, state(2, PaneAgentState::Idle));
+    assert_eq!(stage(&server), (Some(AgentStage::Done), None));
+    completion_guard_api_report(&mut server, state(3, PaneAgentState::Working));
+    assert_eq!(
+        stage(&server),
+        (Some(AgentStage::Thinking), None),
+        "a new working stretch does not inherit the old tool"
+    );
+}

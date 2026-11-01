@@ -18,6 +18,7 @@ const OBSERVER_SOURCE: &str = "herdr:observer";
 #[derive(Default)]
 struct Seen {
     file: Option<(u64, Option<SystemTime>)>,
+    activity: Option<crate::agent_models::Activity>,
     /// Bytes already read; later changes read only what was appended.
     offset: Option<u64>,
     observed: ObservedModel,
@@ -31,16 +32,30 @@ pub(super) fn spawn(api_tx: ApiRequestSender, running: Arc<AtomicBool>) {
             let Some(agents) = agent_list(&api_tx) else {
                 continue;
             };
-            observe(&agents, &mut seen, |report| {
-                let _ = dispatch_to_app_with_timeout(
-                    Request {
-                        id: "herdr:observer".into(),
-                        method: Method::PaneReportAgentModel(report),
-                    },
-                    &api_tx,
-                    Some(APP_RESPONSE_TIMEOUT),
-                );
-            });
+            observe(
+                &agents,
+                &mut seen,
+                |report| {
+                    let _ = dispatch_to_app_with_timeout(
+                        Request {
+                            id: "herdr:observer".into(),
+                            method: Method::PaneReportAgentModel(report),
+                        },
+                        &api_tx,
+                        Some(APP_RESPONSE_TIMEOUT),
+                    );
+                },
+                |report| {
+                    let _ = dispatch_to_app_with_timeout(
+                        Request {
+                            id: "herdr:observer:stage".into(),
+                            method: Method::PaneReportAgentStage(report),
+                        },
+                        &api_tx,
+                        Some(APP_RESPONSE_TIMEOUT),
+                    );
+                },
+            );
         }
     });
     if let Err(err) = spawned {
@@ -65,6 +80,7 @@ fn observe(
     agents: &[AgentInfo],
     seen: &mut HashMap<(String, String), Seen>,
     mut report: impl FnMut(PaneReportAgentModelParams),
+    mut report_stage: impl FnMut(crate::api::schema::PaneReportAgentStageParams),
 ) {
     let mut live = Vec::new();
     for agent in agents {
@@ -92,11 +108,18 @@ fn observe(
         if entry.file != file {
             entry.file = file;
             let from = entry.offset.filter(|offset| *offset <= metadata.len());
-            let Some((found, offset)) =
-                crate::agent_models::observe_transcript(kind, std::path::Path::new(path), from)
+            let Some((found, activity, offset)) =
+                crate::agent_models::observe_transcript_with_activity(
+                    kind,
+                    std::path::Path::new(path),
+                    from,
+                )
             else {
                 continue;
             };
+            if activity.is_some() {
+                entry.activity = activity;
+            }
             entry.offset = Some(offset);
             if from.is_none() {
                 entry.observed = ObservedModel::default();
@@ -109,6 +132,23 @@ fn observe(
             }
             if found.fast.is_some() {
                 entry.observed.fast = found.fast;
+            }
+        }
+        if agent.agent_status == crate::api::schema::AgentStatus::Working {
+            let (stage, tool) = match &entry.activity {
+                Some(crate::agent_models::Activity::RunningTool(tool)) => (
+                    crate::api::schema::AgentStage::RunningTool,
+                    Some(tool.clone()),
+                ),
+                _ => (crate::api::schema::AgentStage::Thinking, None),
+            };
+            if (agent.stage, agent.tool.as_ref()) != (Some(stage), tool.as_ref()) {
+                report_stage(crate::api::schema::PaneReportAgentStageParams {
+                    pane_id: agent.pane_id.clone(),
+                    source: OBSERVER_SOURCE.into(),
+                    stage,
+                    tool,
+                });
             }
         }
         let observed = &entry.observed;
@@ -164,7 +204,7 @@ mod tests {
         let mut seen = HashMap::new();
         let mut reports = Vec::new();
 
-        observe(&agents, &mut seen, |report| reports.push(report));
+        observe(&agents, &mut seen, |report| reports.push(report), |_| {});
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].effort.as_deref(), Some("high"));
         assert_eq!(reports[0].fast, Some(true));
@@ -174,9 +214,12 @@ mod tests {
         applied.model = Some("claude-opus-5-5".into());
         applied.effort = Some("high".into());
         applied.fast = Some(true);
-        observe(std::slice::from_ref(&applied), &mut seen, |report| {
-            reports.push(report)
-        });
+        observe(
+            std::slice::from_ref(&applied),
+            &mut seen,
+            |report| reports.push(report),
+            |_| {},
+        );
         assert_eq!(
             reports.len(),
             1,
@@ -184,9 +227,12 @@ mod tests {
         );
 
         applied.effort = Some("low".into());
-        observe(std::slice::from_ref(&applied), &mut seen, |report| {
-            reports.push(report)
-        });
+        observe(
+            std::slice::from_ref(&applied),
+            &mut seen,
+            |report| reports.push(report),
+            |_| {},
+        );
         assert_eq!(reports.len(), 2, "a record that drifted is corrected");
 
         std::fs::write(
@@ -196,12 +242,20 @@ mod tests {
         )
         .unwrap();
         applied.effort = Some("high".into());
-        observe(std::slice::from_ref(&applied), &mut seen, |report| {
-            reports.push(report)
-        });
+        observe(
+            std::slice::from_ref(&applied),
+            &mut seen,
+            |report| reports.push(report),
+            |_| {},
+        );
         assert_eq!(reports.last().unwrap().effort.as_deref(), Some("max"));
 
-        observe(&agents[..0], &mut seen, |report| reports.push(report));
+        observe(
+            &agents[..0],
+            &mut seen,
+            |report| reports.push(report),
+            |_| {},
+        );
         assert!(seen.is_empty(), "closed panes are forgotten");
         let _ = std::fs::remove_dir_all(dir);
     }

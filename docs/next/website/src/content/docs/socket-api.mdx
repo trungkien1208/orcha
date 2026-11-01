@@ -1367,6 +1367,29 @@ Errors: `no_question`, `unknown_option`, `not_multi_select`,
 of the call, so a question that changed in between fails instead of picking the
 wrong option.
 
+### Agent stage
+
+Agent records and `pane.agent_status_changed` events carry `stage`, finer than
+the status:
+
+| `stage` | When |
+| --- | --- |
+| `thinking` | Working: reasoning or writing its answer. |
+| `running_tool` | Working: a tool call started and has no result yet; `tool` names it (`Bash`, `apply_patch`, …). |
+| `waiting` | Blocked on a question (see `agent.question`). |
+| `done` | Finished its work (`done` or `idle` after work). |
+
+```json
+{"event":"pane.agent_status_changed","data":{"pane_id":"w1:p2","agent_status":"working","stage":"running_tool","tool":"Bash","state_change_seq":120,"session_version":44}}
+```
+
+Claude and Codex stages come from their transcripts, read in the background
+(about two seconds behind); other agents report `thinking` while working. A
+stage change sends a status event with the same `agent_status`. Reporters can
+set it with `pane.report_agent_stage {pane_id, source, stage: "thinking" | "running_tool", tool?}`.
+
+Feature flag: `agent.stage`.
+
 ## Protocol stability
 
 The client-rendered Herdr UI uses a stable endpoint generation for local and SSH

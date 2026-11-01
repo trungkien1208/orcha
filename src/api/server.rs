@@ -978,6 +978,8 @@ const API_FEATURES: &[&str] = &[
     "pane.agent_status_changed.order_keys",
     // `agent.read` / `pane.read` accept `source: "scrollback"`.
     "read.source.scrollback",
+    // Agent records and status events carry `stage` and `tool`.
+    "agent.stage",
 ];
 
 fn server_capabilities_response(id: String) -> String {

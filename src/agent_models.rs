@@ -33,6 +33,15 @@ pub(crate) struct ObservedModel {
     pub fast: Option<bool>,
 }
 
+/// What a working agent is doing, from its newest transcript records.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Activity {
+    /// Reasoning or writing its answer.
+    Thinking,
+    /// A tool call has started and has no result yet.
+    RunningTool(String),
+}
+
 pub(crate) fn catalog(kind: &str) -> Result<ModelCatalog, String> {
     match kind {
         "claude" => claude_catalog(&claude_config_dir()),
@@ -343,14 +352,24 @@ fn cursor_base_name(name: &str, effort: Option<&str>, fast: bool) -> String {
 /// backwards from the end until the settings are found, since a long Codex
 /// rollout can hold its last settings record megabytes before the end.
 /// Returns the settings found and the offset read up to.
+#[cfg(test)]
 pub(crate) fn observe_transcript(
     kind: &str,
     path: &Path,
     from: Option<u64>,
 ) -> Option<(ObservedModel, u64)> {
+    observe_transcript_with_activity(kind, path, from).map(|(model, _, offset)| (model, offset))
+}
+
+/// `observe_transcript` plus the newest activity in the bytes read.
+pub(crate) fn observe_transcript_with_activity(
+    kind: &str,
+    path: &Path,
+    from: Option<u64>,
+) -> Option<(ObservedModel, Option<Activity>, u64)> {
     let parse = |text: &str| match kind {
-        "claude" => Some(observe_claude(text)),
-        "codex" => Some(observe_codex(text)),
+        "claude" => Some((observe_claude(text), claude_activity(text))),
+        "codex" => Some((observe_codex(text), codex_activity(text))),
         _ => None,
     };
     let len = std::fs::metadata(path).ok()?.len();
@@ -358,22 +377,92 @@ pub(crate) fn observe_transcript(
         let start = from.max(len.saturating_sub(TRANSCRIPT_APPEND_MAX_BYTES));
         // Start one byte early so a record beginning exactly at `start` is not
         // mistaken for the partial line that `read_range` drops.
-        return Some((
-            parse(&read_range(path, start.saturating_sub(1), len)?)?,
-            len,
-        ));
+        let (model, activity) = parse(&read_range(path, start.saturating_sub(1), len)?)?;
+        return Some((model, activity, len));
     }
     let mut window = TRANSCRIPT_TAIL_BYTES;
     loop {
         let start = len.saturating_sub(window);
-        let observed = parse(&read_range(path, start, len)?)?;
+        let (observed, activity) = parse(&read_range(path, start, len)?)?;
         let complete =
             observed.model.is_some() && observed.effort.is_some() && observed.fast.is_some();
         if complete || start == 0 || window >= TRANSCRIPT_SCAN_MAX_BYTES {
-            return Some((observed, len));
+            return Some((observed, activity, len));
         }
         window *= 4;
     }
+}
+
+/// Claude: the newest assistant tool call without a result is running;
+/// any other newest turn record means it is thinking or answering.
+pub(crate) fn claude_activity(text: &str) -> Option<Activity> {
+    for line in text.lines().rev() {
+        let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if record
+            .get("isSidechain")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        {
+            continue;
+        }
+        let content = record.pointer("/message/content");
+        match record.get("type").and_then(serde_json::Value::as_str) {
+            Some("assistant") => {
+                let tool = content
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|items| {
+                        items.iter().rev().find(|item| {
+                            item.get("type").and_then(|t| t.as_str()) == Some("tool_use")
+                        })
+                    })
+                    .and_then(|item| text_field(item, "name"));
+                return Some(match tool {
+                    Some(tool) => Activity::RunningTool(tool),
+                    None => Activity::Thinking,
+                });
+            }
+            Some("user") => return Some(Activity::Thinking),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Codex: the newest tool call without its output is running.
+pub(crate) fn codex_activity(text: &str) -> Option<Activity> {
+    for line in text.lines().rev() {
+        let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let Some(payload) = record.get("payload") else {
+            continue;
+        };
+        let kind = payload
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        match (record.get("type").and_then(serde_json::Value::as_str), kind) {
+            (Some("response_item"), "function_call" | "custom_tool_call" | "local_shell_call") => {
+                return Some(Activity::RunningTool(
+                    text_field(payload, "name").unwrap_or_else(|| "shell".into()),
+                ));
+            }
+            (Some("event_msg"), "exec_command_begin") => {
+                return Some(Activity::RunningTool("exec_command".into()));
+            }
+            (
+                Some("response_item"),
+                "function_call_output" | "custom_tool_call_output" | "reasoning" | "message",
+            )
+            | (Some("event_msg"), "exec_command_end" | "agent_reasoning" | "agent_message") => {
+                return Some(Activity::Thinking);
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn read_range(path: &Path, start: u64, end: u64) -> Option<String> {
@@ -647,5 +736,40 @@ mod tests {
         assert_eq!(observed.effort.as_deref(), Some("low"));
         assert_eq!(observed.fast, Some(true));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn activity_follows_the_newest_tool_call() {
+        let running = concat!(
+            r#"{"type":"user","message":{"content":"fix it"}}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"ok"},{"type":"tool_use","name":"Bash"}]}}"#,
+            "\n",
+            r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"sub"}]}}"#,
+        );
+        assert_eq!(
+            claude_activity(running),
+            Some(Activity::RunningTool("Bash".into()))
+        );
+        let done = format!(
+            "{running}\n{}",
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}"#
+        );
+        assert_eq!(claude_activity(&done), Some(Activity::Thinking));
+
+        let codex = concat!(
+            r#"{"type":"response_item","payload":{"type":"reasoning"}}"#,
+            "\n",
+            r#"{"type":"response_item","payload":{"type":"function_call","name":"apply_patch"}}"#,
+        );
+        assert_eq!(
+            codex_activity(codex),
+            Some(Activity::RunningTool("apply_patch".into()))
+        );
+        let codex_done = format!(
+            "{codex}\n{}",
+            r#"{"type":"response_item","payload":{"type":"function_call_output"}}"#
+        );
+        assert_eq!(codex_activity(&codex_done), Some(Activity::Thinking));
     }
 }

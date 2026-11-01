@@ -732,6 +732,14 @@ impl App {
                 .and_then(|ws| ws.pane_state(update.pane_id))
                 .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id))
                 .map(|terminal| terminal.last_agent_state_change_seq.unwrap_or(0));
+            let stage = self
+                .state
+                .workspaces
+                .get(update.ws_idx)
+                .and_then(|ws| ws.pane_state(update.pane_id))
+                .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id))
+                .map(|terminal| crate::app::agents::agent_stage(agent_status, terminal))
+                .unwrap_or((None, None));
             self.emit_event(crate::api::schema::EventEnvelope {
                 event: crate::api::schema::EventKind::PaneAgentStatusChanged,
                 data: crate::api::schema::EventData::PaneAgentStatusChanged {
@@ -744,6 +752,8 @@ impl App {
                     state_labels: presentation.state_labels,
                     state_change_seq,
                     session_version: Some(self.session_journal.version()),
+                    stage: stage.0,
+                    tool: stage.1,
                 },
             });
         }
@@ -1269,6 +1279,9 @@ impl App {
             }
             Method::PluginPaneClose(params) => {
                 return self.handle_plugin_pane_close(request.id, params);
+            }
+            Method::PaneReportAgentStage(params) => {
+                return self.handle_pane_report_agent_stage(request.id, params);
             }
             Method::AgentMarkSeen(params) => {
                 return self.handle_agent_mark_seen(request.id, params);
