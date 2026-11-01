@@ -20,12 +20,7 @@ fn valid_agent_name(name: &str) -> bool {
 }
 
 /// Model settings of an agent's current session, each `None` when unknown.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AgentModelState {
-    pub model: Option<String>,
-    pub effort: Option<String>,
-    pub fast: Option<bool>,
-}
+pub(crate) type AgentModelState = crate::agent_models::ObservedModel;
 
 pub(crate) fn current_session_value(terminal: &crate::terminal::TerminalState) -> Option<&str> {
     terminal
@@ -52,11 +47,19 @@ pub(crate) fn agent_model_state(terminal: &crate::terminal::TerminalState) -> Ag
     else {
         return AgentModelState::default();
     };
-    AgentModelState {
-        model: reported.model.clone(),
-        effort: reported.effort.clone(),
-        fast: reported.fast,
-    }
+    reported.clone()
+}
+
+/// What the agent reported doing during its current working stretch; a
+/// report from an earlier stretch no longer applies.
+fn current_activity(
+    terminal: &crate::terminal::TerminalState,
+) -> Option<&crate::agent_models::Activity> {
+    terminal
+        .agent_activity
+        .as_ref()
+        .filter(|(seq, _)| Some(*seq) == terminal.last_agent_state_change_seq)
+        .map(|(_, activity)| activity)
 }
 
 /// The PROCESS station of a working agent from what it is doing now:
@@ -64,13 +67,10 @@ pub(crate) fn agent_model_state(terminal: &crate::terminal::TerminalState) -> Ag
 /// commands, `testing` while a command runs tests, a type check or a linter.
 pub(crate) fn activity_station(terminal: &crate::terminal::TerminalState) -> Option<&'static str> {
     use crate::agent_models::Activity;
-    let (seq, activity) = terminal.agent_activity.as_ref()?;
-    if Some(*seq) != terminal.last_agent_state_change_seq
-        || terminal.state != crate::detect::AgentState::Working
-    {
+    if terminal.state != crate::detect::AgentState::Working {
         return None;
     }
-    Some(match activity {
+    Some(match current_activity(terminal)? {
         Activity::Thinking => "thinking",
         Activity::RunningTool(_, true) => "testing",
         Activity::RunningTool(tool, false) => {
@@ -90,7 +90,7 @@ pub(crate) fn activity_station(terminal: &crate::terminal::TerminalState) -> Opt
                 "list_dir",
                 "find",
             ];
-            if READING.contains(&tool.to_ascii_lowercase().as_str()) {
+            if READING.iter().any(|name| tool.eq_ignore_ascii_case(name)) {
                 "thinking"
             } else {
                 "coding"
@@ -108,12 +108,8 @@ pub(crate) fn agent_stage(
     use crate::agent_models::Activity;
     use crate::api::schema::{AgentStage, AgentStatus};
     match status {
-        AgentStatus::Working => match terminal
-            .agent_activity
-            .as_ref()
-            .filter(|(seq, _)| Some(*seq) == terminal.last_agent_state_change_seq)
-        {
-            Some((_, Activity::RunningTool(tool, _))) => {
+        AgentStatus::Working => match current_activity(terminal) {
+            Some(Activity::RunningTool(tool, _)) => {
                 (Some(AgentStage::RunningTool), Some(tool.clone()))
             }
             _ => (Some(AgentStage::Thinking), None),
@@ -540,6 +536,7 @@ impl App {
         }
         let pane = self.pane_metadata(ws_idx, pane_id)?;
         let model_state = agent_model_state(terminal);
+        let (stage, tool) = agent_stage(pane.agent_status, terminal);
         Some(crate::api::schema::AgentInfo {
             terminal_id: pane.terminal_id,
             name: terminal.agent_name.clone(),
@@ -566,8 +563,8 @@ impl App {
                 .then_some(terminal.last_agent_completion_seq)
                 .flatten(),
             cwd: pane.cwd,
-            stage: agent_stage(pane.agent_status, terminal).0,
-            tool: agent_stage(pane.agent_status, terminal).1,
+            stage,
+            tool,
             model: model_state.model,
             effort: model_state.effort,
             fast: model_state.fast,

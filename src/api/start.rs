@@ -3,11 +3,12 @@
 //! model settings and the first prompt. A failure closes the tab again, so
 //! nothing is left half created.
 
+use crate::api::app_call;
 use crate::api::schema::{
     AgentConfigureParams, AgentInfo, AgentStartParams, ErrorBody, ErrorResponse, Method, Request,
     ResponseResult, SuccessResponse, TabCreateParams,
 };
-use crate::api::server::{dispatch_to_app_with_timeout, ApiConnection, APP_RESPONSE_TIMEOUT};
+use crate::api::server::{dispatch_to_app_with_timeout, ApiConnection};
 use crate::api::ApiRequestSender;
 
 /// Whether this request needs the server-side path (the app handles a plain
@@ -240,25 +241,8 @@ fn app(
     method: Method,
     api_tx: &ApiRequestSender,
 ) -> Result<serde_json::Value, StartError> {
-    let response = dispatch_to_app_with_timeout(
-        Request {
-            id: format!("{request_id}:start"),
-            method,
-        },
-        api_tx,
-        Some(APP_RESPONSE_TIMEOUT),
-    );
-    let value: serde_json::Value = serde_json::from_str(&response).unwrap_or_default();
-    if let Some(error) = value.get("error") {
-        return Err((
-            error["code"]
-                .as_str()
-                .unwrap_or("agent_start_failed")
-                .to_string(),
-            error["message"].as_str().unwrap_or("").to_string(),
-        ));
-    }
-    Ok(value)
+    app_call::call(format!("{request_id}:start"), method, api_tx)
+        .map_err(|err| (err.code, err.message))
 }
 
 fn text(value: &serde_json::Value, pointer: &str) -> Result<String, StartError> {
@@ -270,15 +254,7 @@ fn text(value: &serde_json::Value, pointer: &str) -> Result<String, StartError> 
 }
 
 fn agent_get(request_id: &str, pane_id: &str, api_tx: &ApiRequestSender) -> Option<AgentInfo> {
-    let value = app(
-        request_id,
-        Method::AgentGet(crate::api::schema::AgentTarget {
-            target: pane_id.to_string(),
-        }),
-        api_tx,
-    )
-    .ok()?;
-    serde_json::from_value(value["result"]["agent"].clone()).ok()
+    app_call::agent_get(format!("{request_id}:start"), pane_id, api_tx).ok()
 }
 
 #[cfg(test)]

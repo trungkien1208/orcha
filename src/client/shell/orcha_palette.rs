@@ -331,27 +331,31 @@ pub(super) fn plugin_pane_rows(
 }
 
 /// A row's title and detail: built-in commands first, then plugin actions.
-fn row(index: usize) -> Option<(String, String)> {
+fn row(plugins: &[PluginPaletteAction], index: usize) -> Option<(&str, &str)> {
     if let Some((_, title, detail)) = COMMANDS.get(index) {
-        return Some(((*title).to_owned(), (*detail).to_owned()));
+        return Some((title, detail));
     }
-    plugin_actions()
-        .get(index - COMMANDS.len())
-        .map(|action| (action.title.clone(), action.detail.clone()))
+    plugins
+        .get(index.checked_sub(COMMANDS.len())?)
+        .map(|action| (action.title.as_str(), action.detail.as_str()))
 }
 
 /// The rows for `query`, best match first; all of them, in order, when the
 /// query is empty.
 pub(super) fn matches(query: &str) -> Vec<usize> {
-    let total = COMMANDS.len() + plugin_actions().len();
+    matches_in(&plugin_actions(), query)
+}
+
+fn matches_in(plugins: &[PluginPaletteAction], query: &str) -> Vec<usize> {
+    let total = COMMANDS.len() + plugins.len();
     if query.trim().is_empty() {
         return (0..total).collect();
     }
     let mut scored: Vec<(usize, usize)> = (0..total)
         .filter_map(|index| {
-            let (title, detail) = row(index)?;
-            let title_score = fuzzy_score(&title, query);
-            let detail_score = fuzzy_score(&detail, query).map(|score| score + 100);
+            let (title, detail) = row(plugins, index)?;
+            let title_score = fuzzy_score(title, query);
+            let detail_score = fuzzy_score(detail, query).map(|score| score + 100);
             title_score.or(detail_score).map(|score| (score, index))
         })
         .collect();
@@ -379,7 +383,8 @@ pub(super) fn render(
     t: &Brutal,
     hits: &mut PopupHits,
 ) -> Option<()> {
-    let rows = matches(query);
+    let plugins = plugin_actions();
+    let rows = matches_in(&plugins, query);
     let frame = popup_frame(
         buffer,
         92,
@@ -430,7 +435,7 @@ pub(super) fn render(
         if y >= body.bottom() {
             break;
         }
-        let Some((title, detail)) = row(*index) else {
+        let Some((title, detail)) = row(&plugins, *index) else {
             continue;
         };
         let rect = Rect::new(body.x, y, body.width, 1);
@@ -442,7 +447,7 @@ pub(super) fn render(
             rect.x + 2,
             y,
             title_width,
-            &title,
+            title,
             Style::default()
                 .fg(t.ink)
                 .bg(fill)
@@ -454,7 +459,7 @@ pub(super) fn render(
             detail_x,
             y,
             rect.right().saturating_sub(detail_x + 9),
-            &detail,
+            detail,
             Style::default().fg(t.muted).bg(fill),
         );
         if cursor {

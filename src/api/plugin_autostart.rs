@@ -8,11 +8,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::api::app_call;
 use crate::api::schema::{
-    Method, PaneInfo, PluginAutostartEntry, PluginAutostartSetParams, PluginPanePlacement, Request,
+    Method, PaneInfo, PluginAutostartEntry, PluginAutostartSetParams, PluginPanePlacement,
     ResponseResult, WorkspaceInfo,
 };
-use crate::api::server::{dispatch_to_app_with_timeout, APP_RESPONSE_TIMEOUT};
 use crate::api::ApiRequestSender;
 
 const CHECK_INTERVAL: Duration = Duration::from_secs(3);
@@ -112,13 +112,13 @@ fn running_entry(
     pane_id: &str,
     api_tx: &ApiRequestSender,
 ) -> Result<crate::api::schema::PluginPaneListEntry, AutostartError> {
-    let listed = app(
+    let mut listed = app(
         "plugin-pane",
         Method::PluginPaneList(Default::default()),
         api_tx,
     )?;
     let panes: Vec<crate::api::schema::PluginPaneListEntry> =
-        serde_json::from_value(listed["result"]["plugin_panes"].clone()).unwrap_or_default();
+        app_call::take(&mut listed, "/result/plugin_panes").unwrap_or_default();
     panes
         .into_iter()
         .find(|pane| pane.pane_id == pane_id)
@@ -328,13 +328,13 @@ fn host_workspace(
     entry: &PluginAutostartEntry,
     api_tx: &ApiRequestSender,
 ) -> Result<String, AutostartError> {
-    let listed = app(
+    let mut listed = app(
         "autostart",
         Method::WorkspaceList(Default::default()),
         api_tx,
     )?;
     let workspaces: Vec<WorkspaceInfo> =
-        serde_json::from_value(listed["result"]["workspaces"].clone()).unwrap_or_default();
+        app_call::take(&mut listed, "/result/workspaces").unwrap_or_default();
     if let Some(found) = workspaces
         .iter()
         .find(|workspace| workspace.tokens.get(HOST_TOKEN) == Some(&entry.plugin_id))
@@ -381,8 +381,8 @@ fn host_workspace(
 }
 
 fn panes(api_tx: &ApiRequestSender) -> Option<Vec<PaneInfo>> {
-    let value = app("autostart", Method::PaneList(Default::default()), api_tx).ok()?;
-    serde_json::from_value(value["result"]["panes"].clone()).ok()
+    let mut value = app("autostart", Method::PaneList(Default::default()), api_tx).ok()?;
+    app_call::take(&mut value, "/result/panes")
 }
 
 fn app(
@@ -390,25 +390,8 @@ fn app(
     method: Method,
     api_tx: &ApiRequestSender,
 ) -> Result<serde_json::Value, AutostartError> {
-    let response = dispatch_to_app_with_timeout(
-        Request {
-            id: format!("{request_id}:plugin-autostart"),
-            method,
-        },
-        api_tx,
-        Some(APP_RESPONSE_TIMEOUT),
-    );
-    let value: serde_json::Value = serde_json::from_str(&response).unwrap_or_default();
-    if let Some(error) = value.get("error") {
-        return Err((
-            "autostart_failed",
-            error["message"]
-                .as_str()
-                .unwrap_or("request failed")
-                .to_string(),
-        ));
-    }
-    Ok(value)
+    app_call::call(format!("{request_id}:plugin-autostart"), method, api_tx)
+        .map_err(|err| err.with_code("autostart_failed"))
 }
 
 #[cfg(test)]

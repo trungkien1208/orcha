@@ -7,11 +7,11 @@
 //! keyed lists (`[a] Trust this workspace`) and checkbox lists. Only the
 //! last block of options is used, never older text higher up.
 
+use crate::api::app_call;
 use crate::api::schema::{
     AgentAnswerParams, AgentQuestion, AgentQuestionOption, AgentStatus, Method, ReadFormat,
-    ReadSource, Request, ResponseResult,
+    ReadSource, ResponseResult,
 };
-use crate::api::server::{dispatch_to_app_with_timeout, APP_RESPONSE_TIMEOUT};
 use crate::api::ApiRequestSender;
 
 type QuestionError = (&'static str, String);
@@ -499,25 +499,8 @@ fn app_value(
     method: Method,
     api_tx: &ApiRequestSender,
 ) -> Result<serde_json::Value, QuestionError> {
-    let response = dispatch_to_app_with_timeout(
-        Request {
-            id: format!("{request_id}:question"),
-            method,
-        },
-        api_tx,
-        Some(APP_RESPONSE_TIMEOUT),
-    );
-    let value: serde_json::Value = serde_json::from_str(&response).unwrap_or_default();
-    if let Some(error) = value.get("error") {
-        return Err((
-            "agent_not_found",
-            error["message"]
-                .as_str()
-                .unwrap_or("request failed")
-                .to_string(),
-        ));
-    }
-    Ok(value)
+    app_call::call(format!("{request_id}:question"), method, api_tx)
+        .map_err(|err| err.with_code("agent_not_found"))
 }
 
 #[cfg(test)]

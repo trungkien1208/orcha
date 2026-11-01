@@ -7,12 +7,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::api::app_call;
 use crate::api::schema::{
     AccountInfo, AccountPlan, AccountSwitchMode, AccountsPlanParams, AccountsSwitchParams,
     AgentInfo, AgentStatus, ErrorBody, ErrorResponse, EventData, EventEnvelope, EventKind,
     FuelWindowInfo, Method, Request, ResponseResult, SuccessResponse,
 };
-use crate::api::server::{dispatch_to_app_with_timeout, APP_RESPONSE_TIMEOUT};
 use crate::api::{ApiRequestSender, EventHub};
 
 /// How often watched fuel is re-read; the account code keeps fetched numbers
@@ -152,7 +152,7 @@ pub(crate) fn list(
 ) -> Result<Vec<AccountInfo>, AccountError> {
     let configs = crate::orcha_accounts::accounts();
     let agents = agent_list("accounts", api_tx).unwrap_or_default();
-    let mut panes: Vec<(String, String)> = Vec::new();
+    let mut panes: std::collections::HashMap<String, Vec<String>> = Default::default();
     for agent in &agents {
         let Some(kind) = agent.agent.as_deref() else {
             continue;
@@ -160,43 +160,46 @@ pub(crate) fn list(
         if !configs.iter().any(|account| account.kind == kind) {
             continue;
         }
-        if let Some(account) = crate::orcha_accounts::account_of_pane(&configs, &agent.pane_id) {
-            panes.push((account, agent.pane_id.clone()));
+        if let Some(account) =
+            crate::orcha_accounts::account_of_agent(&configs, kind, &agent.pane_id)
+        {
+            panes
+                .entry(account)
+                .or_default()
+                .push(agent.pane_id.clone());
         }
     }
-    Ok(crate::orcha_accounts::accounts_with_fuel(None, fresh)
-        .into_iter()
-        .map(|account| {
-            let config = crate::orcha_accounts::find_account(&configs, &account.id);
-            AccountInfo {
-                is_default: crate::orcha_accounts::default_account(&configs, &account.kind)
-                    .as_deref()
-                    == Some(account.id.as_str()),
-                plan: config.and_then(crate::orcha_accounts::plan),
-                signed_in: account.signed_in.unwrap_or(false),
-                fuel: account
-                    .windows
-                    .iter()
-                    .map(|window| FuelWindowInfo {
-                        key: window.key.clone(),
-                        label: window.label.clone(),
-                        left_percent: window.left,
-                        reset_at: window.reset_at,
-                    })
-                    .collect(),
-                pane_ids: panes
-                    .iter()
-                    .filter(|(owner, _)| *owner == account.id)
-                    .map(|(_, pane)| pane.clone())
-                    .collect(),
-                id: account.id,
-                kind: account.kind,
-                label: account.label,
-                email: account.email,
-                error: account.error,
-            }
-        })
-        .collect())
+    Ok(
+        crate::orcha_accounts::accounts_with_fuel_of(&configs, None, fresh)
+            .into_iter()
+            .map(|account| {
+                let config = crate::orcha_accounts::find_account(&configs, &account.id);
+                AccountInfo {
+                    is_default: crate::orcha_accounts::default_account(&configs, &account.kind)
+                        .as_deref()
+                        == Some(account.id.as_str()),
+                    plan: config.and_then(crate::orcha_accounts::plan),
+                    signed_in: account.signed_in.unwrap_or(false),
+                    fuel: account
+                        .windows
+                        .iter()
+                        .map(|window| FuelWindowInfo {
+                            key: window.key.clone(),
+                            label: window.label.clone(),
+                            left_percent: window.left,
+                            reset_at: window.reset_at,
+                        })
+                        .collect(),
+                    pane_ids: panes.remove(&account.id).unwrap_or_default(),
+                    id: account.id,
+                    kind: account.kind,
+                    label: account.label,
+                    email: account.email,
+                    error: account.error,
+                }
+            })
+            .collect(),
+    )
 }
 
 /// What switching `pane_id` to `account_id` with `mode` would do.
@@ -338,7 +341,7 @@ fn switch(
                 std::thread::sleep(QUEUE_POLL);
                 match agent_get(&request_id, &queued.pane_id, &api_tx) {
                     Ok(agent) if !is_busy(&agent) => {
-                        if let Err((_, message)) = apply(&request_id, &queued, &api_tx) {
+                        if let Err((_, message)) = apply(&queued) {
                             tracing::warn!(%message, "queued account switch failed");
                         }
                         return;
@@ -360,7 +363,7 @@ fn switch(
             pane_id: None,
         });
     }
-    let pane_id = apply(request_id, &params, api_tx)?;
+    let pane_id = apply(&params)?;
     Ok(ResponseResult::AccountSwitched {
         outcome: "applied".into(),
         plan,
@@ -368,11 +371,7 @@ fn switch(
     })
 }
 
-fn apply(
-    request_id: &str,
-    params: &AccountsSwitchParams,
-    api_tx: &ApiRequestSender,
-) -> Result<String, AccountError> {
+fn apply(params: &AccountsSwitchParams) -> Result<String, AccountError> {
     let pane_id = match params.mode {
         AccountSwitchMode::Keep => {
             crate::orcha_accounts::switch(&params.account_id, &params.pane_id)
@@ -384,12 +383,9 @@ fn apply(
                 .map_err(|message| ("switch_failed", message))?;
             params.pane_id.clone()
         }
-        AccountSwitchMode::Handoff => crate::api::handoff::handoff_to_account(
-            request_id,
-            &params.pane_id,
-            &params.account_id,
-            api_tx,
-        )?,
+        AccountSwitchMode::Handoff => {
+            crate::api::handoff::handoff_to_account(&params.pane_id, &params.account_id)?
+        }
     };
     note_change("switched");
     Ok(pane_id)
@@ -445,26 +441,8 @@ fn app_request(
     method: Method,
     api_tx: &ApiRequestSender,
 ) -> Result<serde_json::Value, AccountError> {
-    let response = dispatch_to_app_with_timeout(
-        Request {
-            id: format!("{request_id}:accounts"),
-            method,
-        },
-        api_tx,
-        Some(APP_RESPONSE_TIMEOUT),
-    );
-    let value: serde_json::Value = serde_json::from_str(&response).unwrap_or_default();
-    if let Some(error) = value.get("error") {
-        return Err((
-            "account_failed",
-            error
-                .get("message")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("request failed")
-                .to_string(),
-        ));
-    }
-    Ok(value)
+    app_call::call(format!("{request_id}:accounts"), method, api_tx)
+        .map_err(|err| err.with_code("account_failed"))
 }
 
 fn agent_get(
@@ -472,21 +450,12 @@ fn agent_get(
     pane_id: &str,
     api_tx: &ApiRequestSender,
 ) -> Result<AgentInfo, AccountError> {
-    let value = app_request(
-        request_id,
-        Method::AgentGet(crate::api::schema::AgentTarget {
-            target: pane_id.to_string(),
-        }),
-        api_tx,
-    )
-    .map_err(|(_, message)| ("agent_not_found", message))?;
-    serde_json::from_value(value["result"]["agent"].clone())
-        .map_err(|_| ("internal_error", "could not decode the agent".to_string()))
+    app_call::agent_get(format!("{request_id}:accounts"), pane_id, api_tx)
+        .map_err(app_call::AppError::into_agent_lookup)
 }
 
 fn agent_list(request_id: &str, api_tx: &ApiRequestSender) -> Option<Vec<AgentInfo>> {
-    let value = app_request(request_id, Method::AgentList(Default::default()), api_tx).ok()?;
-    serde_json::from_value(value.pointer("/result/agents")?.clone()).ok()
+    app_call::agent_list(format!("{request_id}:accounts"), api_tx)
 }
 
 /// Publishes `accounts.changed` while someone subscribes: after a change made

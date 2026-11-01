@@ -725,19 +725,10 @@ impl App {
             || update.previous_presentation != update.presentation
         {
             let presentation = update.presentation.clone();
-            let state_change_seq = self
-                .state
-                .workspaces
-                .get(update.ws_idx)
-                .and_then(|ws| ws.pane_state(update.pane_id))
-                .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id))
-                .map(|terminal| terminal.last_agent_state_change_seq.unwrap_or(0));
-            let stage = self
-                .state
-                .workspaces
-                .get(update.ws_idx)
-                .and_then(|ws| ws.pane_state(update.pane_id))
-                .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id))
+            let terminal = self.pane_terminal(update.ws_idx, update.pane_id);
+            let state_change_seq =
+                terminal.map(|terminal| terminal.last_agent_state_change_seq.unwrap_or(0));
+            let (stage, tool) = terminal
                 .map(|terminal| crate::app::agents::agent_stage(agent_status, terminal))
                 .unwrap_or((None, None));
             self.emit_event(crate::api::schema::EventEnvelope {
@@ -752,8 +743,8 @@ impl App {
                     state_labels: presentation.state_labels,
                     state_change_seq,
                     session_version: Some(self.session_journal.version()),
-                    stage: stage.0,
-                    tool: stage.1,
+                    stage,
+                    tool,
                 },
             });
         }
@@ -1285,16 +1276,12 @@ impl App {
             }
             Method::PluginRunAction(params) => {
                 // The same as plugin.action.invoke with an explicit plugin.
-                return self.handle_api_request_after_internal_events_drained(
-                    crate::api::schema::Request {
-                        id: request.id,
-                        method: Method::PluginActionInvoke(
-                            crate::api::schema::PluginActionInvokeParams {
-                                action_id: params.action_id,
-                                plugin_id: Some(params.plugin_id),
-                                context: None,
-                            },
-                        ),
+                return self.handle_plugin_action_invoke(
+                    request.id,
+                    crate::api::schema::PluginActionInvokeParams {
+                        action_id: params.action_id,
+                        plugin_id: Some(params.plugin_id),
+                        context: None,
                     },
                 );
             }

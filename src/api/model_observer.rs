@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crate::agent_models::ObservedModel;
-use crate::api::schema::{AgentInfo, Method, PaneReportAgentModelParams, Request};
-use crate::api::server::{dispatch_to_app_with_timeout, APP_RESPONSE_TIMEOUT};
+use crate::api::app_call;
+use crate::api::schema::{AgentInfo, Method, PaneReportAgentModelParams};
 use crate::api::ApiRequestSender;
 
 const OBSERVE_INTERVAL: Duration = Duration::from_secs(2);
@@ -37,23 +37,17 @@ pub(super) fn spawn(api_tx: ApiRequestSender, running: Arc<AtomicBool>) {
                 &agents,
                 &mut seen,
                 |report| {
-                    let _ = dispatch_to_app_with_timeout(
-                        Request {
-                            id: "herdr:observer".into(),
-                            method: Method::PaneReportAgentModel(report),
-                        },
+                    let _ = app_call::call(
+                        "herdr:observer",
+                        Method::PaneReportAgentModel(report),
                         &api_tx,
-                        Some(APP_RESPONSE_TIMEOUT),
                     );
                 },
                 |report| {
-                    let _ = dispatch_to_app_with_timeout(
-                        Request {
-                            id: "herdr:observer:stage".into(),
-                            method: Method::PaneReportAgentStage(report),
-                        },
+                    let _ = app_call::call(
+                        "herdr:observer:stage",
+                        Method::PaneReportAgentStage(report),
                         &api_tx,
-                        Some(APP_RESPONSE_TIMEOUT),
                     );
                 },
             );
@@ -65,16 +59,7 @@ pub(super) fn spawn(api_tx: ApiRequestSender, running: Arc<AtomicBool>) {
 }
 
 fn agent_list(api_tx: &ApiRequestSender) -> Option<Vec<AgentInfo>> {
-    let response = dispatch_to_app_with_timeout(
-        Request {
-            id: "herdr:observer:agents".into(),
-            method: Method::AgentList(Default::default()),
-        },
-        api_tx,
-        Some(APP_RESPONSE_TIMEOUT),
-    );
-    let value: serde_json::Value = serde_json::from_str(&response).ok()?;
-    serde_json::from_value(value.pointer("/result/agents")?.clone()).ok()
+    app_call::agent_list("herdr:observer:agents", api_tx)
 }
 
 fn observe(
@@ -83,7 +68,7 @@ fn observe(
     mut report: impl FnMut(PaneReportAgentModelParams),
     mut report_stage: impl FnMut(crate::api::schema::PaneReportAgentStageParams),
 ) {
-    let mut live = Vec::new();
+    let mut live = std::collections::HashSet::new();
     for agent in agents {
         let Some(kind) = agent
             .agent
@@ -100,7 +85,7 @@ fn observe(
             continue;
         };
         let key = (agent.pane_id.clone(), path.to_string());
-        live.push(key.clone());
+        live.insert(key.clone());
         let Ok(metadata) = std::fs::metadata(path) else {
             continue;
         };
@@ -109,13 +94,12 @@ fn observe(
         if entry.file != file {
             entry.file = file;
             let from = entry.offset.filter(|offset| *offset <= metadata.len());
-            let Some((found, activity, offset)) =
-                crate::agent_models::observe_transcript_with_activity(
-                    kind,
-                    std::path::Path::new(path),
-                    from,
-                )
-            else {
+            let Some((found, activity, offset)) = crate::agent_models::observe_transcript(
+                kind,
+                std::path::Path::new(path),
+                from,
+                metadata.len(),
+            ) else {
                 continue;
             };
             if activity.is_some() {
@@ -125,15 +109,7 @@ fn observe(
             if from.is_none() {
                 entry.observed = ObservedModel::default();
             }
-            if found.model.is_some() {
-                entry.observed.model = found.model;
-            }
-            if found.effort.is_some() {
-                entry.observed.effort = found.effort;
-            }
-            if found.fast.is_some() {
-                entry.observed.fast = found.fast;
-            }
+            entry.observed.overlay(found);
         }
         if agent.agent_status == crate::api::schema::AgentStatus::Working {
             let (stage, tool, checks) = match &entry.activity {

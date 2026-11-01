@@ -2,7 +2,7 @@
 //! agent CLI uses: Claude Code's model-catalog cache, Codex's models cache,
 //! and `cursor-agent models`.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -31,6 +31,21 @@ pub(crate) struct ObservedModel {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub fast: Option<bool>,
+}
+
+impl ObservedModel {
+    /// Takes every setting `newer` knows, keeping the rest.
+    pub(crate) fn overlay(&mut self, newer: ObservedModel) {
+        if newer.model.is_some() {
+            self.model = newer.model;
+        }
+        if newer.effort.is_some() {
+            self.effort = newer.effort;
+        }
+        if newer.fast.is_some() {
+            self.fast = newer.fast;
+        }
+    }
 }
 
 /// What a working agent is doing, from its newest transcript records.
@@ -102,32 +117,17 @@ fn tool_command(input: Option<&serde_json::Value>) -> Option<String> {
 
 pub(crate) fn catalog(kind: &str) -> Result<ModelCatalog, String> {
     match kind {
-        "claude" => claude_catalog(&claude_config_dir()),
-        "codex" => codex_catalog(&codex_home()),
+        "claude" => {
+            claude_catalog(&crate::integration::env::claude_dir().map_err(|err| err.to_string())?)
+        }
+        "codex" => {
+            codex_catalog(&crate::integration::env::codex_dir().map_err(|err| err.to_string())?)
+        }
         "cursor" => cursor_catalog(),
         other => Err(format!(
             "no model catalog for {other}; supported kinds are claude, codex and cursor"
         )),
     }
-}
-
-fn home_dir() -> PathBuf {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_default()
-}
-
-fn claude_config_dir() -> PathBuf {
-    std::env::var_os("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join(".claude"))
-}
-
-fn codex_home() -> PathBuf {
-    std::env::var_os("CODEX_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home_dir().join(".codex"))
 }
 
 fn claude_catalog(config_dir: &Path) -> Result<ModelCatalog, String> {
@@ -409,28 +409,19 @@ fn cursor_base_name(name: &str, effort: Option<&str>, fast: bool) -> String {
 /// (the caller merges them over what it knew); without it, the file is scanned
 /// backwards from the end until the settings are found, since a long Codex
 /// rollout can hold its last settings record megabytes before the end.
-/// Returns the settings found and the offset read up to.
-#[cfg(test)]
+/// Returns the settings found, the newest activity in the bytes read and the
+/// offset read up to. `len` is the file's current length.
 pub(crate) fn observe_transcript(
     kind: &str,
     path: &Path,
     from: Option<u64>,
-) -> Option<(ObservedModel, u64)> {
-    observe_transcript_with_activity(kind, path, from).map(|(model, _, offset)| (model, offset))
-}
-
-/// `observe_transcript` plus the newest activity in the bytes read.
-pub(crate) fn observe_transcript_with_activity(
-    kind: &str,
-    path: &Path,
-    from: Option<u64>,
+    len: u64,
 ) -> Option<(ObservedModel, Option<Activity>, u64)> {
     let parse = |text: &str| match kind {
         "claude" => Some((observe_claude(text), claude_activity(text))),
         "codex" => Some((observe_codex(text), codex_activity(text))),
         _ => None,
     };
-    let len = std::fs::metadata(path).ok()?.len();
     if let Some(from) = from.filter(|from| *from <= len) {
         let start = from.max(len.saturating_sub(TRANSCRIPT_APPEND_MAX_BYTES));
         // Start one byte early so a record beginning exactly at `start` is not
@@ -540,15 +531,15 @@ fn read_range(path: &Path, start: u64, end: u64) -> Option<String> {
     file.take(end.saturating_sub(start))
         .read_to_end(&mut bytes)
         .ok()?;
-    let text = String::from_utf8_lossy(&bytes).into_owned();
     // Drop a partial first line when reading from the middle.
-    Some(if start > 0 {
-        text.split_once('\n')
-            .map(|(_, rest)| rest.to_string())
-            .unwrap_or_default()
-    } else {
-        text
-    })
+    if start > 0 {
+        let line_end = bytes.iter().position(|byte| *byte == b'\n')?;
+        bytes.drain(..=line_end);
+    }
+    Some(
+        String::from_utf8(bytes)
+            .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned()),
+    )
 }
 
 pub(crate) fn observe_claude(tail: &str) -> ObservedModel {
@@ -792,14 +783,16 @@ mod tests {
         }
         std::fs::write(&path, &text).unwrap();
 
-        let (observed, offset) = observe_transcript("codex", &path, None).unwrap();
+        let len = std::fs::metadata(&path).unwrap().len();
+        let (observed, _, offset) = observe_transcript("codex", &path, None, len).unwrap();
         assert_eq!(observed.model.as_deref(), Some("gpt-a"));
         assert_eq!(observed.fast, Some(false));
         assert_eq!(offset, text.len() as u64);
 
         let appended = r#"{"type":"event_msg","payload":{"thread_settings":{"model":"gpt-a","reasoning_effort":"low","service_tier":"priority"}}}"#;
         std::fs::write(&path, format!("{text}{appended}\n")).unwrap();
-        let (observed, _) = observe_transcript("codex", &path, Some(offset)).unwrap();
+        let len = std::fs::metadata(&path).unwrap().len();
+        let (observed, _, _) = observe_transcript("codex", &path, Some(offset), len).unwrap();
         assert_eq!(observed.effort.as_deref(), Some("low"));
         assert_eq!(observed.fast, Some(true));
         let _ = std::fs::remove_dir_all(dir);

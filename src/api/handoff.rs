@@ -3,15 +3,10 @@
 //! agent is not asked for anything, so this works when it is out of fuel.
 
 use crate::api::schema::{AgentHandoffParams, ResponseResult};
-use crate::api::ApiRequestSender;
 
 type HandoffError = (&'static str, String);
 
-pub(super) fn handle(
-    params: AgentHandoffParams,
-    api_tx: &ApiRequestSender,
-) -> Result<ResponseResult, HandoffError> {
-    let _ = api_tx;
+pub(super) fn handle(params: AgentHandoffParams) -> Result<ResponseResult, HandoffError> {
     let mode = crate::orcha_handoff::Mode::from_notes(params.notes.as_deref().unwrap_or("full"))
         .ok_or((
             "invalid_params",
@@ -26,12 +21,7 @@ pub(super) fn handle(
 
 /// Starts a new agent for `account_id` with a hand-off of `pane_id`'s
 /// conversation, returning the new pane.
-pub(super) fn handoff_to_account(
-    _request_id: &str,
-    pane_id: &str,
-    account_id: &str,
-    _api_tx: &ApiRequestSender,
-) -> Result<String, HandoffError> {
+pub(super) fn handoff_to_account(pane_id: &str, account_id: &str) -> Result<String, HandoffError> {
     let (kind, claude_dir) = target(None, Some(account_id))?;
     crate::orcha_handoff::hand_off_to(
         pane_id,

@@ -1239,9 +1239,7 @@ pub(crate) fn plan(account: &AccountConfig) -> Option<String> {
             Some(kind.strip_prefix("claude_").unwrap_or(kind).to_owned())
         }
         "codex" => {
-            let home = std::env::var_os("CODEX_HOME")
-                .map(PathBuf::from)
-                .or_else(|| home().map(|home| home.join(".codex")))?;
+            let home = crate::integration::env::codex_dir().ok()?;
             let auth = read_json(&home.join("auth.json"))?;
             let token = auth.get("tokens")?.get("id_token")?.as_str()?;
             jwt_payload(token)?
@@ -1281,6 +1279,16 @@ pub(crate) fn rename(id: &str, label: &str) -> Result<(), String> {
 /// The account a pane's agent runs on.
 pub(crate) fn account_of_pane(accounts: &[AccountConfig], pane: &str) -> Option<String> {
     pane_account(accounts, pane)
+}
+
+/// `account_of_pane` when the caller already knows the agent's kind, which
+/// saves asking the server for the pane.
+pub(crate) fn account_of_agent(
+    accounts: &[AccountConfig],
+    kind: &str,
+    pane: &str,
+) -> Option<String> {
+    agent_account(accounts, kind, pane)
 }
 
 /// `CLAUDE_CONFIG_DIR` of the Claude in a pane; None for the default folder.
@@ -1335,6 +1343,10 @@ fn pane_config_dir(pane: &str) -> Option<String> {
 fn pane_account(accounts: &[AccountConfig], pane: &str) -> Option<String> {
     let info = pane_info(pane)?;
     let kind = info.get("agent").and_then(Value::as_str)?;
+    agent_account(accounts, kind, pane)
+}
+
+fn agent_account(accounts: &[AccountConfig], kind: &str, pane: &str) -> Option<String> {
     if kind != "claude" {
         return accounts
             .iter()
@@ -1364,17 +1376,25 @@ fn pane_account(accounts: &[AccountConfig], pane: &str) -> Option<String> {
 /// Every account and its fuel; `current` is `pane`'s account, else the
 /// one picked last.
 pub(crate) fn accounts_with_fuel(pane: Option<&str>, fresh: bool) -> Vec<Account> {
-    let accounts = accounts();
+    accounts_with_fuel_of(&accounts(), pane, fresh)
+}
+
+/// `accounts_with_fuel` for accounts the caller has already read.
+pub(crate) fn accounts_with_fuel_of(
+    accounts: &[AccountConfig],
+    pane: Option<&str>,
+    fresh: bool,
+) -> Vec<Account> {
     let current = pane
-        .and_then(|pane| pane_account(&accounts, pane))
-        .or_else(|| selected(&accounts));
+        .and_then(|pane| pane_account(accounts, pane))
+        .or_else(|| selected(accounts));
     let now = now_secs();
     accounts
         .iter()
         .map(|account| {
             let fuel = agent_kind(&account.kind).is_some_and(|agent| agent.fuel);
             let limits = if fuel {
-                limits(&accounts, account, fresh)
+                limits(accounts, account, fresh)
             } else {
                 Limits::default()
             };
@@ -1382,11 +1402,11 @@ pub(crate) fn accounts_with_fuel(pane: Option<&str>, fresh: bool) -> Vec<Account
                 id: account.id.clone(),
                 kind: account.kind.clone(),
                 label: account.label.clone(),
-                email: email(&accounts, account),
+                email: email(accounts, account),
                 current: current.as_deref() == Some(account.id.as_str()),
                 windows: windows(&limits, now),
                 signed_in: Some(
-                    signed_in(&accounts, account) && !auth_needed(limits.error.as_deref()),
+                    signed_in(accounts, account) && !auth_needed(limits.error.as_deref()),
                 ),
                 error: limits.error,
             }

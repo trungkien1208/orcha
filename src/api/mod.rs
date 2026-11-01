@@ -1,4 +1,5 @@
 mod accounts;
+mod app_call;
 pub mod client;
 mod configure;
 mod event_hub;

@@ -5,11 +5,12 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::api::app_call;
 use crate::api::schema::{
     AgentConfigureParams, AgentInfo, AgentModelInfo, AgentStatus, ErrorBody, ErrorResponse, Method,
     Request, ResponseResult, SuccessResponse,
 };
-use crate::api::server::{dispatch_to_app_with_timeout, APP_RESPONSE_TIMEOUT};
+use crate::api::server::dispatch_to_app_with_timeout;
 use crate::api::ApiRequestSender;
 
 /// Gap between commands, so each one is handled before the next is typed.
@@ -293,29 +294,8 @@ fn agent_get(
     pane_id: &str,
     api_tx: &ApiRequestSender,
 ) -> Result<AgentInfo, ConfigureError> {
-    let response = dispatch_to_app_with_timeout(
-        Request {
-            id: format!("{request_id}:agent"),
-            method: Method::AgentGet(crate::api::schema::AgentTarget {
-                target: pane_id.to_string(),
-            }),
-        },
-        api_tx,
-        Some(APP_RESPONSE_TIMEOUT),
-    );
-    let value: serde_json::Value = serde_json::from_str(&response).unwrap_or_default();
-    if let Some(error) = value.get("error") {
-        return Err((
-            "agent_not_found",
-            error
-                .get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("agent not found")
-                .to_string(),
-        ));
-    }
-    serde_json::from_value(value["result"]["agent"].clone())
-        .map_err(|_| ("internal_error", "could not decode the agent".to_string()))
+    app_call::agent_get(format!("{request_id}:agent"), pane_id, api_tx)
+        .map_err(app_call::AppError::into_agent_lookup)
 }
 
 #[cfg(test)]

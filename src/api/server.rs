@@ -606,74 +606,31 @@ fn serve_request(
         }
         Method::AgentQuestionGet(params) => {
             let result = crate::api::question::question(&request_id, &params.pane_id, api_tx);
-            let response = match result {
-                Ok(result) => serde_json::to_string(&SuccessResponse {
-                    id: request_id.clone(),
-                    result,
-                })
-                .unwrap_or_default(),
-                Err((code, message)) => error_response_json(request_id.clone(), code, message),
-            };
-            finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
+            reply(connection, &request_id, method, changes_ui, result)
         }
         Method::AgentAnswer(params) => {
             let result = crate::api::question::answer(&request_id, params, api_tx);
-            let response = match result {
-                Ok(result) => serde_json::to_string(&SuccessResponse {
-                    id: request_id.clone(),
-                    result,
-                })
-                .unwrap_or_default(),
-                Err((code, message)) => error_response_json(request_id.clone(), code, message),
-            };
-            finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
+            reply(connection, &request_id, method, changes_ui, result)
         }
         Method::PluginAutostartSet(params) => {
-            let response = match crate::api::plugin_autostart::set(params, api_tx) {
-                Ok(result) => serde_json::to_string(&SuccessResponse {
-                    id: request_id.clone(),
-                    result,
-                })
-                .unwrap_or_default(),
-                Err((code, message)) => error_response_json(request_id.clone(), code, message),
-            };
-            finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
+            let result = crate::api::plugin_autostart::set(params, api_tx);
+            reply(connection, &request_id, method, changes_ui, result)
         }
-        Method::PluginPaneStop(params) | Method::PluginPaneRestart(params) => {
-            let result = if matches!(method, "plugin.pane.stop") {
-                crate::api::plugin_autostart::stop_pane(&params.pane_id, api_tx)
-            } else {
-                crate::api::plugin_autostart::restart_pane(&params.pane_id, api_tx)
-            };
-            let response = match result {
-                Ok(result) => serde_json::to_string(&SuccessResponse {
-                    id: request_id.clone(),
-                    result,
-                })
-                .unwrap_or_default(),
-                Err((code, message)) => error_response_json(request_id.clone(), code, message),
-            };
-            finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
+        Method::PluginPaneStop(params) => {
+            let result = crate::api::plugin_autostart::stop_pane(&params.pane_id, api_tx);
+            reply(connection, &request_id, method, changes_ui, result)
+        }
+        Method::PluginPaneRestart(params) => {
+            let result = crate::api::plugin_autostart::restart_pane(&params.pane_id, api_tx);
+            reply(connection, &request_id, method, changes_ui, result)
         }
         Method::PluginAutostartList(_) => {
-            let response = serde_json::to_string(&SuccessResponse {
-                id: request_id.clone(),
-                result: crate::api::plugin_autostart::list(api_tx),
-            })
-            .unwrap_or_default();
-            finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
+            let result = Ok(crate::api::plugin_autostart::list(api_tx));
+            reply(connection, &request_id, method, changes_ui, result)
         }
         Method::AgentHandoff(params) => {
-            let result = crate::api::handoff::handle(params, api_tx);
-            let response = match result {
-                Ok(result) => serde_json::to_string(&SuccessResponse {
-                    id: request_id.clone(),
-                    result,
-                })
-                .unwrap_or_default(),
-                Err((code, message)) => error_response_json(request_id.clone(), code, message),
-            };
-            finish_wait_response(connection, Some(response), &request_id, method, changes_ui)
+            let result = crate::api::handoff::handle(params);
+            reply(connection, &request_id, method, changes_ui, result)
         }
         Method::AgentStart(params) if crate::api::start::wants_server_start(&params) => {
             let response =
@@ -927,6 +884,25 @@ fn dispatch_multiplexed_line(
             },
         });
     }
+}
+
+/// Sends the result of a method handled on this API thread.
+fn reply(
+    stream: &mut dyn ApiConnection,
+    request_id: &str,
+    method: &'static str,
+    changes_ui: bool,
+    result: Result<ResponseResult, (&'static str, String)>,
+) -> std::io::Result<()> {
+    let response = match result {
+        Ok(result) => serde_json::to_string(&SuccessResponse {
+            id: request_id.to_string(),
+            result,
+        })
+        .unwrap_or_default(),
+        Err((code, message)) => error_response_json(request_id.to_string(), code, message),
+    };
+    finish_wait_response(stream, Some(response), request_id, method, changes_ui)
 }
 
 fn finish_wait_response(

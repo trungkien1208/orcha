@@ -61,6 +61,26 @@ impl App {
         encode_success(id, ResponseResult::AgentInfo { agent })
     }
 
+    /// Announces an agent's current status record as `pane.agent_status_changed`.
+    pub(super) fn emit_agent_status_changed(&mut self, agent: &crate::api::schema::AgentInfo) {
+        self.emit_event(crate::api::schema::EventEnvelope {
+            event: crate::api::schema::EventKind::PaneAgentStatusChanged,
+            data: crate::api::schema::EventData::PaneAgentStatusChanged {
+                pane_id: agent.pane_id.clone(),
+                workspace_id: agent.workspace_id.clone(),
+                agent_status: agent.agent_status,
+                agent: agent.agent.clone(),
+                title: agent.title.clone(),
+                display_agent: agent.display_agent.clone(),
+                state_labels: agent.state_labels.clone(),
+                state_change_seq: Some(agent.state_change_seq),
+                session_version: Some(self.session_journal.version()),
+                stage: agent.stage,
+                tool: agent.tool.clone(),
+            },
+        });
+    }
+
     /// Records what a working agent is doing and announces a change with a
     /// `pane.agent_status_changed` event (same status, new stage).
     pub(super) fn handle_pane_report_agent_stage(
@@ -86,44 +106,35 @@ impl App {
                 );
             }
         };
-        let Some(before) = self.agent_info(ws_idx, pane_id) else {
-            return agent_not_found(id, &params.pane_id);
-        };
-        let Some(terminal) = self
+        let Some(pane) = self
             .state
             .workspaces
             .get(ws_idx)
             .and_then(|ws| ws.pane_state(pane_id))
-            .map(|pane| pane.attached_terminal_id.clone())
-            .and_then(|terminal_id| self.state.terminals.get_mut(&terminal_id))
+        else {
+            return agent_not_found(id, &params.pane_id);
+        };
+        let seen = pane.seen;
+        let terminal_id = pane.attached_terminal_id.clone();
+        let Some(terminal) = self
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .filter(|terminal| terminal.is_agent_terminal())
         else {
             return agent_not_found(id, &params.pane_id);
         };
         let Some(seq) = terminal.last_agent_state_change_seq else {
             return encode_success(id, ResponseResult::AgentModelReported { changed: false });
         };
+        let status = crate::app::api_helpers::pane_agent_status(terminal.state, seen);
+        let before = crate::app::agents::agent_stage(status, terminal);
         terminal.agent_activity = Some((seq, activity));
-        let Some(agent) = self.agent_info(ws_idx, pane_id) else {
-            return agent_not_found(id, &params.pane_id);
-        };
-        let changed = (before.stage, &before.tool) != (agent.stage, &agent.tool);
+        let changed = crate::app::agents::agent_stage(status, terminal) != before;
         if changed {
-            self.emit_event(crate::api::schema::EventEnvelope {
-                event: crate::api::schema::EventKind::PaneAgentStatusChanged,
-                data: crate::api::schema::EventData::PaneAgentStatusChanged {
-                    pane_id: agent.pane_id.clone(),
-                    workspace_id: agent.workspace_id.clone(),
-                    agent_status: agent.agent_status,
-                    agent: agent.agent.clone(),
-                    title: agent.title.clone(),
-                    display_agent: agent.display_agent.clone(),
-                    state_labels: agent.state_labels.clone(),
-                    state_change_seq: Some(agent.state_change_seq),
-                    session_version: Some(self.session_journal.version()),
-                    stage: agent.stage,
-                    tool: agent.tool.clone(),
-                },
-            });
+            if let Some(agent) = self.agent_info(ws_idx, pane_id) {
+                self.emit_agent_status_changed(&agent);
+            }
         }
         encode_success(id, ResponseResult::AgentModelReported { changed })
     }
@@ -139,50 +150,29 @@ impl App {
             Err(err) => return encode_error_body(id, self.agent_target_error_body(err)),
         };
         let (ws_idx, pane_id) = (resolved.ws_idx, resolved.pane_id);
-        let Some(terminal) = self
-            .state
-            .workspaces
-            .get(ws_idx)
-            .and_then(|ws| ws.pane_state(pane_id))
-            .and_then(|pane| self.state.terminals.get(&pane.attached_terminal_id))
-        else {
+        let Some(terminal) = self.pane_terminal(ws_idx, pane_id) else {
             return agent_not_found(id, &params.pane_id);
         };
+        let state = terminal.state;
         let completion = terminal.last_agent_completion_seq;
         let marked = completion.is_some_and(|completion| completion <= params.completion_seq);
+        let mut status_changed = false;
         if marked {
-            let before = self
-                .agent_info(ws_idx, pane_id)
-                .map(|agent| agent.agent_status);
             if let Some(pane) = self.state.workspaces[ws_idx].pane_state_mut(pane_id) {
+                use crate::app::api_helpers::pane_agent_status;
+                status_changed =
+                    pane_agent_status(state, pane.seen) != pane_agent_status(state, true);
                 pane.seen = true;
             }
             self.state.pending_agent_notifications.remove(&pane_id);
             self.state.mark_session_dirty();
-            if let Some(agent) = self.agent_info(ws_idx, pane_id) {
-                if before != Some(agent.agent_status) {
-                    self.emit_event(crate::api::schema::EventEnvelope {
-                        event: crate::api::schema::EventKind::PaneAgentStatusChanged,
-                        data: crate::api::schema::EventData::PaneAgentStatusChanged {
-                            pane_id: agent.pane_id.clone(),
-                            workspace_id: agent.workspace_id.clone(),
-                            agent_status: agent.agent_status,
-                            agent: agent.agent.clone(),
-                            title: agent.title.clone(),
-                            display_agent: agent.display_agent.clone(),
-                            state_labels: agent.state_labels.clone(),
-                            state_change_seq: Some(agent.state_change_seq),
-                            session_version: Some(self.session_journal.version()),
-                            stage: agent.stage,
-                            tool: agent.tool.clone(),
-                        },
-                    });
-                }
-            }
         }
         let Some(agent) = self.agent_info(ws_idx, pane_id) else {
             return agent_not_found(id, &params.pane_id);
         };
+        if status_changed {
+            self.emit_agent_status_changed(&agent);
+        }
         encode_success(id, ResponseResult::AgentSeen { marked, agent })
     }
 

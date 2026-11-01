@@ -1764,15 +1764,7 @@ impl App {
             .filter(|(known, _)| *known == session)
             .map(|(_, model)| model.clone())
             .unwrap_or_default();
-        if update.model.is_some() {
-            merged.model = update.model;
-        }
-        if update.effort.is_some() {
-            merged.effort = update.effort;
-        }
-        if update.fast.is_some() {
-            merged.fast = update.fast;
-        }
+        merged.overlay(update);
         let reported = Some((session, merged));
         if terminal.agent_model == reported {
             return false;
@@ -1824,7 +1816,7 @@ impl App {
         })
     }
 
-    fn pane_terminal(
+    pub(super) fn pane_terminal(
         &self,
         ws_idx: usize,
         pane_id: crate::layout::PaneId,

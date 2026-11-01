@@ -94,32 +94,30 @@ impl SessionJournal {
             );
         }
 
+        // Records still in `self.records` after this pass were removed.
         let mut changes = Vec::new();
-        let mut seen = std::collections::HashSet::with_capacity(current.len());
+        let mut next = HashMap::with_capacity(current.len());
         for (key, record) in current {
-            seen.insert(key.clone());
-            let op = match self.records.get(&key) {
-                Some(previous) if previous == &record => continue,
-                Some(_) => SessionChangeOp::Updated,
-                None => SessionChangeOp::Added,
+            let op = match self.records.remove(&key) {
+                Some(previous) if previous == record => None,
+                Some(_) => Some(SessionChangeOp::Updated),
+                None => Some(SessionChangeOp::Added),
             };
-            changes.push(SessionChange {
-                entity: key.0,
-                op,
-                id: key.1.clone(),
-                record: Some(record.clone()),
-            });
-            self.records.insert(key, record);
+            if let Some(op) = op {
+                changes.push(SessionChange {
+                    entity: key.0,
+                    op,
+                    id: key.1.clone(),
+                    record: Some(record.clone()),
+                });
+            }
+            next.insert(key, record);
         }
-        let mut removed: Vec<_> = self
-            .records
-            .keys()
-            .filter(|key| !seen.contains(*key))
-            .cloned()
+        let mut removed: Vec<_> = std::mem::replace(&mut self.records, next)
+            .into_keys()
             .collect();
         removed.sort_by(|a, b| (a.0 as u8, &a.1).cmp(&(b.0 as u8, &b.1)));
         for key in removed {
-            self.records.remove(&key);
             changes.push(SessionChange {
                 entity: key.0,
                 op: SessionChangeOp::Removed,
