@@ -26,8 +26,10 @@ pub(super) fn render_header(
     brutal::pill(buffer, chip, &label, t.chip_text, t.pink, false, &t);
     let projects = snapshot.workspaces.len();
     let agents = snapshot.agents.len();
+    // the version first: which orcha this is, at a glance
     let counts = format!(
-        "{projects} project{} · {agents} agent{}",
+        "v{} · {projects} project{} · {agents} agent{}",
+        crate::orcha_app::ORCHA_VERSION,
         if projects == 1 { "" } else { "s" },
         if agents == 1 { "" } else { "s" },
     );
