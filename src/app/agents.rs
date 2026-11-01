@@ -59,6 +59,46 @@ pub(crate) fn agent_model_state(terminal: &crate::terminal::TerminalState) -> Ag
     }
 }
 
+/// The PROCESS station of a working agent from what it is doing now:
+/// `thinking` while it reasons or reads, `coding` while it edits or runs
+/// commands, `testing` while a command runs tests, a type check or a linter.
+pub(crate) fn activity_station(terminal: &crate::terminal::TerminalState) -> Option<&'static str> {
+    use crate::agent_models::Activity;
+    let (seq, activity) = terminal.agent_activity.as_ref()?;
+    if Some(*seq) != terminal.last_agent_state_change_seq
+        || terminal.state != crate::detect::AgentState::Working
+    {
+        return None;
+    }
+    Some(match activity {
+        Activity::Thinking => "thinking",
+        Activity::RunningTool(_, true) => "testing",
+        Activity::RunningTool(tool, false) => {
+            const READING: &[&str] = &[
+                "read",
+                "grep",
+                "glob",
+                "ls",
+                "webfetch",
+                "websearch",
+                "task",
+                "agent",
+                "todowrite",
+                "view",
+                "read_file",
+                "search",
+                "list_dir",
+                "find",
+            ];
+            if READING.contains(&tool.to_ascii_lowercase().as_str()) {
+                "thinking"
+            } else {
+                "coding"
+            }
+        }
+    })
+}
+
 /// The agent's stage: what it reported for this working stretch, else
 /// derived from its status.
 pub(crate) fn agent_stage(
@@ -73,7 +113,7 @@ pub(crate) fn agent_stage(
             .as_ref()
             .filter(|(seq, _)| Some(*seq) == terminal.last_agent_state_change_seq)
         {
-            Some((_, Activity::RunningTool(tool))) => {
+            Some((_, Activity::RunningTool(tool, _))) => {
                 (Some(AgentStage::RunningTool), Some(tool.clone()))
             }
             _ => (Some(AgentStage::Thinking), None),

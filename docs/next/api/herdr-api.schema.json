@@ -3690,6 +3690,10 @@
         },
         "PaneReportAgentStageParams": {
           "properties": {
+            "checks": {
+              "description": "The running tool runs tests, a type check or a linter.",
+              "type": "boolean"
+            },
             "pane_id": {
               "type": "string"
             },

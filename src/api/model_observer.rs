@@ -19,6 +19,7 @@ const OBSERVER_SOURCE: &str = "herdr:observer";
 struct Seen {
     file: Option<(u64, Option<SystemTime>)>,
     activity: Option<crate::agent_models::Activity>,
+    reported_stage: Option<(crate::api::schema::AgentStage, Option<String>, bool)>,
     /// Bytes already read; later changes read only what was appended.
     offset: Option<u64>,
     observed: ObservedModel,
@@ -135,19 +136,25 @@ fn observe(
             }
         }
         if agent.agent_status == crate::api::schema::AgentStatus::Working {
-            let (stage, tool) = match &entry.activity {
-                Some(crate::agent_models::Activity::RunningTool(tool)) => (
+            let (stage, tool, checks) = match &entry.activity {
+                Some(crate::agent_models::Activity::RunningTool(tool, checks)) => (
                     crate::api::schema::AgentStage::RunningTool,
                     Some(tool.clone()),
+                    *checks,
                 ),
-                _ => (crate::api::schema::AgentStage::Thinking, None),
+                _ => (crate::api::schema::AgentStage::Thinking, None, false),
             };
-            if (agent.stage, agent.tool.as_ref()) != (Some(stage), tool.as_ref()) {
+            let reported = (stage, tool.clone(), checks);
+            if (agent.stage, agent.tool.as_ref()) != (Some(stage), tool.as_ref())
+                || entry.reported_stage.as_ref() != Some(&reported)
+            {
+                entry.reported_stage = Some(reported);
                 report_stage(crate::api::schema::PaneReportAgentStageParams {
                     pane_id: agent.pane_id.clone(),
                     source: OBSERVER_SOURCE.into(),
                     stage,
                     tool,
+                    checks,
                 });
             }
         }

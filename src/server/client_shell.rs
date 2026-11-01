@@ -157,6 +157,24 @@ pub(super) fn snapshot_with_completions(
             let mut state_labels = agent.state_labels.into_iter().collect::<Vec<_>>();
             state_labels.sort_by(|left, right| left.0.cmp(&right.0));
             let mut tokens = agent.tokens.into_iter().collect::<Vec<_>>();
+            // PROCESS reads its station from `stage`; a reporter's own wins,
+            // else what Herdr sees the agent doing in its transcript.
+            if !tokens.iter().any(|(key, _)| key == "stage") {
+                let station = app
+                    .parse_pane_id(&pane_id)
+                    .and_then(|(workspace_index, pane)| {
+                        let pane = app
+                            .state
+                            .workspaces
+                            .get(workspace_index)?
+                            .pane_state(pane)?;
+                        app.state.terminals.get(&pane.attached_terminal_id)
+                    })
+                    .and_then(crate::app::activity_station);
+                if let Some(station) = station {
+                    tokens.push(("stage".to_owned(), station.to_owned()));
+                }
+            }
             tokens.sort_by(|left, right| left.0.cmp(&right.0));
             protocol::ClientShellAgent {
                 pane_id,

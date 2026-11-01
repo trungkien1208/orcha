@@ -38,8 +38,66 @@ pub(crate) struct ObservedModel {
 pub(crate) enum Activity {
     /// Reasoning or writing its answer.
     Thinking,
-    /// A tool call has started and has no result yet.
-    RunningTool(String),
+    /// A tool call has started and has no result yet; true when it runs
+    /// tests, a type check or a linter.
+    RunningTool(String, bool),
+}
+
+/// Whether a shell command runs tests, a type check or a linter.
+pub(crate) fn is_check_command(command: &str) -> bool {
+    let command = command.to_ascii_lowercase();
+    const CHECKS: &[&str] = &[
+        "test",
+        "pytest",
+        "jest",
+        "vitest",
+        "mocha",
+        "rspec",
+        "nextest",
+        "clippy",
+        "cargo check",
+        "tsc",
+        "eslint",
+        "ruff",
+        "mypy",
+        "lint",
+        "typecheck",
+        "type-check",
+        "go vet",
+        "phpunit",
+        "playwright",
+        "cypress",
+    ];
+    CHECKS.iter().any(|check| command.contains(check))
+}
+
+/// The command a tool call runs, when it is a shell call.
+fn tool_command(input: Option<&serde_json::Value>) -> Option<String> {
+    let input = input?;
+    // Codex passes its arguments as a JSON string.
+    let parsed;
+    let input = match input.as_str() {
+        Some(text) => {
+            parsed = serde_json::from_str::<serde_json::Value>(text).ok()?;
+            &parsed
+        }
+        None => input,
+    };
+    let value = input
+        .get("command")
+        .or_else(|| input.get("cmd"))
+        .or_else(|| input.get("script"))?;
+    match value {
+        serde_json::Value::String(text) => Some(text.clone()),
+        serde_json::Value::Array(parts) => Some(
+            parts
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+        _ => None,
+    }
 }
 
 pub(crate) fn catalog(kind: &str) -> Result<ModelCatalog, String> {
@@ -410,16 +468,19 @@ pub(crate) fn claude_activity(text: &str) -> Option<Activity> {
         let content = record.pointer("/message/content");
         match record.get("type").and_then(serde_json::Value::as_str) {
             Some("assistant") => {
-                let tool = content
+                let call = content
                     .and_then(serde_json::Value::as_array)
                     .and_then(|items| {
                         items.iter().rev().find(|item| {
                             item.get("type").and_then(|t| t.as_str()) == Some("tool_use")
                         })
-                    })
-                    .and_then(|item| text_field(item, "name"));
-                return Some(match tool {
-                    Some(tool) => Activity::RunningTool(tool),
+                    });
+                return Some(match call.and_then(|item| text_field(item, "name")) {
+                    Some(tool) => {
+                        let checks = tool_command(call.and_then(|item| item.get("input")))
+                            .is_some_and(|command| is_check_command(&command));
+                        Activity::RunningTool(tool, checks)
+                    }
                     None => Activity::Thinking,
                 });
             }
@@ -445,12 +506,18 @@ pub(crate) fn codex_activity(text: &str) -> Option<Activity> {
             .unwrap_or("");
         match (record.get("type").and_then(serde_json::Value::as_str), kind) {
             (Some("response_item"), "function_call" | "custom_tool_call" | "local_shell_call") => {
+                let checks =
+                    tool_command(payload.get("arguments").or_else(|| payload.get("action")))
+                        .is_some_and(|command| is_check_command(&command));
                 return Some(Activity::RunningTool(
                     text_field(payload, "name").unwrap_or_else(|| "shell".into()),
+                    checks,
                 ));
             }
             (Some("event_msg"), "exec_command_begin") => {
-                return Some(Activity::RunningTool("exec_command".into()));
+                let checks =
+                    tool_command(Some(payload)).is_some_and(|command| is_check_command(&command));
+                return Some(Activity::RunningTool("exec_command".into(), checks));
             }
             (
                 Some("response_item"),
@@ -749,7 +816,7 @@ mod tests {
         );
         assert_eq!(
             claude_activity(running),
-            Some(Activity::RunningTool("Bash".into()))
+            Some(Activity::RunningTool("Bash".into(), false))
         );
         let done = format!(
             "{running}\n{}",
@@ -764,12 +831,31 @@ mod tests {
         );
         assert_eq!(
             codex_activity(codex),
-            Some(Activity::RunningTool("apply_patch".into()))
+            Some(Activity::RunningTool("apply_patch".into(), false))
         );
         let codex_done = format!(
             "{codex}\n{}",
             r#"{"type":"response_item","payload":{"type":"function_call_output"}}"#
         );
         assert_eq!(codex_activity(&codex_done), Some(Activity::Thinking));
+    }
+
+    #[test]
+    fn shell_calls_that_run_checks_are_marked() {
+        let claude = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"cargo nextest run -p herdr"}}]}}"#;
+        assert_eq!(
+            claude_activity(claude),
+            Some(Activity::RunningTool("Bash".into(), true))
+        );
+        let build = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"ls -la"}}]}}"#;
+        assert_eq!(
+            claude_activity(build),
+            Some(Activity::RunningTool("Bash".into(), false))
+        );
+        let codex = r#"{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":[\"npm\",\"run\",\"lint\"]}"}}"#;
+        assert_eq!(
+            codex_activity(codex),
+            Some(Activity::RunningTool("exec_command".into(), true))
+        );
     }
 }

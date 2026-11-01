@@ -232,10 +232,12 @@ fn render_process(
         let kind = brutal::agent_label(agent).to_uppercase();
         let chip_width = brutal::chip(buffer, x, y, width, &kind, t.chip_text, color);
         let task = brutal::agent_task(agent);
-        let detail = if task.is_empty() {
-            Cow::Borrowed(*project)
-        } else {
-            Cow::Owned(format!("{project} · {task}"))
+        let detail = match (agent.agent_status == AgentStatus::Blocked, task.is_empty()) {
+            // a question waits: say so first, it is what to act on
+            (true, true) => Cow::Owned(format!("needs you · {project}")),
+            (true, false) => Cow::Owned(format!("needs you · {project} · {task}")),
+            (false, true) => Cow::Borrowed(*project),
+            (false, false) => Cow::Owned(format!("{project} · {task}")),
         };
         let detail_x = x + chip_width + 1;
         let detail_width = (x + width).saturating_sub(detail_x);
@@ -467,7 +469,14 @@ pub(super) fn process_view(snapshot: &ClientShellSnapshot, folded: bool) -> Proc
         total: 0,
         blocked: 0,
     };
-    for agent in snapshot.agents.iter().filter(|agent| running(agent)) {
+    // Agents waiting on a question come first, then the ones working.
+    let mut running_agents: Vec<_> = snapshot
+        .agents
+        .iter()
+        .filter(|agent| running(agent))
+        .collect();
+    running_agents.sort_by_key(|agent| agent.agent_status != AgentStatus::Blocked);
+    for agent in running_agents {
         view.blocked += usize::from(agent.agent_status == AgentStatus::Blocked);
         if !folded && view.total < MAX_TRAINS {
             let project = snapshot
@@ -1074,5 +1083,19 @@ mod tests {
     fn trains_chug_forward_and_back() {
         let positions: Vec<u16> = (0..8).map(|frame| chug(frame, 3)).collect();
         assert_eq!(positions, vec![0, 1, 2, 3, 2, 1, 0, 1]);
+    }
+}
+
+#[cfg(test)]
+mod process_station_tests {
+    use super::*;
+
+    #[test]
+    fn reported_stages_map_to_stations() {
+        let tokens = |stage: &str| vec![("stage".to_owned(), stage.to_owned())];
+        assert_eq!(station(&tokens("thinking"), AgentStatus::Working), 0);
+        assert_eq!(station(&tokens("coding"), AgentStatus::Working), 1);
+        assert_eq!(station(&tokens("testing"), AgentStatus::Working), 2);
+        assert_eq!(station(&[], AgentStatus::Done), 3);
     }
 }

@@ -769,4 +769,7 @@ pub struct PaneReportAgentStageParams {
     pub stage: super::common::AgentStage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
+    /// The running tool runs tests, a type check or a linter.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub checks: bool,
 }

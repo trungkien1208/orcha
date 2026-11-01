@@ -75,7 +75,9 @@ impl App {
         };
         let activity = match params.stage {
             AgentStage::Thinking => Activity::Thinking,
-            AgentStage::RunningTool => Activity::RunningTool(params.tool.unwrap_or_default()),
+            AgentStage::RunningTool => {
+                Activity::RunningTool(params.tool.unwrap_or_default(), params.checks)
+            }
             AgentStage::Waiting | AgentStage::Done => {
                 return encode_error(
                     id,

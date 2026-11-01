@@ -8826,6 +8826,7 @@ fn agent_stage_follows_status_and_reported_activity() {
             source: "test".into(),
             stage: AgentStage::RunningTool,
             tool: Some("Bash".into()),
+            checks: false,
         }),
     );
     assert_eq!(
