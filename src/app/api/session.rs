@@ -56,7 +56,12 @@ impl App {
         let heartbeat_due = self.session_journal.last_refresh.is_none_or(|at| {
             at.elapsed() >= super::super::session_journal::SESSION_JOURNAL_HEARTBEAT
         });
-        if events_moved || heartbeat_due {
+        // Bursts of events share one rebuild: it walks every pane, so at most
+        // a few times a second.
+        let settled = self.session_journal.last_refresh.is_none_or(|at| {
+            at.elapsed() >= super::super::session_journal::SESSION_JOURNAL_MIN_GAP
+        });
+        if (events_moved && settled) || heartbeat_due {
             self.refresh_session_journal();
         }
     }

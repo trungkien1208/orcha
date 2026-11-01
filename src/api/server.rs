@@ -31,6 +31,8 @@ pub(super) const CONNECTION_POLL_INTERVAL: Duration = Duration::from_millis(100)
 pub(super) const APP_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 const INITIAL_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const INITIAL_REQUEST_FIRST_POLL: Duration = Duration::from_millis(1);
+/// Requests and subscriptions running at once on one multiplexed connection.
+const MULTIPLEX_MAX_IN_FLIGHT: usize = 64;
 const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_INITIAL_REQUEST_BYTES: usize = 1024 * 1024;
 const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(50);
@@ -781,6 +783,7 @@ fn run_multiplex(stream: LocalStream, context: &RequestContext) -> std::io::Resu
     use std::io::BufRead;
 
     let closed = Arc::new(AtomicBool::new(false));
+    let in_flight = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let (outgoing_tx, outgoing_rx) = std::sync::mpsc::channel::<String>();
     let (receive, mut send) = stream.split();
 
@@ -817,7 +820,7 @@ fn run_multiplex(stream: LocalStream, context: &RequestContext) -> std::io::Resu
             }
             Ok(_) => {
                 let text = String::from_utf8_lossy(&line);
-                dispatch_multiplexed_line(text.trim(), context, &outgoing_tx, &closed);
+                dispatch_multiplexed_line(text.trim(), context, &outgoing_tx, &closed, &in_flight);
             }
             Err(err) if is_connection_closed_error(&err) => break Ok(()),
             Err(err) => break Err(err),
@@ -836,6 +839,7 @@ fn dispatch_multiplexed_line(
     context: &RequestContext,
     outgoing: &std::sync::mpsc::Sender<String>,
     closed: &Arc<AtomicBool>,
+    in_flight: &Arc<std::sync::atomic::AtomicUsize>,
 ) {
     if line.is_empty() {
         return;
@@ -869,6 +873,19 @@ fn dispatch_multiplexed_line(
         return;
     }
 
+    // Each request runs on a thread; a connection gets a bounded number.
+    if in_flight.load(Ordering::Relaxed) >= MULTIPLEX_MAX_IN_FLIGHT {
+        reply(&ErrorResponse {
+            id: request.id,
+            error: ErrorBody {
+                code: "too_many_requests".into(),
+                message: format!(
+                    "at most {MULTIPLEX_MAX_IN_FLIGHT} requests and subscriptions per connection"
+                ),
+            },
+        });
+        return;
+    }
     let mut connection = MultiplexedRequest {
         id: request.id.clone(),
         outgoing: outgoing.clone(),
@@ -876,11 +893,15 @@ fn dispatch_multiplexed_line(
     };
     let context = context.clone();
     let request_id = request.id.clone();
+    in_flight.fetch_add(1, Ordering::Relaxed);
+    let running_requests = Arc::clone(in_flight);
     if let Err(err) = crate::thread_spawn::spawn_named("herdr-api-mux", move || {
         if let Err(err) = serve_request(&mut connection, request, &context) {
             debug!(err = %err, "multiplexed api request failed");
         }
+        running_requests.fetch_sub(1, Ordering::Relaxed);
     }) {
+        in_flight.fetch_sub(1, Ordering::Relaxed);
         warn!(err = %err, "failed to spawn multiplexed api request thread");
         reply(&ErrorResponse {
             id: request_id,

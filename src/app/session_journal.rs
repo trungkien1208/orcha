@@ -11,6 +11,12 @@ const MAX_RETAINED_CHANGES: usize = 4096;
 /// Catches changes that reach the records without a lifecycle event, such as a
 /// new working directory, while a client watches the session.
 pub(crate) const SESSION_JOURNAL_HEARTBEAT: Duration = Duration::from_secs(2);
+/// Shortest gap between two rebuilds after events; later events wait for the
+/// next loop turn past it, so none is lost.
+#[cfg(not(test))]
+pub(crate) const SESSION_JOURNAL_MIN_GAP: Duration = Duration::from_millis(200);
+#[cfg(test)]
+pub(crate) const SESSION_JOURNAL_MIN_GAP: Duration = Duration::ZERO;
 
 pub(crate) struct SessionJournal {
     epoch: String,

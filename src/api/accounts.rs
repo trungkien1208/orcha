@@ -43,13 +43,18 @@ pub(super) fn handle(request: Request, api_tx: &ApiRequestSender) -> Option<Stri
         }
         Method::AccountsSwitch(params) => switch(&id, params, api_tx),
         Method::AccountsLogin(params) => {
+            let created = params.pane_id.is_none();
             let pane = match params.pane_id {
                 Some(pane) => Ok(pane),
                 None => background_pane(&id, api_tx),
             };
             pane.and_then(|pane| {
-                crate::orcha_accounts::login(&params.account_id, Some(&pane))
-                    .map_err(|message| ("account_failed", message))
+                crate::orcha_accounts::login(&params.account_id, Some(&pane)).map_err(|message| {
+                    if created {
+                        close_workspace_of(&id, &pane, api_tx);
+                    }
+                    ("account_failed", message)
+                })
             })
             .map(|()| {
                 note_change("login_started");
@@ -66,13 +71,18 @@ pub(super) fn handle(request: Request, api_tx: &ApiRequestSender) -> Option<Stri
                     ),
                 ))
             } else {
+                let created = params.pane_id.is_none();
                 let pane = match params.pane_id {
                     Some(pane) => Ok(pane),
                     None => background_pane(&id, api_tx),
                 };
                 pane.and_then(|pane| {
-                    crate::orcha_accounts::add(&params.name, Some(&pane))
-                        .map_err(|message| ("account_failed", message))
+                    crate::orcha_accounts::add(&params.name, Some(&pane)).map_err(|message| {
+                        if created {
+                            close_workspace_of(&id, &pane, api_tx);
+                        }
+                        ("account_failed", message)
+                    })
                 })
                 .map(|account_id| {
                     note_change("added");
@@ -414,6 +424,20 @@ fn background_pane(request_id: &str, api_tx: &ApiRequestSender) -> Result<String
             "account_failed",
             "could not open a pane for the sign-in".into(),
         ))
+}
+
+/// Closes the workspace a failed sign-in opened, so retries leave nothing behind.
+fn close_workspace_of(request_id: &str, pane_id: &str, api_tx: &ApiRequestSender) {
+    if let Some((workspace_id, _)) = pane_id.split_once(':') {
+        let _ = app_request(
+            request_id,
+            Method::WorkspaceClose(crate::api::schema::WorkspaceCloseParams {
+                workspace_id: workspace_id.to_string(),
+                close_group: false,
+            }),
+            api_tx,
+        );
+    }
 }
 
 fn app_request(

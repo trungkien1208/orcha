@@ -927,10 +927,6 @@ impl ActiveAgentStatusSetSubscription {
         api_tx: &ApiRequestSender,
         event_hub: &EventHub,
     ) -> Vec<SubscriptionEventEnvelope> {
-        let before = self.last_sequence;
-        if event_hub.current_sequence() != before {
-            return Vec::new();
-        }
         let Ok(panes) = pane_list(
             format!("{}:list", self.request_prefix),
             self.workspace_id.as_deref(),
@@ -938,12 +934,23 @@ impl ActiveAgentStatusSetSubscription {
         ) else {
             return Vec::new();
         };
-        if event_hub.current_sequence() != before {
-            return Vec::new();
-        }
+        // Panes with status events not handled yet get them from history in
+        // order; comparing them with this list could send a stale status.
+        // Other panes are compared even while events keep arriving.
+        let pending: std::collections::HashSet<String> = event_hub
+            .events_after(self.last_sequence)
+            .into_iter()
+            .filter_map(|(_, event)| match event.data {
+                crate::api::schema::EventData::PaneAgentStatusChanged { pane_id, .. } => {
+                    Some(pane_id)
+                }
+                _ => None,
+            })
+            .collect();
         let mut events = Vec::new();
         for pane in panes {
-            if !self.in_scope(&pane.pane_id, &pane.workspace_id) {
+            if !self.in_scope(&pane.pane_id, &pane.workspace_id) || pending.contains(&pane.pane_id)
+            {
                 continue;
             }
             let current = (pane.agent_status, PanePresentationSnapshot::from(&pane));
@@ -1016,7 +1023,10 @@ impl ActiveTranscriptSubscription {
             return events;
         };
         if let Some(tail) = self.pending_tail.take() {
-            let records = read_records(&path, 0, u64::MAX).0;
+            // The tail reads to the end, so the stream goes on from there:
+            // nothing in the tail is sent again.
+            let (records, offset) = read_records(&path, 0, u64::MAX);
+            self.offset = offset;
             let start = records.len().saturating_sub(tail as usize);
             for chunk in records[start..].chunks(TRANSCRIPT_EVENT_ENTRIES) {
                 events.push(self.envelope(chunk.to_vec(), false));
@@ -1060,6 +1070,15 @@ fn read_records(path: &str, from: u64, max: u64) -> (Vec<serde_json::Value>, u64
     let mut bytes = Vec::new();
     if (&mut file).take(max).read_to_end(&mut bytes).is_err() {
         return (Vec::new(), from);
+    }
+    // One record longer than `max` (a large inlined image or tool output):
+    // read on to the end of that line rather than stall on it.
+    if bytes.len() as u64 == max && !bytes.contains(&b'\n') {
+        let mut rest = Vec::new();
+        let mut reader = std::io::BufReader::new(&mut file);
+        if std::io::BufRead::read_until(&mut reader, b'\n', &mut rest).is_ok() {
+            bytes.extend_from_slice(&rest);
+        }
     }
     // Keep a partly written last line for the next read.
     let complete = bytes
@@ -1554,6 +1573,67 @@ mod tests {
             [4]
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn transcript_records_longer_than_one_read_are_not_stuck() {
+        let dir = std::env::temp_dir().join(format!("herdr-long-record-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.jsonl");
+        let long = format!("{{\"n\":1,\"blob\":\"{}\"}}\n{{\"n\":2}}\n", "x".repeat(64));
+        std::fs::write(&path, &long).unwrap();
+        let (records, offset) = read_records(path.to_str().unwrap(), 0, 16);
+        assert_eq!(records.len(), 1, "the long record is read whole");
+        let (records, end) = read_records(path.to_str().unwrap(), offset, 16);
+        assert_eq!(records[0]["n"], 2);
+        assert_eq!(end, long.len() as u64);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn reconcile_runs_while_other_panes_keep_sending_events() {
+        let event_hub = EventHub::default();
+        let (api_tx, responder) = spawn_pane_list_responder(vec![
+            vec![
+                pane("w1:p1", "w1", AgentStatus::Done),
+                pane("w1:p2", "w1", AgentStatus::Working),
+            ],
+            vec![
+                pane("w1:p1", "w1", AgentStatus::Idle),
+                pane("w1:p2", "w1", AgentStatus::Idle),
+            ],
+        ]);
+        let mut subscription = ActiveSubscription::new_with_warnings(
+            all_panes_subscription(Vec::new(), None),
+            "busy",
+            0,
+            &api_tx,
+            &event_hub,
+            event_hub.current_sequence(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        let ActiveSubscription::AgentStatusSet(set) = &mut subscription else {
+            panic!("expected all-pane subscription");
+        };
+        // An event for another pane arrives after this subscriber's last poll.
+        event_hub.push(status_event("w1:p2", "w1", AgentStatus::Idle));
+        let events = set.reconcile(&api_tx, &event_hub);
+        let changed: Vec<_> = events
+            .iter()
+            .map(|event| match &event.data {
+                SubscriptionEventData::PaneAgentStatusChanged(data) => data.pane_id.clone(),
+                _ => unreachable!(),
+            })
+            .collect();
+        assert_eq!(
+            changed,
+            ["w1:p1"],
+            "p1's seen change is caught; p2 waits for history"
+        );
+        drop(api_tx);
+        drop(subscription);
+        responder.join().unwrap();
     }
 
     #[test]

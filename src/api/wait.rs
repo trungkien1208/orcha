@@ -556,7 +556,10 @@ const AGENT_PROMPT_SUBMIT_CONFIRM: std::time::Duration = std::time::Duration::fr
 #[cfg(test)]
 const AGENT_PROMPT_SUBMIT_CONFIRM: std::time::Duration = std::time::Duration::from_millis(400);
 /// How long `agent.prompt` waits for a just-answered question to clear.
+#[cfg(not(test))]
 const AGENT_PROMPT_BLOCKED_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
+#[cfg(test)]
+const AGENT_PROMPT_BLOCKED_GRACE: std::time::Duration = std::time::Duration::from_millis(300);
 /// How long `agent.prompt` waits for a starting agent to accept input.
 const AGENT_PROMPT_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
@@ -587,15 +590,29 @@ pub(super) fn prompt_agent_and_confirm(
         };
         let now = std::time::Instant::now();
         // A question that was just answered can still read as blocked, and an
-        // agent loading after it reads as unknown; give both a moment.
+        // agent loading after it reads as unknown; give both a moment. An
+        // agent without status detection stays unknown, so only briefly.
+        let grace = now < started + AGENT_PROMPT_BLOCKED_GRACE;
         let settling = match agent.agent_status {
-            crate::api::schema::AgentStatus::Blocked => now < started + AGENT_PROMPT_BLOCKED_GRACE,
-            crate::api::schema::AgentStatus::Unknown => {
-                agent.agent.is_some() && now < ready_deadline
+            crate::api::schema::AgentStatus::Blocked | crate::api::schema::AgentStatus::Unknown => {
+                grace && agent.agent.is_some()
             }
             _ => false,
         };
         if !agent.launch_pending && !settling {
+            // Still asking something: typing or pressing Enter now would
+            // answer the question, so fail without sending anything.
+            if agent.agent_status == crate::api::schema::AgentStatus::Blocked {
+                return encode(&ErrorResponse {
+                    id: request_id,
+                    error: ErrorBody {
+                        code: "agent_blocked".into(),
+                        message: format!(
+                            "agent {target} is waiting on a question; see agent.question and agent.answer"
+                        ),
+                    },
+                });
+            }
             break agent;
         }
         if !agent.launch_pending {
@@ -1116,6 +1133,39 @@ mod prompt_confirm_tests {
         assert_eq!(response["result"]["agent"]["agent_status"], "working");
         drop(api_tx);
         assert_eq!(agent.join().unwrap(), 1);
+    }
+
+    #[test]
+    fn a_blocked_agent_gets_no_prompt_and_no_enter() {
+        use crate::api::schema::{AgentStatus, ResponseResult, SuccessResponse};
+        let (api_tx, mut api_rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::api::ApiRequestMessage>();
+        let thread = std::thread::spawn(move || {
+            let mut typed = 0;
+            while let Some(message) = api_rx.blocking_recv() {
+                let result = match message.request.method {
+                    Method::AgentGet(_) => ResponseResult::AgentInfo {
+                        agent: agent(AgentStatus::Blocked, 5),
+                    },
+                    _ => {
+                        typed += 1;
+                        ResponseResult::Ok {}
+                    }
+                };
+                let _ = message.respond_to.send(
+                    serde_json::to_string(&SuccessResponse {
+                        id: message.request.id,
+                        result,
+                    })
+                    .unwrap(),
+                );
+            }
+            typed
+        });
+        let response = prompt(&api_tx);
+        assert_eq!(response["error"]["code"], "agent_blocked");
+        drop(api_tx);
+        assert_eq!(thread.join().unwrap(), 0, "nothing reaches the pane");
     }
 
     #[test]
