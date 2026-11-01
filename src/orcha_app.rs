@@ -129,7 +129,11 @@ pub(crate) fn maybe_run_config_tool(args: &[String]) -> Option<i32> {
     if !CONFIG_TOOL_COMMANDS.contains(&command) {
         return None;
     }
-    if command == "plugin" && args.get(2).is_some_and(|sub| is_herdr_plugin_subcommand(sub)) {
+    if command == "plugin"
+        && args
+            .get(2)
+            .is_some_and(|sub| is_herdr_plugin_subcommand(sub))
+    {
         // `orcha plugin link <dir>` and friends manage herdr-plugin.toml
         // plugins; bare `orcha plugin` still installs the Claude Code plugin.
         return None;

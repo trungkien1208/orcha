@@ -334,3 +334,39 @@ mod tests {
         assert_eq!(session_changed(&app), 2);
     }
 }
+
+#[cfg(test)]
+mod plugin_run_action_tests {
+    #[test]
+    fn run_action_answers_like_action_invoke() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let run = app.handle_api_request(crate::api::schema::Request {
+            id: "a".into(),
+            method: crate::api::schema::Method::PluginRunAction(
+                crate::api::schema::PluginRunActionParams {
+                    plugin_id: "missing".into(),
+                    action_id: "open".into(),
+                },
+            ),
+        });
+        let invoke = app.handle_api_request(crate::api::schema::Request {
+            id: "a".into(),
+            method: crate::api::schema::Method::PluginActionInvoke(
+                crate::api::schema::PluginActionInvokeParams {
+                    action_id: "open".into(),
+                    plugin_id: Some("missing".into()),
+                    context: None,
+                },
+            ),
+        });
+        assert_eq!(run, invoke);
+        assert!(run.contains("error"));
+    }
+}

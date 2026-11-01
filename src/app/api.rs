@@ -1280,6 +1280,21 @@ impl App {
             Method::PluginPaneClose(params) => {
                 return self.handle_plugin_pane_close(request.id, params);
             }
+            Method::PluginRunAction(params) => {
+                // The same as plugin.action.invoke with an explicit plugin.
+                return self.handle_api_request_after_internal_events_drained(
+                    crate::api::schema::Request {
+                        id: request.id,
+                        method: Method::PluginActionInvoke(
+                            crate::api::schema::PluginActionInvokeParams {
+                                action_id: params.action_id,
+                                plugin_id: Some(params.plugin_id),
+                                context: None,
+                            },
+                        ),
+                    },
+                );
+            }
             Method::PaneReportAgentStage(params) => {
                 return self.handle_pane_report_agent_stage(request.id, params);
             }

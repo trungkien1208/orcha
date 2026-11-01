@@ -203,6 +203,7 @@ mod tests {
             "plugin.unlink",
             "plugin.disable",
             "plugin.action.invoke",
+            "plugin.run_action",
             "plugin.pane.open",
             "plugin.pane.focus",
             "plugin.pane.close",

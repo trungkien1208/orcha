@@ -166,6 +166,7 @@ operations::define_operations! {
     AgentQuestionGet(AgentQuestionParams) => "agent.question", false, false;
     AgentAnswer(AgentAnswerParams) => "agent.answer", false, false;
     PaneReportAgentStage(PaneReportAgentStageParams) => "pane.report_agent_stage", false, false;
+    PluginRunAction(PluginRunActionParams) => "plugin.run_action", true, false;
 }
 
 #[cfg(test)]

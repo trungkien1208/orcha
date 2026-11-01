@@ -110,7 +110,7 @@ Raw socket method names use dot notation:
 | Agent | `agent.models`, `agent.configure`, `agent.handoff`, `agent.mark_seen`, `agent.question`, `agent.answer`, `agent.list`, `agent.get`, `agent.read`, `agent.explain`, `agent.send_keys`, `agent.prompt`, `agent.wait`, `agent.rename`, `agent.focus`, `agent.start`, `agent.view.set`, `agent.view.clear` |
 | Events | `events.subscribe`, `events.wait` |
 | Integrations | `integration.install`, `integration.uninstall` |
-| Plugins | `plugin.link`, `plugin.list`, `plugin.unlink`, `plugin.enable`, `plugin.disable`, `plugin.action.list`, `plugin.action.invoke`, `plugin.log.list`, `plugin.pane.open`, `plugin.pane.focus`, `plugin.pane.close` |
+| Plugins | `plugin.link`, `plugin.list`, `plugin.unlink`, `plugin.enable`, `plugin.disable`, `plugin.action.list`, `plugin.action.invoke`, `plugin.run_action`, `plugin.log.list`, `plugin.pane.open`, `plugin.pane.focus`, `plugin.pane.close` |
 
 `agent.wait` is server-owned and event-driven. It pins the resolved pane occupant so a replacement cannot satisfy the wait. `agent.prompt` accepts an optional `wait` object with `until` and `timeout_ms`; this submits the prompt and starts the wait in one request, avoiding a race between separate calls. If the resolved agent is already `blocked`, `agent.prompt` returns `agent_blocked` without sending input or starting the wait. Without `wait`, `agent.prompt` waits up to 15 s for a starting agent to accept input
 (`agent_not_ready` otherwise) and succeeds only when the agent reacts. If the text
@@ -1400,6 +1400,17 @@ stage change sends a status event with the same `agent_status`. Reporters can
 set it with `pane.report_agent_stage {pane_id, source, stage: "thinking" | "running_tool", tool?}`.
 
 Feature flag: `agent.stage`.
+
+### plugin.run_action
+
+The same as `plugin.action.invoke` with an explicit plugin, for clients that
+list actions with `plugin.list` or `plugin.action.list`:
+
+```json
+{"id":"p1","method":"plugin.run_action","params":{"plugin_id":"easy-job","action_id":"open"}}
+```
+
+Linked plugins' actions also appear at the end of Orcha's COMMANDS palette.
 
 ## Protocol stability
 

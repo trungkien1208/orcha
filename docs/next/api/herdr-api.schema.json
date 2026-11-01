@@ -4414,6 +4414,21 @@
           ],
           "type": "string"
         },
+        "PluginRunActionParams": {
+          "properties": {
+            "action_id": {
+              "type": "string"
+            },
+            "plugin_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "plugin_id",
+            "action_id"
+          ],
+          "type": "object"
+        },
         "PluginSetEnabledParams": {
           "properties": {
             "plugin_id": {
@@ -7379,6 +7394,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/PaneReportAgentStageParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "plugin.run_action",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PluginRunActionParams"
             }
           },
           "required": [

@@ -493,3 +493,9 @@ pub struct PluginPaneInfo {
     pub entrypoint: String,
     pub pane: PaneInfo,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PluginRunActionParams {
+    pub plugin_id: String,
+    pub action_id: String,
+}

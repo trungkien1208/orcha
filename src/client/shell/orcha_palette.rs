@@ -172,18 +172,80 @@ fn fuzzy_score(text: &str, query: &str) -> Option<usize> {
     Some(score)
 }
 
+/// A linked plugin's action, listed after the built-in commands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PluginPaletteAction {
+    pub plugin_id: String,
+    pub action_id: String,
+    pub title: String,
+    pub detail: String,
+}
+
+/// Plugin actions from the last refresh; read when COMMANDS opens.
+static PLUGIN_ACTIONS: std::sync::Mutex<Vec<PluginPaletteAction>> =
+    std::sync::Mutex::new(Vec::new());
+
+fn plugin_actions() -> Vec<PluginPaletteAction> {
+    PLUGIN_ACTIONS
+        .lock()
+        .map(|actions| actions.clone())
+        .unwrap_or_default()
+}
+
+/// Asks the server for plugin actions off the input thread.
+fn refresh_plugin_actions() {
+    let _ = crate::thread_spawn::spawn_named("orcha-palette-plugins", || {
+        let Some(result) = crate::orcha_handoff::herdr_json(&["plugin", "action", "list"]) else {
+            return;
+        };
+        let actions = result
+            .get("actions")
+            .and_then(serde_json::Value::as_array)
+            .map(|actions| {
+                actions
+                    .iter()
+                    .filter_map(|action| {
+                        let text = |key: &str| action.get(key)?.as_str().map(str::to_owned);
+                        Some(PluginPaletteAction {
+                            plugin_id: text("plugin_id")?,
+                            action_id: text("action_id")?,
+                            title: text("title")?,
+                            detail: text("description").unwrap_or_else(|| {
+                                format!("{} plugin", text("plugin_id").unwrap_or_default())
+                            }),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Ok(mut known) = PLUGIN_ACTIONS.lock() {
+            *known = actions;
+        }
+    });
+}
+
+/// A row's title and detail: built-in commands first, then plugin actions.
+fn row(index: usize) -> Option<(String, String)> {
+    if let Some((_, title, detail)) = COMMANDS.get(index) {
+        return Some(((*title).to_owned(), (*detail).to_owned()));
+    }
+    plugin_actions()
+        .get(index - COMMANDS.len())
+        .map(|action| (action.title.clone(), action.detail.clone()))
+}
+
 /// The rows for `query`, best match first; all of them, in order, when the
 /// query is empty.
 pub(super) fn matches(query: &str) -> Vec<usize> {
+    let total = COMMANDS.len() + plugin_actions().len();
     if query.trim().is_empty() {
-        return (0..COMMANDS.len()).collect();
+        return (0..total).collect();
     }
-    let mut scored: Vec<(usize, usize)> = COMMANDS
-        .iter()
-        .enumerate()
-        .filter_map(|(index, (_, title, detail))| {
-            let title_score = fuzzy_score(title, query);
-            let detail_score = fuzzy_score(detail, query).map(|score| score + 100);
+    let mut scored: Vec<(usize, usize)> = (0..total)
+        .filter_map(|index| {
+            let (title, detail) = row(index)?;
+            let title_score = fuzzy_score(&title, query);
+            let detail_score = fuzzy_score(&detail, query).map(|score| score + 100);
             title_score.or(detail_score).map(|score| (score, index))
         })
         .collect();
@@ -193,6 +255,12 @@ pub(super) fn matches(query: &str) -> Vec<usize> {
 
 pub(super) fn command(index: usize) -> Option<PaletteCommand> {
     COMMANDS.get(index).map(|(command, _, _)| *command)
+}
+
+fn plugin_action(index: usize) -> Option<PluginPaletteAction> {
+    plugin_actions()
+        .get(index.checked_sub(COMMANDS.len())?)
+        .cloned()
 }
 
 /// Rows shown at once; the list scrolls past them.
@@ -256,7 +324,7 @@ pub(super) fn render(
         if y >= body.bottom() {
             break;
         }
-        let Some((_, title, detail)) = COMMANDS.get(*index) else {
+        let Some((title, detail)) = row(*index) else {
             continue;
         };
         let rect = Rect::new(body.x, y, body.width, 1);
@@ -268,7 +336,7 @@ pub(super) fn render(
             rect.x + 2,
             y,
             title_width,
-            title,
+            &title,
             Style::default()
                 .fg(t.ink)
                 .bg(fill)
@@ -280,7 +348,7 @@ pub(super) fn render(
             detail_x,
             y,
             rect.right().saturating_sub(detail_x + 9),
-            detail,
+            &detail,
             Style::default().fg(t.muted).bg(fill),
         );
         if cursor {
@@ -485,6 +553,7 @@ impl ClientShellState {
     }
 
     pub(super) fn open_palette(&mut self) {
+        refresh_plugin_actions();
         self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::Palette {
             selected: 0,
             query: String::new(),
@@ -539,10 +608,28 @@ impl ClientShellState {
         else {
             return;
         };
-        let Some(command) = matches(query)
-            .get(position)
-            .and_then(|index| command(*index))
-        else {
+        let Some(index) = matches(query).get(position).copied() else {
+            return;
+        };
+        if let Some(action) = plugin_action(index) {
+            self.orcha_ui.popup = None;
+            self.show_notice(format!("running {}", action.title));
+            // Through the server, like any plugin action; never blocks input.
+            let _ = crate::thread_spawn::spawn_named("orcha-palette-plugin-run", move || {
+                let _ = crate::orcha_handoff::herdr(&[
+                    "plugin",
+                    "action",
+                    "invoke",
+                    &action.action_id,
+                    "--plugin",
+                    &action.plugin_id,
+                ])
+                .stdout(std::process::Stdio::null())
+                .status();
+            });
+            return;
+        }
+        let Some(command) = command(index) else {
             return;
         };
         self.orcha_ui.popup = None;
@@ -627,5 +714,26 @@ mod tests {
         assert!(rows
             .iter()
             .any(|row| command(*row) == Some(PaletteCommand::Accounts)));
+    }
+}
+
+#[cfg(test)]
+mod plugin_palette_tests {
+    use super::*;
+
+    #[test]
+    fn plugin_actions_follow_the_built_in_commands_and_match_queries() {
+        *PLUGIN_ACTIONS.lock().unwrap() = vec![PluginPaletteAction {
+            plugin_id: "easy-job".into(),
+            action_id: "open".into(),
+            title: "Open Easy Job".into(),
+            detail: "Open the Easy Job office".into(),
+        }];
+        assert_eq!(matches("").len(), COMMANDS.len() + 1);
+        let found = matches("easy job");
+        assert_eq!(found.first(), Some(&COMMANDS.len()));
+        assert_eq!(plugin_action(COMMANDS.len()).unwrap().action_id, "open");
+        assert!(command(COMMANDS.len()).is_none());
+        PLUGIN_ACTIONS.lock().unwrap().clear();
     }
 }
