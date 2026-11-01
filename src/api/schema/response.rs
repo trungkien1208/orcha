@@ -63,6 +63,9 @@ pub enum ResponseResult {
         session_epoch: String,
         changes: Vec<super::session::SessionChange>,
     },
+    AgentModelReported {
+        changed: bool,
+    },
     AgentModels {
         kind: String,
         /// Where the catalog came from: a cache file or a CLI command.

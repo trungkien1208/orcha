@@ -27,7 +27,7 @@ pub(crate) struct AgentModelState {
     pub fast: Option<bool>,
 }
 
-fn current_session_value(terminal: &crate::terminal::TerminalState) -> Option<&str> {
+pub(crate) fn current_session_value(terminal: &crate::terminal::TerminalState) -> Option<&str> {
     terminal
         .hook_authority
         .as_ref()
@@ -44,15 +44,18 @@ fn current_session_value(terminal: &crate::terminal::TerminalState) -> Option<&s
 /// What a hook reported for the terminal's current session; reports for an
 /// earlier session no longer apply.
 pub(crate) fn agent_model_state(terminal: &crate::terminal::TerminalState) -> AgentModelState {
-    let session = current_session_value(terminal);
+    let session = current_session_value(terminal).unwrap_or("");
+    let Some((_, reported)) = terminal
+        .agent_model
+        .as_ref()
+        .filter(|(reported, _)| reported == session)
+    else {
+        return AgentModelState::default();
+    };
     AgentModelState {
-        model: terminal
-            .agent_model
-            .as_ref()
-            .filter(|(reported, _)| Some(reported.as_str()) == session)
-            .map(|(_, model)| model.clone()),
-        effort: None,
-        fast: None,
+        model: reported.model.clone(),
+        effort: reported.effort.clone(),
+        fast: reported.fast,
     }
 }
 

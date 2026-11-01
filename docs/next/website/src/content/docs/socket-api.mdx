@@ -1126,9 +1126,23 @@ Feature flag: `agent_session.transcript_path`.
 ### Model state
 
 Agent records carry `model`, `effort` and `fast`, each `null` when Herdr does
-not know it. `model` comes from the agent's session-start hook (Claude, Codex
-and Cursor send it when the agent includes it; reinstall their integrations).
-Herdr does not observe effort or fast mode yet, so those stay `null`. A
+not know it. Herdr fills them from what the agents record themselves:
+
+- Claude: each assistant turn in its transcript (`effort`, `usage.speed`), so
+  the values appear after the first reply.
+- Codex: `thread_settings` in its rollout (`reasoning_effort`, `service_tier`
+  `priority` = fast).
+- Cursor: the model id its session-start hook reports, which names the variant
+  (`grok-4.7-high-fast` = model `grok-4.7`, effort `high`, fast).
+
+A background reader checks each transcript every two seconds, re-reads only
+bytes appended since the last read, and never touches the pane. Reporters can
+also set them with `pane.report_agent_model` (fields left out keep their value):
+
+```json
+{"id":"r1","method":"pane.report_agent_model","params":{"pane_id":"w1:p1","source":"my-tool","effort":"high","fast":true}}
+{"id":"r1","result":{"type":"agent_model_reported","changed":true}}
+``` A
 `pane.agent_model_changed` event fires whenever the agent record's `model`,
 `effort` or `fast` changes, whatever changed it, and carries all three:
 
@@ -1139,7 +1153,7 @@ Herdr does not observe effort or fast mode yet, so those stay `null`. A
 Other reporters can set the model with `pane.report_agent_session`'s optional
 `model` field (CLI: `--model`).
 
-Feature flag: `agent.model_state`.
+Feature flags: `agent.model_state`, `agent.model_state.observed`.
 
 ### agent.models
 

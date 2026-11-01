@@ -11,6 +11,11 @@ use crate::api::schema::{AgentModelInfo, AgentModelVariant};
 /// `cursor-agent models` asks Cursor's servers; reuse its answer for a while.
 const CURSOR_CATALOG_TTL: Duration = Duration::from_secs(600);
 const CURSOR_MODELS_TIMEOUT: Duration = Duration::from_secs(20);
+/// First look at a transcript's last 512 KB, widening the window until the
+/// settings are found or 64 MB were read; later reads take only appended bytes.
+const TRANSCRIPT_TAIL_BYTES: u64 = 512 * 1024;
+const TRANSCRIPT_SCAN_MAX_BYTES: u64 = 64 * 1024 * 1024;
+const TRANSCRIPT_APPEND_MAX_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Efforts in the order agents list them, used to split Cursor variant ids.
 const CURSOR_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
@@ -18,6 +23,14 @@ const CURSOR_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 pub(crate) struct ModelCatalog {
     pub source: String,
     pub models: Vec<AgentModelInfo>,
+}
+
+/// Model settings an agent recorded for its current session.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ObservedModel {
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub fast: Option<bool>,
 }
 
 pub(crate) fn catalog(kind: &str) -> Result<ModelCatalog, String> {
@@ -323,6 +336,159 @@ fn cursor_base_name(name: &str, effort: Option<&str>, fast: bool) -> String {
     joined
 }
 
+/// Reads the model, effort and fast mode an agent recorded in its transcript.
+/// Claude records them on each assistant turn; Codex in `thread_settings` and
+/// `turn_context`. With `from`, only bytes appended after that offset are read
+/// (the caller merges them over what it knew); without it, the file is scanned
+/// backwards from the end until the settings are found, since a long Codex
+/// rollout can hold its last settings record megabytes before the end.
+/// Returns the settings found and the offset read up to.
+pub(crate) fn observe_transcript(
+    kind: &str,
+    path: &Path,
+    from: Option<u64>,
+) -> Option<(ObservedModel, u64)> {
+    let parse = |text: &str| match kind {
+        "claude" => Some(observe_claude(text)),
+        "codex" => Some(observe_codex(text)),
+        _ => None,
+    };
+    let len = std::fs::metadata(path).ok()?.len();
+    if let Some(from) = from.filter(|from| *from <= len) {
+        let start = from.max(len.saturating_sub(TRANSCRIPT_APPEND_MAX_BYTES));
+        // Start one byte early so a record beginning exactly at `start` is not
+        // mistaken for the partial line that `read_range` drops.
+        return Some((
+            parse(&read_range(path, start.saturating_sub(1), len)?)?,
+            len,
+        ));
+    }
+    let mut window = TRANSCRIPT_TAIL_BYTES;
+    loop {
+        let start = len.saturating_sub(window);
+        let observed = parse(&read_range(path, start, len)?)?;
+        let complete =
+            observed.model.is_some() && observed.effort.is_some() && observed.fast.is_some();
+        if complete || start == 0 || window >= TRANSCRIPT_SCAN_MAX_BYTES {
+            return Some((observed, len));
+        }
+        window *= 4;
+    }
+}
+
+fn read_range(path: &Path, start: u64, end: u64) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut bytes = Vec::new();
+    file.take(end.saturating_sub(start))
+        .read_to_end(&mut bytes)
+        .ok()?;
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    // Drop a partial first line when reading from the middle.
+    Some(if start > 0 {
+        text.split_once('\n')
+            .map(|(_, rest)| rest.to_string())
+            .unwrap_or_default()
+    } else {
+        text
+    })
+}
+
+pub(crate) fn observe_claude(tail: &str) -> ObservedModel {
+    let mut observed = ObservedModel::default();
+    for line in tail.lines().rev() {
+        let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if observed.model.is_none() {
+            observed.model = record
+                .pointer("/message/model")
+                .and_then(serde_json::Value::as_str)
+                .filter(|model| !model.starts_with('<'))
+                .map(str::to_string);
+        }
+        if observed.effort.is_none() {
+            observed.effort = text_field(&record, "effort").or_else(|| {
+                record
+                    .pointer("/message/output_config/effort")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            });
+        }
+        if observed.fast.is_none() {
+            observed.fast = record
+                .pointer("/message/usage/speed")
+                .and_then(serde_json::Value::as_str)
+                .map(|speed| speed == "fast");
+        }
+        if observed.model.is_some() && observed.effort.is_some() && observed.fast.is_some() {
+            break;
+        }
+    }
+    observed
+}
+
+pub(crate) fn observe_codex(tail: &str) -> ObservedModel {
+    let mut observed = ObservedModel::default();
+    for line in tail.lines().rev() {
+        let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if let Some(settings) = record.pointer("/payload/thread_settings") {
+            fill_missing(
+                &mut observed,
+                text_field(settings, "model"),
+                text_field(settings, "reasoning_effort"),
+                text_field(settings, "service_tier")
+                    .map(|tier| matches!(tier.as_str(), "priority" | "fast")),
+            );
+        } else if record.get("type").and_then(serde_json::Value::as_str) == Some("turn_context") {
+            if let Some(payload) = record.get("payload") {
+                fill_missing(
+                    &mut observed,
+                    text_field(payload, "model"),
+                    text_field(payload, "effort"),
+                    None,
+                );
+            }
+        }
+        if observed.model.is_some() && observed.effort.is_some() && observed.fast.is_some() {
+            break;
+        }
+    }
+    observed
+}
+
+/// Keeps newer values; fills only what is still unknown.
+fn fill_missing(
+    observed: &mut ObservedModel,
+    model: Option<String>,
+    effort: Option<String>,
+    fast: Option<bool>,
+) {
+    if observed.model.is_none() {
+        observed.model = model;
+    }
+    if observed.effort.is_none() {
+        observed.effort = effort;
+    }
+    if observed.fast.is_none() {
+        observed.fast = fast;
+    }
+}
+
+/// Splits a Cursor model id such as `grok-4.7-high-fast` into its model,
+/// effort and fast mode, as `cursor-agent models` names its variants.
+pub(crate) fn cursor_model_settings(id: &str) -> ObservedModel {
+    let (model, effort, fast) = split_cursor_variant(id);
+    ObservedModel {
+        model: Some(model),
+        effort,
+        fast: Some(fast),
+    }
+}
+
 fn text_field(value: &serde_json::Value, key: &str) -> Option<String> {
     value
         .get(key)
@@ -401,5 +567,85 @@ mod tests {
         assert_eq!(grok.fast_efforts, ["low"], "fast only exists for low");
         assert_eq!(grok.variants[1].id, "grok-4.7-low-fast");
         assert!(grok.variants[1].fast);
+    }
+    #[test]
+    fn claude_transcript_reports_the_latest_turn_settings() {
+        let tail = concat!(
+            r#"{"type":"assistant","effort":"low","message":{"model":"claude-sonnet-5-5","usage":{"speed":"standard"}}}"#,
+            "\n",
+            r#"{"type":"assistant","effort":"high","message":{"model":"claude-opus-5-5","usage":{"speed":"fast"}}}"#,
+            "\n",
+            r#"{"type":"user","message":{"content":"hi"}}"#,
+        );
+        assert_eq!(
+            observe_claude(tail),
+            ObservedModel {
+                model: Some("claude-opus-5-5".into()),
+                effort: Some("high".into()),
+                fast: Some(true),
+            }
+        );
+    }
+
+    #[test]
+    fn codex_rollout_reports_thread_settings() {
+        let tail = concat!(
+            r#"{"type":"turn_context","payload":{"model":"old","effort":"low"}}"#,
+            "\n",
+            r#"{"type":"event_msg","payload":{"thread_settings":{"model":"gpt-a","reasoning_effort":"high","service_tier":"priority"}}}"#,
+            "\n",
+            r#"{"type":"turn_context","payload":{"model":"gpt-a","effort":"high"}}"#,
+        );
+        assert_eq!(
+            observe_codex(tail),
+            ObservedModel {
+                model: Some("gpt-a".into()),
+                effort: Some("high".into()),
+                fast: Some(true),
+            }
+        );
+    }
+    #[test]
+    fn cursor_model_ids_split_into_model_effort_and_fast() {
+        assert_eq!(
+            cursor_model_settings("grok-4.7-high-fast"),
+            ObservedModel {
+                model: Some("grok-4.7".into()),
+                effort: Some("high".into()),
+                fast: Some(true),
+            }
+        );
+        assert_eq!(cursor_model_settings("composer-2.5").effort, None);
+    }
+
+    #[test]
+    fn transcript_scan_widens_past_a_long_tail_and_then_reads_only_appends() {
+        let dir = std::env::temp_dir().join(format!("herdr-scan-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("rollout.jsonl");
+        let mut text = String::from(
+            r#"{"type":"event_msg","payload":{"thread_settings":{"model":"gpt-a","reasoning_effort":"high","service_tier":"default"}}}"#,
+        );
+        text.push('\n');
+        let filler = format!(
+            "{{\"type\":\"response_item\",\"payload\":\"{}\"}}\n",
+            "x".repeat(1000)
+        );
+        for _ in 0..(TRANSCRIPT_TAIL_BYTES as usize / 1000 + 10) {
+            text.push_str(&filler);
+        }
+        std::fs::write(&path, &text).unwrap();
+
+        let (observed, offset) = observe_transcript("codex", &path, None).unwrap();
+        assert_eq!(observed.model.as_deref(), Some("gpt-a"));
+        assert_eq!(observed.fast, Some(false));
+        assert_eq!(offset, text.len() as u64);
+
+        let appended = r#"{"type":"event_msg","payload":{"thread_settings":{"model":"gpt-a","reasoning_effort":"low","service_tier":"priority"}}}"#;
+        std::fs::write(&path, format!("{text}{appended}\n")).unwrap();
+        let (observed, _) = observe_transcript("codex", &path, Some(offset)).unwrap();
+        assert_eq!(observed.effort.as_deref(), Some("low"));
+        assert_eq!(observed.fast, Some(true));
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

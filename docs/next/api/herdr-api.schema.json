@@ -3034,6 +3034,40 @@
           ],
           "type": "object"
         },
+        "PaneReportAgentModelParams": {
+          "properties": {
+            "effort": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fast": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "model": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pane_id": {
+              "type": "string"
+            },
+            "source": {
+              "description": "Who observed it, such as `herdr:observer` or a plugin id.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane_id",
+            "source"
+          ],
+          "type": "object"
+        },
         "PaneReportAgentParams": {
           "properties": {
             "agent": {
@@ -6578,6 +6612,22 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "pane.report_agent_model",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/PaneReportAgentModelParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -9740,6 +9790,22 @@
                 "session_version",
                 "session_epoch",
                 "changes"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "changed": {
+                  "type": "boolean"
+                },
+                "type": {
+                  "const": "agent_model_reported",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "changed"
               ],
               "type": "object"
             },

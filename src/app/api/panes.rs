@@ -1704,8 +1704,8 @@ impl App {
         }
     }
 
-    /// Remembers the model a session report named.
-    /// A report without a model keeps the one already known for this session.
+    /// Remembers the model a session report named. Cursor names a variant
+    /// (`grok-4.7-high-fast`), which also carries effort and fast mode.
     fn record_agent_model(
         &mut self,
         ws_idx: usize,
@@ -1716,6 +1716,32 @@ impl App {
         let Some(model) = model else {
             return;
         };
+        let is_cursor = self
+            .pane_terminal(ws_idx, pane_id)
+            .and_then(|terminal| terminal.effective_agent_label())
+            .is_some_and(|label| label == "cursor");
+        let update = if is_cursor {
+            crate::agent_models::cursor_model_settings(&model)
+        } else {
+            crate::agent_models::ObservedModel {
+                model: Some(model),
+                effort: None,
+                fast: None,
+            }
+        };
+        self.update_agent_model(ws_idx, pane_id, Some(&session_ref.value), update);
+    }
+
+    /// Merges reported model settings into the pane's record for `session`
+    /// (the current session when `None`). Fields that are `None` keep what is
+    /// already known for the same session.
+    pub(super) fn update_agent_model(
+        &mut self,
+        ws_idx: usize,
+        pane_id: crate::layout::PaneId,
+        session: Option<&str>,
+        update: crate::agent_models::ObservedModel,
+    ) -> bool {
         let Some(terminal_id) = self
             .state
             .workspaces
@@ -1723,19 +1749,65 @@ impl App {
             .and_then(|ws| ws.pane_state(pane_id))
             .map(|pane| pane.attached_terminal_id.clone())
         else {
-            return;
+            return false;
         };
         let Some(terminal) = self.state.terminals.get_mut(&terminal_id) else {
-            return;
+            return false;
         };
-        let reported = Some((session_ref.value.clone(), model.clone()));
+        let session = session
+            .map(str::to_string)
+            .or_else(|| super::super::agents::current_session_value(terminal).map(str::to_string))
+            .unwrap_or_default();
+        let mut merged = terminal
+            .agent_model
+            .as_ref()
+            .filter(|(known, _)| *known == session)
+            .map(|(_, model)| model.clone())
+            .unwrap_or_default();
+        if update.model.is_some() {
+            merged.model = update.model;
+        }
+        if update.effort.is_some() {
+            merged.effort = update.effort;
+        }
+        if update.fast.is_some() {
+            merged.fast = update.fast;
+        }
+        let reported = Some((session, merged));
         if terminal.agent_model == reported {
-            return;
+            return false;
         }
         terminal.agent_model = reported;
         // `sync_agent_model_events` announces the change with the rest of the
         // agent record's model state.
         self.emit_pane_updated(ws_idx, pane_id);
+        true
+    }
+
+    pub(super) fn handle_pane_report_agent_model(
+        &mut self,
+        id: String,
+        params: crate::api::schema::PaneReportAgentModelParams,
+    ) -> String {
+        let Some((ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
+            return pane_not_found(id, &params.pane_id);
+        };
+        let clean = |value: Option<String>| {
+            value
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        };
+        let changed = self.update_agent_model(
+            ws_idx,
+            pane_id,
+            None,
+            crate::agent_models::ObservedModel {
+                model: clean(params.model),
+                effort: clean(params.effort),
+                fast: params.fast,
+            },
+        );
+        encode_success(id, ResponseResult::AgentModelReported { changed })
     }
 
     /// A resume command belongs to the session it was reported with, so it is

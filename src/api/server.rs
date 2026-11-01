@@ -119,6 +119,7 @@ fn start_server_inner(
     }
 
     let running = Arc::new(AtomicBool::new(true));
+    crate::api::model_observer::spawn(api_tx.clone(), Arc::clone(&running));
     let listener_running = Arc::clone(&running);
     let spawned = crate::thread_spawn::spawn_named("herdr-api-accept", move || {
         run_accept_loop(
@@ -903,6 +904,8 @@ const API_FEATURES: &[&str] = &[
     "agent_session.transcript_path",
     // Agent records carry `model`, `effort` and `fast`.
     "agent.model_state",
+    // `effort` and `fast` are read from transcripts, not always null.
+    "agent.model_state.observed",
     // Subscriptions in one `events.subscribe` request are written in event order.
     "events.subscribe.ordered",
     // `pane.agent_status_changed` carries `state_change_seq` and `session_version`.
