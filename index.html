@@ -891,7 +891,7 @@
                 </article>
               </div>
               <div class="continue-pop" id="live-continue" aria-hidden="true">
-                <div class="pop-head"><b>CONTINUE ON</b><span>Claude · work · 6% left</span><span class="pop-x">✕</span></div>
+                <div class="pop-head"><b>ACCOUNTS</b><span>Claude · work · 6% left</span><span class="pop-x">✕</span></div>
                 <div class="pop-row"><i class="agent-ico claude">✳</i><b>Claude · personal</b><span class="best">BEST</span><span class="pop-fuel">70%</span><span class="pop-btn" id="live-continue-btn">CONTINUE ↵</span></div>
                 <div class="pop-row dim"><i class="agent-ico codex">◎</i><b>Codex</b><span class="handoff">HAND-OFF</span><span class="pop-fuel">90%</span><span class="pop-btn plain">CONTINUE</span></div>
               </div>
@@ -944,7 +944,7 @@
             </article>
             <article class="feature" tabindex="0" data-target="fuel">
               <h2 class="feature-title"><i class="feature-mark" aria-hidden="true"></i>Pick the next driver</h2>
-              <p>Fuel running low? CONTINUE ON moves the chat to another account or agent, notes included.</p>
+              <p>Fuel running low? Accounts moves the chat to another account or agent, notes included.</p>
             </article>
             <article class="feature" tabindex="0" data-target="status git">
               <h2 class="feature-title"><i class="feature-mark" aria-hidden="true"></i>Let them cook</h2>
@@ -999,7 +999,7 @@
               <h3>Coming from herdr?</h3>
               <ul>
                 <li><b>It is herdr underneath,</b> so nothing you rely on goes away. Settings and workspaces come along.</li>
-                <li><b>Fuel and CONTINUE ON:</b> see each plan’s fuel, move a chat to another account before it runs dry.</li>
+                <li><b>Fuel and accounts:</b> see each plan’s fuel, move a chat to another account before it runs dry.</li>
                 <li><b>One search for every action,</b> plus git and live status on the side.</li>
                 <li><b>One-line install and <code>orcha update</code></b> on macOS and Windows.</li>
               </ul>
@@ -1175,7 +1175,7 @@
         .catch(() => {});
 
       // The preview plays one calm loop: Claude types, Codex asks for you,
-      // the account runs low and CONTINUE ON moves the chat, Claude finishes.
+      // the account runs low and Accounts moves the chat, Claude finishes.
       const $ = (id) => document.getElementById(id);
       const meter = (el, pct, low) => {
         const on = Math.round(pct / 10);
@@ -1250,7 +1250,7 @@
       at(2600, () => say("Fuel is draining. Glug glug."));
       at(3400, () => { setCodexAsking(true); setProject("need", "needs you"); say("Psst. Codex needs you.", true); });
       at(4600, () => say("Claude is at 6%. Swap drivers?", true));
-      // Demo: the user opens CONTINUE ON and chooses the suggested account.
+      // Demo: the user opens Accounts and chooses the suggested account.
       at(5200, () => $("live-continue").classList.add("show"));
       at(6600, () => $("live-continue-btn").classList.add("pressed"));
       at(6900, () => { $("live-continue").classList.remove("show"); setFuel(70, "CLAUDE · PERSONAL"); say("Moved to personal. Same chat."); });

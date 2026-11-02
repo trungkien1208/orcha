@@ -67,21 +67,21 @@ Any terminal works. For the nicest look, use [Ghostty](https://ghostty.org) on m
   </picture>
 </p>
 
-- **Everything in one place.** Your projects and their agents sit in one sidebar. Each agent shows `running`, `needs you` or `done`, so nobody waits in silence.
-- **Never run out mid-task.** The fuel gauge shows how much of each account's plan is left. When it gets low, **CONTINUE ON** moves the chat to another account or another agent, with a short summary so it can pick up where it left off.
+- **Everything in one place.** Your projects and their agents sit in one sidebar. Each agent shows `running`, `needs you`, `done` or `idle`, so nobody waits in silence.
+- **Never run out mid-task.** The fuel gauge shows how much of each account's plan is left. When it gets low, **Accounts** moves the chat to another account or another agent, with a short summary so it can pick up where it left off.
 - **Close it, they keep going.** Quit orcha and your agents keep working. Type `orcha` again to come back. (A restart of your computer does stop them.)
 - **Click to open.** Ctrl+click a file or folder an agent mentions and it opens in your editor or file manager.
 - **Git at a glance.** See your branch and changed files on the side, and open them in your editor or Git app with one click.
 - **Find any action.** Click `⌕ commands` at the top and type what you want: new agent, new branch, ask every agent, open in editor.
-- **Make it yours.** Light and dark themes, colors, layout and an emoji for each project. Open Settings, then `look`.
+- **Make it yours.** Light and dark themes, colors, layout and an emoji for each project. Click `⚙ settings` at the top, then **Look & colors**.
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/orcha/images/continue-on.png" alt="CONTINUE ON: accounts with their fuel, the best next one marked" /></td>
+    <td width="50%"><img src="docs/orcha/images/continue-on.png" alt="Accounts: each account with its fuel, the best next one marked" /></td>
     <td width="50%"><img src="docs/orcha/images/open-with.png" alt="OPEN WITH: pick the app for a file type once" /></td>
   </tr>
   <tr>
-    <td align="center"><sub><b>CONTINUE ON</b> · switch account or agent when one runs low</sub></td>
+    <td align="center"><sub><b>Accounts</b> · switch account or agent when one runs low</sub></td>
     <td align="center"><sub><b>OPEN WITH</b> · pick which app opens each file type</sub></td>
   </tr>
 </table>
@@ -101,7 +101,7 @@ All three run several coding agents at once. They just sit in different places:
 **Coming from herdr?** orcha *is* herdr underneath, so nothing you rely on goes away, and your settings and workspaces come along (herdr itself stays as it is). On top you get what you would otherwise build yourself:
 
 - a ready-made look with projects, live agent status and git on the side
-- fuel gauges for each account's plan, and **CONTINUE ON** to move a chat to another account or agent before one runs dry
+- fuel gauges for each account's plan, and **Accounts** to move a chat to another account or agent before one runs dry
 - one search for every action (`⌕ commands`)
 - a one-line install and `orcha update` on macOS and Windows
 - Easy Job, a whole pixel office for your agents, one `y` away
