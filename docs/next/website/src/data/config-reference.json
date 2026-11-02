@@ -1095,6 +1095,30 @@
           "type": "color",
           "default": "\"cyan\"",
           "description": "Accent color for highlights, borders, and navigation UI. Accepts hex (#89b4fa), named colors (cyan, blue), or RGB (rgb(137,180,250))."
+        },
+        {
+          "key": "ui.status_bar",
+          "type": "boolean",
+          "default": "true",
+          "description": "Show the `tab_bar_right` entries in a full-width status bar at the bottom of the screen instead of in the tab row. Default: true (orcha). Default shown is for the standalone Orcha app."
+        },
+        {
+          "key": "ui.right_panel",
+          "type": "boolean",
+          "default": "true",
+          "description": "Show the git panel (branch, changed files, worktrees of the focused pane's folder) at the right edge. Default: true (orcha). Default shown is for the standalone Orcha app."
+        },
+        {
+          "key": "ui.right_panel_width",
+          "type": "integer",
+          "default": "34",
+          "description": "Width of the right git panel in columns. Default: 34. Default shown is for the standalone Orcha app."
+        },
+        {
+          "key": "ui.sidebar_tree",
+          "type": "boolean",
+          "default": "true",
+          "description": "Show projects and their agents as one tree in the left sidebar instead of separate spaces and agents sections. Default: true (orcha). Default shown is for the standalone Orcha app."
         }
       ]
     },
@@ -1533,6 +1557,162 @@
           "type": "boolean",
           "default": "false",
           "description": "While prefix mode is active, temporarily switch the host input source to an ASCII-capable mode so prefix commands are read as ASCII even when an IME is active, then restore the previous input source when prefix mode exits. On macOS this selects the ASCII-capable keyboard layout; on Windows it switches the IME to English (ASCII) input. Windows support is currently limited to the Korean IME; with an IME for any other language, the input source is left unchanged. macOS and Windows only; a no-op elsewhere and a best-effort no-op if the switch fails."
+        }
+      ]
+    },
+    {
+      "id": "orcha",
+      "title": "Orcha",
+      "keys": [
+        {
+          "key": "orcha.fuel",
+          "type": "string",
+          "default": "panel",
+          "description": "FUEL gauges in the right panel (\"panel\") or the status bar (\"status_bar\").",
+          "values": [
+            "panel",
+            "status_bar"
+          ]
+        },
+        {
+          "key": "orcha.icons",
+          "type": "string",
+          "default": "auto",
+          "description": "Agent logos: \"auto\", \"font\" or \"symbols\".",
+          "values": [
+            "auto",
+            "font",
+            "symbols"
+          ]
+        },
+        {
+          "key": "orcha.process",
+          "type": "string",
+          "default": "sidebar",
+          "description": "PROCESS: \"sidebar\" (default), \"panel\" (the right panel) or \"off\".",
+          "values": [
+            "panel",
+            "sidebar",
+            "off"
+          ]
+        },
+        {
+          "key": "orcha.sidebar_side",
+          "type": "string",
+          "default": "left",
+          "description": "The project sidebar on the \"left\" (default) or the \"right\".",
+          "values": [
+            "left",
+            "right"
+          ]
+        },
+        {
+          "key": "orcha.accounts_command",
+          "type": "string",
+          "default": "",
+          "description": "Command printing the accounts and their plan limits as JSON (`[{id, agent, name, email, current, windows: [{key, left, reset}]}]`). This and the other account commands are empty by default: orcha does it natively. Set one to replace that action with your own script."
+        },
+        {
+          "key": "orcha.switch_command",
+          "type": "string",
+          "default": "",
+          "description": "Continue a pane's chat on another account: `{id}` account, `{pane}` pane."
+        },
+        {
+          "key": "orcha.open_command",
+          "type": "string",
+          "default": "",
+          "description": "Open an account in a new pane continuing its last chat: `{id}`."
+        },
+        {
+          "key": "orcha.login_command",
+          "type": "string",
+          "default": "",
+          "description": "Sign an account in, in a new pane: `{id}`."
+        },
+        {
+          "key": "orcha.add_command",
+          "type": "string",
+          "default": "",
+          "description": "Add a Claude account and sign it in: `{name}` (personal, work, …)."
+        },
+        {
+          "key": "orcha.new_agent_command",
+          "type": "string",
+          "default": "",
+          "description": "Start an account's agent in a new tab: `{id}`, `{workspace}`, `{cwd}`."
+        },
+        {
+          "key": "orcha.handoff_command",
+          "type": "string",
+          "default": "",
+          "description": "Continue `{pane}`'s chat with another agent: `{agent}` and `{mode}` (\"full\" or \"summary\"). Empty (the default): orcha's own hand-off."
+        },
+        {
+          "key": "orcha.ide",
+          "type": "string",
+          "default": "",
+          "description": "Command opening a folder in the IDE; `{path}` is replaced. Empty: detect."
+        },
+        {
+          "key": "orcha.git_gui",
+          "type": "string",
+          "default": "",
+          "description": "Command opening a folder in the Git GUI; `{path}` is replaced. Empty: detect."
+        },
+        {
+          "key": "orcha.pane_paper",
+          "type": "boolean",
+          "default": "true",
+          "description": "Paint pane cells that use the terminal's default colors with the style's pane colors (white panes in Brutal light). Default: true."
+        },
+        {
+          "key": "orcha.low_fuel_percent",
+          "type": "integer",
+          "default": "10",
+          "description": "Under this % left of a plan window, offer to switch accounts. Default: 10."
+        },
+        {
+          "key": "orcha.checklist_percent",
+          "type": "integer",
+          "default": "0",
+          "description": "Under this % left, ask the focused agent (between turns) to write a hand-off checklist to `checklist_file`. 0 (the default): never."
+        },
+        {
+          "key": "orcha.checklist_file",
+          "type": "string",
+          "default": ".orcha/handoff.md",
+          "description": "Where that checklist goes, relative to the project. A hand-off points the next agent at it."
+        },
+        {
+          "key": "orcha.auto_handoff_percent",
+          "type": "integer",
+          "default": "0",
+          "description": "Under this % left, move the focused chat (between turns) to the best other account without asking. 0 (the default): only offer."
+        },
+        {
+          "key": "orcha.switch_mode",
+          "type": "string",
+          "default": "ask",
+          "description": "How a chat moves to another account of the same agent.",
+          "values": [
+            "ask",
+            "keep",
+            "restart",
+            "new_pane"
+          ]
+        },
+        {
+          "key": "orcha.update_plugins",
+          "type": "boolean",
+          "default": "false",
+          "description": "Install new versions of GitHub plugins as soon as the daily check finds them, without asking. Default: false (Orcha asks first)."
+        },
+        {
+          "key": "orcha.open_with",
+          "type": "table",
+          "default": "{}",
+          "description": "How a Ctrl+clicked file opens, by lowercase extension (`[orcha.open_with]`): \"system\", \"folder\", \"editor\" or \"editor:<command>\". Others ask."
         }
       ]
     }

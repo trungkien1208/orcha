@@ -4,14 +4,21 @@
 //! Folders are listed on a background thread when the section opens, when a
 //! folder is opened and every few seconds while the section stays open;
 //! rendering only reads the last listing. Files git ignores are left out.
+//! A folder whose modified time stands still is not listed again until
+//! `RELIST` passes (what git ignores can change without touching it).
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 const REFRESH: Duration = Duration::from_secs(5);
+/// The longest a listing stands on an unchanged folder.
+const RELIST: Duration = Duration::from_secs(30);
+/// A folder modified this close before its listing may have changed again
+/// within the same tick of a coarse clock: it is listed again.
+const RACY: Duration = Duration::from_secs(2);
 /// Entries listed per folder; the rest are summed up in one row.
 const MAX_ENTRIES: usize = 500;
 
@@ -33,18 +40,48 @@ pub(super) struct TreeRow {
 
 type Listings = HashMap<PathBuf, Vec<Entry>>;
 
+/// A folder's modified time when it was listed, and when that was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    modified: SystemTime,
+    listed: SystemTime,
+}
+
+impl Stamp {
+    /// The listing still holds at `now` for a folder modified at `modified`.
+    fn holds(&self, modified: SystemTime, now: SystemTime) -> bool {
+        self.modified == modified
+            && self
+                .listed
+                .duration_since(modified)
+                .is_ok_and(|gap| gap >= RACY)
+            && now
+                .duration_since(self.listed)
+                .is_ok_and(|age| age < RELIST)
+    }
+}
+
+/// A finished listing: each folder read again, with its new stamp.
+/// Folders left out still hold.
+type Relisted = Vec<(PathBuf, Vec<Entry>, Option<Stamp>)>;
+
 #[derive(Default)]
 pub(super) struct FileTree {
     root: Option<PathBuf>,
     /// Opened folders under `root`.
     open: BTreeSet<PathBuf>,
     listings: Listings,
+    stamps: HashMap<PathBuf, Stamp>,
     rows: Vec<TreeRow>,
-    pending: Option<(PathBuf, Receiver<Listings>)>,
+    pending: Option<(PathBuf, Receiver<Relisted>)>,
     next_refresh: Option<Instant>,
 }
 
 impl FileTree {
+    pub(super) fn has_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
     pub(super) fn rows(&self) -> &[TreeRow] {
         &self.rows
     }
@@ -62,15 +99,22 @@ impl FileTree {
             self.root = root.map(Path::to_path_buf);
             self.open.clear();
             self.listings.clear();
+            self.stamps.clear();
             self.pending = None;
             self.next_refresh = None;
             changed |= self.rebuild();
         }
         if let Some((for_root, rx)) = &self.pending {
             match rx.try_recv() {
-                Ok(listings) => {
-                    if Some(for_root) == self.root.as_ref() {
-                        self.listings.extend(listings);
+                Ok(relisted) => {
+                    if Some(for_root) == self.root.as_ref() && !relisted.is_empty() {
+                        for (folder, entries, stamp) in relisted {
+                            match stamp {
+                                Some(stamp) => self.stamps.insert(folder.clone(), stamp),
+                                None => self.stamps.remove(&folder),
+                            };
+                            self.listings.insert(folder, entries);
+                        }
                         changed |= self.rebuild();
                     }
                     self.pending = None;
@@ -83,18 +127,21 @@ impl FileTree {
         let due = self.next_refresh.is_none_or(|at| now >= at);
         if wanted && due && self.pending.is_none() {
             if let Some(root) = self.root.clone() {
-                let mut folders = vec![root.clone()];
-                folders.extend(self.open.iter().cloned());
+                // a folder not listed yet has no stamp and is read for sure
+                let folders: Vec<(PathBuf, Option<Stamp>)> = std::iter::once(&root)
+                    .chain(self.open.iter())
+                    .map(|folder| {
+                        let stamp = self
+                            .listings
+                            .contains_key(folder)
+                            .then(|| self.stamps.get(folder).copied())
+                            .flatten();
+                        (folder.clone(), stamp)
+                    })
+                    .collect();
                 let (tx, rx) = mpsc::channel();
                 let spawned = crate::thread_spawn::spawn_named("orcha-file-tree", move || {
-                    let listings = folders
-                        .into_iter()
-                        .map(|folder| {
-                            let entries = list_folder(&folder);
-                            (folder, entries)
-                        })
-                        .collect();
-                    let _ = tx.send(listings);
+                    let _ = tx.send(relist(folders));
                 });
                 if spawned.is_ok() {
                     self.pending = Some((root, rx));
@@ -162,6 +209,30 @@ fn push_rows(
     }
 }
 
+/// Lists the folders again, but not one whose stamp still holds.
+fn relist(folders: Vec<(PathBuf, Option<Stamp>)>) -> Relisted {
+    folders
+        .into_iter()
+        .filter_map(|(folder, stamp)| {
+            let now = SystemTime::now();
+            let modified = std::fs::metadata(&folder)
+                .and_then(|meta| meta.modified())
+                .ok();
+            if let (Some(stamp), Some(modified)) = (stamp, modified) {
+                if stamp.holds(modified, now) {
+                    return None;
+                }
+            }
+            let entries = list_folder(&folder);
+            let stamp = modified.map(|modified| Stamp {
+                modified,
+                listed: now,
+            });
+            Some((folder, entries, stamp))
+        })
+        .collect()
+}
+
 /// The folder's entries, folders first, without `.git` and what git ignores.
 fn list_folder(folder: &Path) -> Vec<Entry> {
     let Ok(read) = std::fs::read_dir(folder) else {
@@ -174,8 +245,12 @@ fn list_folder(folder: &Path) -> Vec<Entry> {
             if name == ".git" || name == ".DS_Store" {
                 return None;
             }
-            // a link to a folder opens like a folder
-            let is_dir = std::fs::metadata(entry.path()).is_ok_and(|meta| meta.is_dir());
+            // the listing already knows the type; a link to a folder opens
+            // like a folder, so only a link is followed
+            let is_dir = match entry.file_type() {
+                Ok(kind) if !kind.is_symlink() => kind.is_dir(),
+                _ => std::fs::metadata(entry.path()).is_ok_and(|meta| meta.is_dir()),
+            };
             Some(Entry { name, is_dir })
         })
         .collect();
@@ -291,6 +366,48 @@ mod tests {
         );
         tree.toggle(&src);
         assert_eq!(tree.rows().len(), 3);
+    }
+
+    #[test]
+    fn a_listing_holds_while_the_folder_stands_still() {
+        let changed = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+        let stamp = Stamp {
+            modified: changed,
+            listed: changed + RACY,
+        };
+        let later = |secs| stamp.listed + Duration::from_secs(secs);
+        assert!(stamp.holds(changed, later(1)));
+        assert!(
+            !stamp.holds(changed + Duration::from_secs(1), later(1)),
+            "modified since"
+        );
+        assert!(
+            !stamp.holds(changed, later(RELIST.as_secs())),
+            "listed too long ago"
+        );
+        let racy = Stamp {
+            modified: changed,
+            listed: changed + Duration::from_millis(500),
+        };
+        assert!(
+            !racy.holds(changed, later(1)),
+            "listed right after a change: a coarse clock may hide the next one"
+        );
+    }
+
+    #[test]
+    fn a_folder_not_listed_yet_is_listed() {
+        let root = std::env::temp_dir().join(format!("orcha-relist-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).expect("create src");
+        std::fs::write(root.join("a.txt"), "a").expect("write file");
+        let relisted = relist(vec![(root.clone(), None)]);
+        assert_eq!(relisted.len(), 1);
+        let (folder, entries, stamp) = &relisted[0];
+        assert_eq!(folder, &root);
+        assert_eq!(entries, &[entry("src", true), entry("a.txt", false)]);
+        assert!(stamp.is_some());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

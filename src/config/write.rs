@@ -121,6 +121,8 @@ pub(crate) fn update_file_at(
     description: &str,
     update: impl FnOnce(&str) -> Result<String, String>,
 ) -> Result<(), String> {
+    let _lock = crate::orcha_app::lock_for_update(path)
+        .map_err(|error| format!("failed to lock config before saving {description}: {error}"))?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("failed to create config directory: {error}"))?;
@@ -135,7 +137,8 @@ pub(crate) fn update_file_at(
         }
     };
     let updated = update(&content)?;
-    std::fs::write(path, updated).map_err(|error| format!("failed to save {description}: {error}"))
+    crate::orcha_app::write_atomic(path, &updated)
+        .map_err(|error| format!("failed to save {description}: {error}"))
 }
 
 pub(crate) fn write_edit(edit: ConfigEdit<'_>) -> Result<(), String> {
@@ -147,6 +150,36 @@ pub(crate) fn write_edit(edit: ConfigEdit<'_>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_config_edits_keep_each_writers_change() {
+        let dir =
+            std::env::temp_dir().join(format!("orcha-config-concurrent-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let _ = std::fs::remove_file(&path);
+        let barrier = std::sync::Barrier::new(8);
+        std::thread::scope(|scope| {
+            for index in 0..8 {
+                let path = &path;
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    barrier.wait();
+                    update_file_at(path, "test setting", |current| {
+                        Ok(format!("{current}key{index} = true\n"))
+                    })
+                    .expect("concurrent edit");
+                });
+            }
+        });
+        let text = std::fs::read_to_string(&path).unwrap();
+        let parsed: toml::Value = toml::from_str(&text).unwrap();
+        assert_eq!(parsed.as_table().unwrap().len(), 8);
+        for index in 0..8 {
+            assert_eq!(parsed[format!("key{index}")].as_bool(), Some(true));
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn look_edits_write_their_keys_and_the_theme_accent_removes_the_override() {

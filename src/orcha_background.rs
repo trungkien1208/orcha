@@ -2,14 +2,57 @@
 //! agents, plugin servers and Easy Job. `orcha status` prints it and the
 //! settings page shows it with a Stop for each.
 
+use std::time::Duration;
+
 use serde_json::{json, Value};
 
+use crate::api::client::{ApiClient, ConnectionTarget};
+use crate::api::schema::{EmptyParams, Method, PingParams, Request};
+
+/// A stalled server must not hold the settings page's poll for long: the
+/// page's one server answers every request in turn.
+const CALL_TIMEOUT: Duration = Duration::from_millis(1500);
+
+/// One socket method's `result`, asked over this session's API socket. The
+/// settings page polls `snapshot` every few seconds, so this talks to the
+/// socket directly instead of starting an `orcha api call` process per method.
+fn call(name: &str, method: Method) -> Option<Value> {
+    let client = ApiClient::for_target(ConnectionTarget::SocketPath(
+        crate::session::active_api_socket_path(),
+    ));
+    let request = Request {
+        id: format!("orcha:background:{name}"),
+        method,
+    };
+    let mut response = client
+        .request_value_with_timeout(&request, CALL_TIMEOUT)
+        .ok()?;
+    Some(response.get_mut("result")?.take())
+}
+
 /// Everything running in the background, as the settings page reads it.
-/// Blocking (a few API calls): call it off the input path.
+/// Blocking (a few API calls, asked at once, so CALL_TIMEOUT at most):
+/// call it off the input path.
 pub(crate) fn snapshot() -> Value {
-    let call = |method: &str| crate::orcha_handoff::herdr_json(&["api", "call", method]);
-    let server = call("ping");
-    let agents: Vec<Value> = call("agent.list")
+    let (server, agents, listed, office) = std::thread::scope(|scope| {
+        let server = scope.spawn(|| call("ping", Method::Ping(PingParams::default())));
+        let agents = scope.spawn(|| call("agent.list", Method::AgentList(EmptyParams::default())));
+        let listed = scope.spawn(|| {
+            call(
+                "plugin.pane.list",
+                Method::PluginPaneList(EmptyParams::default()),
+            )
+        });
+        let office = crate::orcha_office::summary();
+        // a call that panicked reads as no answer
+        (
+            server.join().ok().flatten(),
+            agents.join().ok().flatten(),
+            listed.join().ok().flatten(),
+            office,
+        )
+    });
+    let agents: Vec<Value> = agents
         .and_then(|result| result.get("agents").cloned())
         .and_then(|agents| agents.as_array().cloned())
         .unwrap_or_default()
@@ -28,7 +71,7 @@ pub(crate) fn snapshot() -> Value {
             })
         })
         .collect();
-    let plugin_panes: Vec<Value> = call("plugin.pane.list")
+    let plugin_panes: Vec<Value> = listed
         .and_then(|result| result.get("plugin_panes").cloned())
         .and_then(|panes| panes.as_array().cloned())
         .unwrap_or_default()
@@ -46,7 +89,7 @@ pub(crate) fn snapshot() -> Value {
     let office_in_pane = plugin_panes
         .iter()
         .any(|pane| pane["plugin_id"] == crate::orcha_office::PLUGIN_ID);
-    let office = crate::orcha_office::summary().filter(|_| !office_in_pane);
+    let office = office.filter(|_| !office_in_pane);
     json!({
         "server": {
             "running": server.is_some(),

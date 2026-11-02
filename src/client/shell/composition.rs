@@ -551,6 +551,7 @@ impl ClientShellState {
             occlusion.cover(self.hits.notification_toast);
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
         }
+        self.hits.notice = Rect::default();
         if let Some(feedback) = self.copy_feedback.as_ref() {
             let cursor = frame.cursor.clone();
             let mut composed = frame.to_ratatui_buffer()?;
@@ -567,14 +568,16 @@ impl ClientShellState {
                 self.config.clipboard_toast_position,
                 self.hits.notification_toast,
             );
-            occlusion.cover(crate::ui::render_copy_feedback_buffer(
+            let notice = crate::ui::render_copy_feedback_buffer(
                 &mut composed,
                 feedback_area,
                 feedback,
                 offset,
                 self.config.clipboard_toast_position,
                 &self.config.palette,
-            ));
+            );
+            occlusion.cover(notice);
+            self.hits.notice = notice;
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
         }
         self.hits.popup = None;
@@ -675,6 +678,7 @@ impl ClientShellState {
                     self.hits.global_launcher,
                     menu,
                     snapshot,
+                    self.orcha_ui.menu_news(),
                     &self.config.palette,
                 )?;
                 occlusion.cover(rendered.area);

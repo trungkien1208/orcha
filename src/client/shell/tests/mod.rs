@@ -261,6 +261,8 @@ mod keybindings_settings;
 mod link_hover;
 mod mobile;
 mod mouse_selection;
+mod orcha_chrome;
+mod orcha_flows;
 mod orcha_layout;
 mod popup_focus_projection;
 mod startup_overlays;

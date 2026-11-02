@@ -214,7 +214,10 @@ pub(super) fn account_env(
             ));
         }
     }
-    crate::orcha_accounts::prepare_folder(account);
+    if let Err(err) = crate::orcha_accounts::prepare_folder(account) {
+        // the agent still starts on the account, without the shared history
+        tracing::warn!(account = %account.id, %err, "orcha: could not prepare the account folder");
+    }
     let mut env = std::collections::HashMap::new();
     if let Some(dir) = account.dir.clone().filter(|_| account.kind == "claude") {
         env.insert("CLAUDE_CONFIG_DIR".to_string(), dir);

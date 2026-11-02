@@ -155,6 +155,10 @@ pub struct App {
     tab_bar_datetimes: Vec<tab_bar_status::TabBarDatetimeRuntime>,
     tab_bar_commands: Vec<tab_bar_status::TabBarCommandRuntime>,
     next_tab_bar_datetime_refresh: Option<Instant>,
+    tab_bar_status_placement: tab_bar_status::TabBarStatusPlacement,
+    /// The last scheduler tick found an attached client showing the tab bar
+    /// commands' output (`App::tab_bar_status_shown`).
+    tab_bar_status_active: bool,
     /// Parsed `ui.window_title` plus the hostname resolved when it was applied.
     window_title_template: Option<(crate::config::WindowTitleTemplate, String)>,
     pub(crate) persist_pane_history: bool,
@@ -687,6 +691,8 @@ impl App {
             tab_bar_datetimes: Vec::new(),
             tab_bar_commands: Vec::new(),
             next_tab_bar_datetime_refresh: None,
+            tab_bar_status_placement: tab_bar_status::TabBarStatusPlacement::from_config(config),
+            tab_bar_status_active: false,
             window_title_template: None,
             persist_pane_history: config.experimental.pane_history,
             last_render_at: None,
@@ -936,6 +942,8 @@ impl App {
                     &config.ui.tab_bar_right,
                     &config.ui.tab_bar_right_separator,
                 );
+                self.tab_bar_status_placement =
+                    tab_bar_status::TabBarStatusPlacement::from_config(config);
                 self.configure_window_title(&config.ui.window_title);
                 self.state.agent_panel_sort =
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);

@@ -16,6 +16,28 @@ const DATETIME_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_COMMAND_LINE_BYTES: usize = 4096;
 const MAX_STATUS_TEXT_CHARS: usize = 80;
 
+/// Where clients draw the `tab_bar_right` entries, mirrored from the `[ui]`
+/// settings they share with the server (as `state.sidebar_tree` is for Git
+/// refresh), so `command` items only run while some client can show them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TabBarStatusPlacement {
+    /// `ui.status_bar`: a full-width status bar shows the entries in every
+    /// desktop layout, with or without the tree sidebar.
+    pub(crate) status_bar: bool,
+    /// `ui.hide_tab_bar_when_single_tab`: without the status bar the entries
+    /// sit at the right end of the tab row, which this hides for one tab.
+    pub(crate) hide_single_tab_bar: bool,
+}
+
+impl TabBarStatusPlacement {
+    pub(crate) fn from_config(config: &crate::config::Config) -> Self {
+        Self {
+            status_bar: config.ui.status_bar,
+            hide_single_tab_bar: config.ui.hide_tab_bar_when_single_tab,
+        }
+    }
+}
+
 pub(super) struct TabBarDatetimeRuntime {
     segment_index: usize,
     format: time::format_description::OwnedFormatItem,
@@ -122,8 +144,45 @@ impl App {
             (!self.tab_bar_datetimes.is_empty()).then_some(now + DATETIME_REFRESH_INTERVAL);
     }
 
-    pub(crate) fn handle_tab_bar_status_tasks(&mut self, now: std::time::Instant) -> bool {
+    /// Whether some attached client draws `tab_bar_right`, which is what makes
+    /// its `command` items worth running. The rule follows what clients render:
+    ///
+    /// - Only same-install TUI clients receive the entries (endpoint snapshots
+    ///   leave them empty), so with none attached nothing shows them.
+    /// - With `ui.status_bar` the status bar shows them in every desktop
+    ///   layout. Orcha's tree sidebar (`ui.sidebar_tree`) does not change that:
+    ///   its status bar is where a `header` command's text appears.
+    /// - Otherwise they sit at the right end of the tab row, hidden with it
+    ///   under `ui.hide_tab_bar_when_single_tab`. Clients' focused spaces are
+    ///   not tracked here, so any space with two tabs counts as showing it.
+    ///
+    /// Mobile-width clients draw neither row; the server does not track client
+    /// widths, so such a client still counts.
+    pub(crate) fn tab_bar_status_shown(&self, client_attached: bool) -> bool {
+        let placement = self.tab_bar_status_placement;
+        client_attached
+            && (placement.status_bar
+                || !placement.hide_single_tab_bar
+                || self
+                    .state
+                    .workspaces
+                    .iter()
+                    .any(|workspace| workspace.tabs.len() > 1))
+    }
+
+    /// Refreshes the clock entries and starts due `command` items. Commands
+    /// start only while `tab_bar_status_shown(client_attached)`; one that came
+    /// due meanwhile runs on the first tick a client shows the entries again.
+    pub(crate) fn handle_tab_bar_status_tasks(
+        &mut self,
+        now: std::time::Instant,
+        client_attached: bool,
+    ) -> bool {
         let mut changed = false;
+        self.tab_bar_status_active = self.tab_bar_status_shown(client_attached);
+        if !self.tab_bar_status_active {
+            return false;
+        }
 
         if self
             .next_tab_bar_datetime_refresh
@@ -170,12 +229,18 @@ impl App {
         changed
     }
 
+    /// The next clock refresh or command run. Commands count only while the
+    /// last tick found a client showing them, so a waiting command does not
+    /// keep waking the loop.
     pub(crate) fn next_tab_bar_status_deadline(&self) -> Option<std::time::Instant> {
         self.tab_bar_commands
             .iter()
-            .filter(|runtime| runtime.task.is_none())
+            .filter(|runtime| self.tab_bar_status_active && runtime.task.is_none())
             .map(|runtime| runtime.next_run_at)
-            .chain(self.next_tab_bar_datetime_refresh)
+            .chain(
+                self.next_tab_bar_datetime_refresh
+                    .filter(|_| self.tab_bar_status_active),
+            )
             .min()
     }
 
@@ -521,9 +586,13 @@ mod tests {
     use crate::{config::Config, events::AppEvent};
 
     fn test_app() -> App {
+        test_app_with(&Config::default())
+    }
+
+    fn test_app_with(config: &Config) -> App {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         App::new(
-            &Config::default(),
+            config,
             crate::app::AppPolicy::TEST,
             None,
             api_rx,
@@ -639,6 +708,98 @@ mod tests {
     }
 
     #[test]
+    fn tab_bar_status_shown_matches_client_layouts() {
+        // (case, client attached, sidebar_tree, status_bar,
+        //  hide_tab_bar_when_single_tab, tabs, shown)
+        let cases = [
+            ("headless", false, true, true, false, 2, false),
+            ("orcha status bar", true, true, true, false, 1, true),
+            ("status bar, 1 tab", true, true, true, true, 1, true),
+            ("tree, tab row", true, true, false, false, 1, true),
+            ("plain tab row", true, false, false, false, 1, true),
+            ("hidden tab row", true, false, false, true, 1, false),
+            ("tab row, 2 tabs", true, false, false, true, 2, true),
+        ];
+
+        for (case, attached, sidebar_tree, status_bar, hide, tabs, shown) in cases {
+            let mut config = Config::default();
+            config.ui.sidebar_tree = sidebar_tree;
+            config.ui.status_bar = status_bar;
+            config.ui.hide_tab_bar_when_single_tab = hide;
+            let mut app = test_app_with(&config);
+            let mut workspace = crate::workspace::Workspace::test_new("test");
+            for _ in 1..tabs {
+                workspace.test_add_tab(None);
+            }
+            app.state.workspaces = vec![workspace];
+
+            assert_eq!(app.tab_bar_status_shown(attached), shown, "{case}");
+        }
+    }
+
+    #[tokio::test]
+    async fn tab_bar_commands_run_only_while_a_client_shows_them() {
+        if !crate::platform::status_commands_supported() {
+            return;
+        }
+        let mut config = Config::default();
+        config.ui.status_bar = false;
+        config.ui.hide_tab_bar_when_single_tab = true;
+        let mut app = test_app_with(&config);
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("test")];
+        app.configure_tab_bar_status(
+            &[TabBarRightEntryConfig::Command {
+                command: MULTILINE_COMMAND.into(),
+                interval_seconds: 5,
+                timeout_seconds: 2,
+            }],
+            " ",
+        );
+        let now = std::time::Instant::now();
+
+        // No client attached: nothing spawns and nothing wakes the loop for it.
+        app.handle_tab_bar_status_tasks(now, false);
+        assert!(app.tab_bar_commands[0].task.is_none());
+        assert_eq!(app.next_tab_bar_status_deadline(), None);
+
+        // A client whose tab row is hidden for one tab shows nothing either.
+        app.handle_tab_bar_status_tasks(now, true);
+        assert!(app.tab_bar_commands[0].task.is_none());
+        assert_eq!(app.next_tab_bar_status_deadline(), None);
+
+        // Once a client shows the entries, the overdue command runs at once.
+        app.state.workspaces[0].test_add_tab(None);
+        app.handle_tab_bar_status_tasks(now + Duration::from_secs(60), true);
+        assert!(app.tab_bar_commands[0].task.is_some());
+        let event = tokio::time::timeout(Duration::from_secs(3), app.event_rx.recv())
+            .await
+            .expect("status command timed out")
+            .expect("status command event channel closed");
+        assert!(matches!(
+            event,
+            AppEvent::TabBarCommandFinished {
+                result: Ok(Some(ref output)),
+                ..
+            } if output == "final"
+        ));
+    }
+
+    #[test]
+    fn config_reload_moves_tab_bar_commands_with_the_status_bar() {
+        let mut config = Config::default();
+        config.ui.status_bar = true;
+        config.ui.hide_tab_bar_when_single_tab = true;
+        let mut app = test_app_with(&config);
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("test")];
+        assert!(app.tab_bar_status_shown(true));
+
+        config.ui.status_bar = false;
+        app.apply_live_config(&config, &[], &[], false);
+
+        assert!(!app.tab_bar_status_shown(true));
+    }
+
+    #[test]
     fn stale_command_result_does_not_replace_reloaded_status() {
         let mut app = test_app();
         app.configure_tab_bar_status(
@@ -684,7 +845,7 @@ mod tests {
             }],
             " ",
         );
-        app.handle_tab_bar_status_tasks(std::time::Instant::now());
+        app.handle_tab_bar_status_tasks(std::time::Instant::now(), true);
         for _ in 0..50 {
             if descendant_started.exists() {
                 break;
@@ -732,11 +893,17 @@ mod tests {
         );
 
         let now = std::time::Instant::now();
-        assert!(app.next_tab_bar_status_deadline().is_some());
-        app.handle_tab_bar_status_tasks(now);
+        app.handle_tab_bar_status_tasks(now, true);
 
         assert!(app.tab_bar_commands[0].task.is_some());
         assert_eq!(app.next_tab_bar_status_deadline(), None);
+
+        let generation = app.tab_bar_status_generation;
+        app.handle_tab_bar_command_finished(generation, 0, Ok(Some("done".into())));
+        assert_eq!(
+            app.next_tab_bar_status_deadline(),
+            Some(now + Duration::from_secs(5))
+        );
     }
 
     #[test]
@@ -753,12 +920,34 @@ mod tests {
             .next_tab_bar_datetime_refresh
             .expect("datetime refresh deadline");
 
-        assert!(app.handle_tab_bar_status_tasks(deadline));
+        assert!(app.handle_tab_bar_status_tasks(deadline, true));
         assert!(matches!(
             &app.state.tab_bar_right[0],
             TabBarStatusSegment::Text(Some(value)) if !value.is_empty()
         ));
-        assert!(!app.handle_tab_bar_status_tasks(deadline));
+        assert!(!app.handle_tab_bar_status_tasks(deadline, true));
+    }
+
+    #[test]
+    fn hidden_clock_entries_do_not_wake_or_dirty_the_server() {
+        let mut app = test_app();
+        app.configure_tab_bar_status(
+            &[TabBarRightEntryConfig::Datetime {
+                format: "%Y-%m-%d %H:%M:%S".into(),
+            }],
+            " ",
+        );
+        app.state.tab_bar_right[0] = TabBarStatusSegment::Text(None);
+        let due = app.next_tab_bar_datetime_refresh.expect("clock deadline");
+        assert!(!app.handle_tab_bar_status_tasks(due, false));
+        assert_eq!(app.next_tab_bar_status_deadline(), None);
+        assert!(matches!(
+            app.state.tab_bar_right[0],
+            TabBarStatusSegment::Text(None)
+        ));
+        // Reattaching refreshes the overdue clock immediately.
+        assert!(app.handle_tab_bar_status_tasks(due + Duration::from_secs(60), true));
+        assert!(app.next_tab_bar_status_deadline().is_some());
     }
 
     #[test]

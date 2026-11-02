@@ -924,7 +924,8 @@ fn mobile_items(
     }
 
     items.push(MobileItem::section("menu", palette));
-    for (index, (label, _)) in super::global_menu::global_menu_items(snapshot)
+    // orcha's own news items stay in the desktop menu
+    for (index, (label, _)) in super::global_menu::global_menu_items(snapshot, Default::default())
         .into_iter()
         .enumerate()
     {
@@ -1069,17 +1070,18 @@ impl ClientShellState {
                 );
             }
             Some(ClientMobileTarget::Menu(index)) => {
-                let actionable = self.snapshot.as_deref().is_some_and(|snapshot| {
-                    super::global_menu::global_menu_items(snapshot)
+                let action = self.snapshot.as_deref().and_then(|snapshot| {
+                    super::global_menu::global_menu_items(snapshot, Default::default())
                         .get(index)
-                        .is_some_and(|(_, action)| {
+                        .map(|(_, action)| *action)
+                        .filter(|action| {
                             *action != super::global_menu::ClientGlobalMenuAction::WhatsNew
                                 || snapshot.release_notes.is_some()
                         })
                 });
-                if actionable {
+                if let Some(action) = action {
                     self.mobile_switcher_suspended = true;
-                    self.activate_global_menu_item(index, outcome);
+                    self.activate_global_menu_action(action, outcome);
                 }
             }
             None => {}

@@ -60,7 +60,10 @@ fn target(
             format!("{account_id} is a {} account", account.kind),
         ));
     }
-    crate::orcha_accounts::prepare_folder(account);
+    if let Err(err) = crate::orcha_accounts::prepare_folder(account) {
+        // the agent still starts on the account, without the shared history
+        tracing::warn!(account = %account.id, %err, "orcha: could not prepare the account folder");
+    }
     Ok((account.kind.clone(), account.dir.clone()))
 }
 

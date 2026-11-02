@@ -1,3 +1,4 @@
+use super::background_job::BackgroundJob;
 use super::*;
 
 pub(super) const MIN_TAB_WIDTH: u16 = 8;
@@ -159,18 +160,15 @@ pub(crate) struct OrchaUiState {
     /// The project orcha was started in was opened (or found open) already.
     pub(super) launch_project_done: bool,
     /// Projects other tools know about, being looked up off the input path.
-    pub(super) import_scan:
-        Option<std::sync::mpsc::Receiver<Vec<crate::orcha_import::ImportSource>>>,
+    pub(super) import_scan: Option<BackgroundJob<Vec<crate::orcha_import::ImportSource>>>,
     /// A newer orcha release (being looked up, then its version).
-    pub(super) update_check: Option<std::sync::mpsc::Receiver<Option<crate::orcha_app::Release>>>,
+    pub(super) update_check: Option<BackgroundJob<Option<crate::orcha_app::Release>>>,
     /// The "what's new" of this build, looked up after an update.
-    pub(super) whats_new_check:
-        Option<std::sync::mpsc::Receiver<Option<crate::orcha_app::Release>>>,
+    pub(super) whats_new_check: Option<BackgroundJob<Option<crate::orcha_app::Release>>>,
     /// Looking for a plugin to offer, off the input path.
-    pub(super) plugin_offer_check:
-        Option<std::sync::mpsc::Receiver<Option<crate::orcha_app::OfferedPlugin>>>,
+    pub(super) plugin_offer_check: Option<BackgroundJob<Option<crate::orcha_app::OfferedPlugin>>>,
     /// Installing an offered plugin: its id and name, then the error line.
-    pub(super) plugin_add_run: Option<std::sync::mpsc::Receiver<PluginAddResult>>,
+    pub(super) plugin_add_run: Option<BackgroundJob<PluginAddResult>>,
     /// A plugin offer waiting for the screen to be free of other popups.
     pub(super) plugin_offer: Option<crate::orcha_app::OfferedPlugin>,
     /// A "what's new" waiting for the screen to be free of other popups.
@@ -178,21 +176,20 @@ pub(crate) struct OrchaUiState {
     pub(super) update_available: Option<String>,
     /// GitHub plugins and whether a newer version is out (checked with
     /// Orcha's own release, at most daily).
-    pub(super) plugin_update_check:
-        Option<std::sync::mpsc::Receiver<crate::orcha_plugin_updates::PluginNews>>,
+    pub(super) plugin_update_check: Option<BackgroundJob<crate::orcha_plugin_updates::PluginNews>>,
     pub(super) plugin_updates: Vec<crate::orcha_plugin_updates::PluginUpdate>,
     /// Easy Job in the header: None when not added, else whether it runs.
     pub(super) office: Option<bool>,
-    pub(super) office_check: Option<std::sync::mpsc::Receiver<Option<bool>>>,
+    pub(super) office_check: Option<BackgroundJob<Option<bool>>>,
     pub(super) office_checked_at: Option<std::time::Instant>,
     /// A plugin update to announce once the screen is free.
     pub(super) plugin_update_notice: Option<(crate::orcha_plugin_updates::PluginUpdate, String)>,
-    /// A plugin removal running; its message for the notice.
-    pub(super) plugin_remove_run: Option<std::sync::mpsc::Receiver<String>>,
+    /// A plugin removal running; what to tell the user, or what went wrong.
+    pub(super) plugin_remove_run: Option<BackgroundJob<Result<String, String>>>,
     /// A plugin update running: the plugin's name and its new version or log.
-    pub(super) plugin_update_run: Option<std::sync::mpsc::Receiver<PluginUpdateResult>>,
+    pub(super) plugin_update_run: Option<BackgroundJob<PluginUpdateResult>>,
     /// `orcha update` running behind the UI; true when it worked.
-    pub(super) update_run: Option<std::sync::mpsc::Receiver<bool>>,
+    pub(super) update_run: Option<BackgroundJob<bool>>,
     /// The header's update button text, while there is one.
     pub(super) update_note: Option<String>,
     /// Project icons by folder (`orcha_icons::key`).
@@ -201,12 +198,10 @@ pub(crate) struct OrchaUiState {
     pub(super) imported_folders: HashSet<String>,
     /// What the import popup offers.
     pub(super) import_sources: Vec<crate::orcha_import::ImportSource>,
-    /// Claude sign-ins on this machine orcha does not list, being looked up
-    /// (true when asked for, false for the look once per start).
-    pub(super) account_scan: Option<(
-        std::sync::mpsc::Receiver<Vec<crate::orcha_accounts::FoundAccount>>,
-        bool,
-    )>,
+    /// Claude sign-ins on this machine orcha does not list, being looked up,
+    /// and whether they were asked for (else the quiet look once per start).
+    pub(super) account_scan:
+        Option<BackgroundJob<(Vec<crate::orcha_accounts::FoundAccount>, bool)>>,
     pub(super) account_scan_started: bool,
     /// What FOUND ACCOUNTS offers; kept until the screen is free of popups.
     pub(super) found_accounts: Vec<crate::orcha_accounts::FoundAccount>,
@@ -232,9 +227,19 @@ pub(crate) struct OrchaUiState {
     /// The open orcha popup (accounts, hand off).
     pub(super) popup: Option<super::orcha_popup::OrchaPopup>,
     /// An account action (switch, sign in, open, add, new agent) under way.
-    pub(super) account_run: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
+    pub(super) account_run: Option<BackgroundJob<Result<String, String>>>,
     /// A hand-off building its notes and opening the new agent.
-    pub(super) handoff_run: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
+    pub(super) handoff_run: Option<BackgroundJob<Result<String, String>>>,
+    /// The HAND OFF popup was opened from the accounts popup (esc goes back).
+    pub(super) handoff_from_accounts: bool,
+    /// Jobs whose outcome is only a notice (open the settings page, write
+    /// project rules, type a prompt): Ok says what happened, Err what went
+    /// wrong.
+    pub(super) notice_jobs: Vec<(&'static str, BackgroundJob<Result<String, String>>)>,
+    /// The accounts new agents start on by default (one per kind, from the
+    /// settings), as last looked up.
+    pub(super) default_accounts: Vec<String>,
+    pub(super) default_accounts_job: Option<BackgroundJob<Vec<String>>>,
     /// The header's low-fuel offer, when the current account runs low.
     pub(super) low_fuel_hint: Option<String>,
     /// Accounts the CONTINUE ON popup was already offered for (once each).
@@ -252,6 +257,46 @@ pub(crate) struct OrchaUiState {
     pub(super) welcome_integrations: Option<Vec<crate::api::schema::IntegrationInfo>>,
     /// WELCOME: the theme kept so far, put back when the setup is skipped.
     pub(super) welcome_theme: Option<(String, Palette)>,
+}
+
+impl OrchaUiState {
+    /// A project shows its agents in the sidebar: it is selected or was
+    /// opened by hand, and was not folded on purpose.
+    pub(super) fn project_expanded(&self, id: &str, focused: bool) -> bool {
+        !self.folded_projects.contains(id) && (focused || self.open_projects.contains(id))
+    }
+
+    /// Opens or folds a project in the sidebar, on purpose (kept across
+    /// selections).
+    pub(super) fn set_project_expanded(&mut self, id: &str, open: bool) {
+        if open {
+            self.folded_projects.remove(id);
+            self.open_projects.insert(id.to_owned());
+        } else {
+            self.open_projects.remove(id);
+            self.folded_projects.insert(id.to_owned());
+        }
+    }
+
+    /// orcha's own news for the menu: a newer orcha, plugin updates.
+    pub(super) fn menu_news(&self) -> super::global_menu::OrchaMenuNews {
+        super::global_menu::OrchaMenuNews {
+            update: self.update_available.is_some() && self.update_run.is_none(),
+            plugin_update: self
+                .plugin_updates
+                .iter()
+                .any(|update| update.installable()),
+        }
+    }
+}
+
+/// What a click on a notice that stays does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum NoticeClick {
+    /// It goes away.
+    Dismiss,
+    /// The accounts popup opens (the low-fuel offer).
+    OpenAccounts,
 }
 
 #[derive(Default)]
@@ -287,6 +332,8 @@ pub(super) struct ShellHitMap {
     pub(super) mobile_max_scroll: usize,
     pub(super) global_launcher: Rect,
     pub(super) notification_toast: Rect,
+    /// The notice toast (`show_notice`), while one is on screen.
+    pub(super) notice: Rect,
     pub(super) global_menu_rows: Vec<(Rect, usize)>,
     pub(super) context_menu_rows: Vec<(Rect, usize)>,
     pub(super) overlay_primary: Rect,
@@ -1156,7 +1203,15 @@ pub(crate) struct ClientShellState {
     pub(super) pane_scroll_queued: HashMap<String, usize>,
     pub(super) pane_scroll_targets: HashMap<String, usize>,
     pub(super) copy_feedback: Option<crate::app::state::CopyFeedback>,
+    /// When the notice fades; None while it stays (work under way, a
+    /// failure, an offer).
     pub(super) copy_feedback_deadline: Option<std::time::Instant>,
+    /// What a click on the notice does, while it is one that stays until
+    /// clicked or replaced.
+    pub(super) notice_click: Option<NoticeClick>,
+    /// Jobs under way and the notice each keeps up ("hand off: writing the
+    /// notes…"); the newest shows whenever no other notice does.
+    pub(super) working_notices: Vec<(&'static str, String)>,
     pub(super) host_mouse_pixels: Option<crate::input::mouse::HostPixels>,
     pub(super) input_leases: ClientInputLeases,
     pub(super) popup_pending: bool,
@@ -1333,6 +1388,8 @@ impl ClientShellState {
             pane_scroll_targets: HashMap::new(),
             copy_feedback: None,
             copy_feedback_deadline: None,
+            notice_click: None,
+            working_notices: Vec::new(),
             host_mouse_pixels: None,
             input_leases: ClientInputLeases::default(),
             popup_pending: false,
@@ -1521,6 +1578,7 @@ impl ClientShellState {
         self.reset_copy_pipeline();
         self.copy_feedback = None;
         self.copy_feedback_deadline = None;
+        self.notice_click = None;
         self.host_mouse_pixels = None;
         self.dismissed_product_announcement = None;
     }
@@ -2056,14 +2114,14 @@ impl ClientShellState {
         if !self.config.clipboard_toast_enabled {
             return false;
         }
-        self.copy_feedback = Some(crate::app::state::CopyFeedback {
-            message: "copied to clipboard".to_owned(),
-        });
-        self.copy_feedback_deadline = Some(now + std::time::Duration::from_secs(2));
+        self.set_notice(
+            "copied to clipboard".to_owned(),
+            Some(now + std::time::Duration::from_secs(2)),
+            None,
+        );
         true
     }
 
-    /// A short message in the copy-feedback toast, shown for three seconds.
     /// A project that was open because it was selected stays open after
     /// another project is selected, until it is folded on purpose.
     fn keep_left_project_open(&mut self, next: &ClientShellSnapshot) {
@@ -2084,10 +2142,97 @@ impl ClientShellState {
         }
     }
 
+    /// A short message in the copy-feedback toast, shown for three seconds.
     pub(crate) fn show_notice(&mut self, message: String) {
+        self.set_notice(
+            message,
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(3)),
+            None,
+        );
+    }
+
+    /// A notice that stays until it is clicked or the next notice replaces
+    /// it; `click` says what the click does.
+    pub(super) fn show_lasting_notice(&mut self, message: String, click: NoticeClick) {
+        self.set_notice(message, None, Some(click));
+    }
+
+    /// Something went wrong: it says so until clicked away or replaced.
+    pub(super) fn show_failure(&mut self, message: String) {
+        self.show_lasting_notice(message, NoticeClick::Dismiss);
+    }
+
+    /// A job started: `message` stays up (also after other notices fade)
+    /// until `end_working_notice(job)`.
+    pub(super) fn start_working_notice(&mut self, job: &'static str, message: String) {
+        self.working_notices.push((job, message.clone()));
+        self.set_notice(message, None, None);
+    }
+
+    /// The job ended: its notice goes, and another job's shows if one is
+    /// still running. Its result is the next notice.
+    pub(super) fn end_working_notice(&mut self, job: &'static str) {
+        let Some(index) = self
+            .working_notices
+            .iter()
+            .position(|(name, _)| *name == job)
+        else {
+            return;
+        };
+        let (_, message) = self.working_notices.remove(index);
+        let showing = self.notice_click.is_none()
+            && self.copy_feedback_deadline.is_none()
+            && self
+                .copy_feedback
+                .as_ref()
+                .is_some_and(|feedback| feedback.message == message);
+        if showing {
+            self.show_working_or_clear();
+        }
+    }
+
+    /// A click on a notice that stays: an offer opens, a failure goes away.
+    /// True when the click was on one.
+    pub(super) fn click_notice(
+        &mut self,
+        point: (u16, u16),
+        outcome: &mut ClientShellInput,
+    ) -> bool {
+        let Some(click) = self.notice_click else {
+            return false;
+        };
+        if !super::contains(self.hits.notice, point) {
+            return false;
+        }
+        self.show_working_or_clear();
+        if click == NoticeClick::OpenAccounts {
+            self.open_accounts_overlay();
+        }
+        outcome.repaint = true;
+        true
+    }
+
+    /// The newest job's working notice, else none.
+    fn show_working_or_clear(&mut self) {
+        match self.working_notices.last() {
+            Some((_, message)) => self.set_notice(message.clone(), None, None),
+            None => {
+                self.copy_feedback = None;
+                self.copy_feedback_deadline = None;
+                self.notice_click = None;
+            }
+        }
+    }
+
+    fn set_notice(
+        &mut self,
+        message: String,
+        deadline: Option<std::time::Instant>,
+        click: Option<NoticeClick>,
+    ) {
         self.copy_feedback = Some(crate::app::state::CopyFeedback { message });
-        self.copy_feedback_deadline =
-            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+        self.copy_feedback_deadline = deadline;
+        self.notice_click = click;
     }
 
     pub(crate) fn tick_copy_feedback(&mut self, now: std::time::Instant) -> bool {
@@ -2096,8 +2241,8 @@ impl ClientShellState {
             .copy_feedback_deadline
             .is_some_and(|deadline| now >= deadline)
         {
-            self.copy_feedback = None;
-            self.copy_feedback_deadline = None;
+            // work still under way says so again
+            self.show_working_or_clear();
             repaint = true;
         }
         if self
@@ -2139,10 +2284,60 @@ impl ClientShellState {
     }
 
     pub(crate) fn timer_delay(&self, now: std::time::Instant) -> std::time::Duration {
-        let default = std::time::Duration::from_millis(100);
+        // Input and server frames wake the loop themselves. Only polled jobs
+        // need the fast cadence; idle clients still check connection health
+        // and refresh schedules twice a second.
+        let ui = &self.orcha_ui;
+        let pending = self.accounts.has_pending()
+            || self.git_panel.has_pending()
+            || self.file_tree.has_pending()
+            || !self.pending_requests.is_empty()
+            || self.pending_workspace_highlight.is_some()
+            || self.pending_integration_installs > 0
+            || ui.project_folder_picker.is_some()
+            || ui.import_scan.is_some()
+            || ui.update_check.is_some()
+            || ui.whats_new_check.is_some()
+            || ui.plugin_offer_check.is_some()
+            || ui.plugin_add_run.is_some()
+            || ui.plugin_update_check.is_some()
+            || ui.office_check.is_some()
+            || ui.plugin_remove_run.is_some()
+            || ui.plugin_update_run.is_some()
+            || ui.update_run.is_some()
+            || ui.account_scan.is_some()
+            || ui.account_run.is_some()
+            || ui.handoff_run.is_some()
+            || !ui.notice_jobs.is_empty()
+            || ui.default_accounts_job.is_some()
+            || ui
+                .file_view
+                .as_ref()
+                .is_some_and(|view| view.content.is_none());
+        let default = std::time::Duration::from_millis(if pending { 100 } else { 500 });
         self.selection_autoscroll_deadline
             .into_iter()
             .chain(self.selection_repaint_deadline)
+            .chain(self.selection_highlight_clear_deadline)
+            .chain(self.copy_feedback_deadline)
+            .chain(self.endpoint_error_deadline)
+            .chain(self.popup_pending_deadline)
+            .chain(ui.next_process_tick)
+            .chain(
+                self.visible_notification
+                    .as_ref()
+                    .map(|notice| notice.deadline),
+            )
+            .chain(
+                self.visible_endpoint_notice
+                    .as_ref()
+                    .map(|notice| notice.deadline),
+            )
+            .chain(
+                self.pending_notifications
+                    .iter()
+                    .map(|notice| notice.deadline),
+            )
             .min()
             .map(|deadline| deadline.saturating_duration_since(now).min(default))
             .unwrap_or(default)

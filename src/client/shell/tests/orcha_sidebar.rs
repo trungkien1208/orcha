@@ -141,8 +141,18 @@ fn idle_projects_fit_without_boxes_or_repeated_shell_paths() {
     assert!(!sidebar.contains('□') && !sidebar.contains('■'));
     assert!(!sidebar.contains("Shell ORCHA"));
     let header = state.hits.workspaces[0].rect.y as usize;
-    // selected project: header, branch, one pane, a blank separator
-    assert_eq!(state.hits.workspaces[15].rect.y as usize, header + 18);
+    // selected project: header, branch, one pane; no blank rows between projects
+    assert_eq!(state.hits.workspaces[15].rect.y as usize, header + 17);
+    let rows = frame_rows(&frame);
+    assert!(
+        rows[header + 3].contains("TAGGLE-SUPERAPP-V2"),
+        "the next project follows right away"
+    );
+    assert!(
+        !rows[header + 3].contains("idle"),
+        "idle projects say nothing: {}",
+        rows[header + 3]
+    );
 }
 
 #[test]
@@ -176,9 +186,13 @@ fn collapsed_project_shows_active_agent_logos_and_selected_project_can_fold() {
         line.contains("needs you") && line.contains('◎') && line.contains('✳'),
         "{line}"
     );
+    // most urgent first; a narrow row drops the quietest logo, never a busy one
+    let blocked = line.find('✳').expect("needs-you logo");
+    let running = line.find('◎').expect("running logo");
+    assert!(blocked < running, "needs you leads: {line}");
     assert!(
-        !line.contains('▲'),
-        "idle agents do not displace active logos"
+        line.find('▲').is_none_or(|idle| running < idle),
+        "idle comes last: {line}"
     );
     let cells =
         &frame.cells[y as usize * frame.width as usize..(y as usize + 1) * frame.width as usize];
@@ -188,7 +202,8 @@ fn collapsed_project_shows_active_agent_logos_and_selected_project_can_fold() {
             .find(|cell| cell.symbol == "◎")
             .expect("Codex")
             .fg,
-        crate::protocol::color_to_u32(palette.mark(palette.green, palette.card))
+        crate::protocol::color_to_u32(palette.mark(palette.yellow, palette.card)),
+        "a running agent is yellow, whatever its brand"
     );
     assert_eq!(
         cells
@@ -203,7 +218,10 @@ fn collapsed_project_shows_active_agent_logos_and_selected_project_can_fold() {
     let running_frame = state.compose(120, 42).expect("working state changed");
     let running_line = &frame_rows(&running_frame)[y as usize];
     assert!(running_line.contains("running") && running_line.contains('◎'));
-    assert!(!running_line.contains('✳') && !running_line.contains('▲'));
+    assert!(
+        running_line.find('◎') < running_line.find('✳'),
+        "the running agent leads, idle ones follow: {running_line}"
+    );
     click_toggle(&mut state);
     state.compose(120, 42).expect("expanded again");
     assert!(state
@@ -224,7 +242,7 @@ fn branch_does_not_compete_with_project_name_and_shell_row_keeps_its_target() {
     let rows = frame_rows(&frame);
     assert!(rows[y].contains("TAGGLE-SUPERAPP-V2"));
     assert!(!rows[y].contains("feature/"));
-    assert!(rows[y + 1].contains("git · feature/"));
+    assert!(rows[y + 1].contains("⎇ feature/"));
     let (rect, id) = state
         .hits
         .agents
@@ -372,13 +390,12 @@ fn project_panes_show_as_a_tree_numbered_by_tab() {
     let rows = frame_rows(&frame);
     let first = rows
         .iter()
-        .position(|row| row.contains("├ 1"))
-        .expect("first tab opens the tree");
-    assert!(rows[first + 1].contains("└ 2"), "second tab closes it");
-    assert!(rows[first + 1].contains("Shell"));
+        .position(|row| row.contains("1 ▌✳"))
+        .expect("the first tab's number sits before its agent, the open pane's bar between");
     assert!(
-        rows[first + 2].trim().is_empty() || !rows[first + 2].contains('│'),
-        "a blank row follows the open project"
+        rows[first + 1].contains("2  ›_ Shell"),
+        "the second tab follows: {}",
+        rows[first + 1]
     );
 }
 
@@ -387,6 +404,316 @@ fn single_tab_project_hides_tab_numbers() {
     let mut state = sidebar_state(1, false);
     let frame = state.compose(120, 42).expect("frame");
     let rows = frame_rows(&frame);
-    let row = rows.iter().find(|row| row.contains('└')).expect("pane row");
-    assert!(!row.contains("└ 1"), "one tab needs no number");
+    let row = rows
+        .iter()
+        .find(|row| row.contains("›_"))
+        .expect("pane row");
+    assert!(!row.contains("1  ›_"), "one tab needs no number: {row}");
+}
+
+/// A busy real-world sidebar: many projects, some open, icons, idle and
+/// working agents, panes spread over several tabs.
+fn busy_sidebar_state() -> ClientShellState {
+    // (label, icon, open, panes as (tab, agent kind or "" for a shell, status, task or shell name))
+    type Pane = (usize, &'static str, AgentStatus, &'static str);
+    let projects: [(&str, &str, bool, &[Pane]); 16] = [
+        ("~Hibari", "🏠", false, &[(1, "", AgentStatus::Idle, "")]),
+        (
+            "taggle-superapp-v2",
+            "📱",
+            true,
+            &[
+                (
+                    1,
+                    "Claude",
+                    AgentStatus::Idle,
+                    "Nhánh set-b-account đã xong",
+                ),
+                (3, "", AgentStatus::Idle, ""),
+                (4, "", AgentStatus::Idle, ""),
+            ],
+        ),
+        ("THKCM RPM", "🐋", true, &[(1, "", AgentStatus::Idle, "")]),
+        (
+            "hientrangvisa-marketing",
+            "🌐",
+            false,
+            &[(1, "", AgentStatus::Idle, "")],
+        ),
+        ("Canva", "🎨", false, &[(1, "", AgentStatus::Idle, "")]),
+        (
+            "Search Jobs",
+            "🧭",
+            false,
+            &[(1, "Claude", AgentStatus::Idle, "")],
+        ),
+        ("COGINGON", "⭐", false, &[(1, "", AgentStatus::Idle, "")]),
+        ("stroke360", "🏥", false, &[(1, "", AgentStatus::Idle, "")]),
+        ("game-ios", "🎮", false, &[(1, "", AgentStatus::Idle, "")]),
+        (
+            "orcha",
+            "🔥",
+            false,
+            &[(1, "Claude", AgentStatus::Idle, "Herdr, Orca và Ghostty")],
+        ),
+        (
+            "LARK_AUTOMATION",
+            "",
+            true,
+            &[(1, "Claude", AgentStatus::Working, "Tôi cần sửa luồng duyệt")],
+        ),
+        (
+            "nca-pssb",
+            "🧾",
+            true,
+            &[
+                (
+                    1,
+                    "Claude",
+                    AgentStatus::Blocked,
+                    "Popup inactivity timeout",
+                ),
+                (
+                    5,
+                    "Codex",
+                    AgentStatus::Working,
+                    "Feedback màn hình thanh toán",
+                ),
+            ],
+        ),
+        ("WABI", "🌱", false, &[(1, "", AgentStatus::Idle, "")]),
+        (
+            "Party Agent",
+            "🚀",
+            false,
+            &[(1, "Claude", AgentStatus::Done, "")],
+        ),
+        (
+            "Easy Job",
+            "⚡",
+            false,
+            &[(1, "Claude", AgentStatus::Idle, "")],
+        ),
+        (
+            "Easy Job bridge",
+            "",
+            true,
+            &[
+                (1, "", AgentStatus::Idle, ""),
+                (2, "", AgentStatus::Idle, "Easy Job"),
+            ],
+        ),
+    ];
+    let mut state = sidebar_state(1, false);
+    let data = state.snapshot.as_mut().expect("snapshot");
+    let workspace = data.workspaces[0].clone();
+    let tab = data.tabs[0].clone();
+    let pane = data.panes[0].clone();
+    data.workspaces.clear();
+    data.tabs.clear();
+    data.panes.clear();
+    data.agents.clear();
+    let mut icons = Vec::new();
+    let mut open = Vec::new();
+    for (index, (label, icon, is_open, panes)) in projects.iter().enumerate() {
+        let workspace_id = format!("ws_{index}");
+        let focused = *label == "orcha";
+        let mut next = workspace.clone();
+        next.workspace_id = workspace_id.clone();
+        next.new_workspace_cwd = format!("/projects/{label}");
+        next.number = index + 1;
+        next.label = (*label).into();
+        next.branch = Some("orcha".into());
+        next.focused = focused;
+        next.active_tab_id = format!("{workspace_id}_tab_1");
+        if !icon.is_empty() {
+            icons.push((next.new_workspace_cwd.clone(), (*icon).to_owned()));
+        }
+        if *is_open {
+            open.push(workspace_id.clone());
+        }
+        data.workspaces.push(next);
+        let mut seen_tabs = Vec::new();
+        for (pane_index, (tab_number, kind, status, text)) in panes.iter().enumerate() {
+            let tab_id = format!("{workspace_id}_tab_{tab_number}");
+            if !seen_tabs.contains(tab_number) {
+                seen_tabs.push(*tab_number);
+                let mut next_tab = tab.clone();
+                next_tab.workspace_id = workspace_id.clone();
+                next_tab.tab_id = tab_id.clone();
+                next_tab.number = *tab_number;
+                next_tab.focused = focused && *tab_number == 1;
+                data.tabs.push(next_tab);
+            }
+            let pane_id = format!("{workspace_id}_pane_{pane_index}");
+            let mut next_pane = pane.clone();
+            next_pane.workspace_id = workspace_id.clone();
+            next_pane.tab_id = tab_id.clone();
+            next_pane.pane_id = pane_id.clone();
+            next_pane.focused = focused && pane_index == 0;
+            next_pane.label = (kind.is_empty() && !text.is_empty()).then(|| (*text).to_owned());
+            data.panes.push(next_pane);
+            if !kind.is_empty() {
+                data.agents.push(ClientShellAgent {
+                    pane_id,
+                    workspace_id: workspace_id.clone(),
+                    tab_id,
+                    name: None,
+                    display_agent: Some((*kind).into()),
+                    agent: Some(kind.to_lowercase()),
+                    title: None,
+                    terminal_title: None,
+                    terminal_title_stripped: None,
+                    agent_status: *status,
+                    state_change_seq: 1,
+                    state_labels: Vec::new(),
+                    tokens: [
+                        (
+                            "model",
+                            if *kind == "Claude" {
+                                "claude-opus-5-5"
+                            } else {
+                                ""
+                            },
+                        ),
+                        ("task", *text),
+                    ]
+                    .into_iter()
+                    .filter(|(_, value)| !value.is_empty())
+                    .map(|(key, value)| (key.to_owned(), value.to_owned()))
+                    .collect(),
+                    focused: focused && pane_index == 0,
+                });
+            }
+        }
+    }
+    state.orcha_ui.project_icons.extend(icons);
+    state.orcha_ui.open_projects.extend(open);
+    state
+}
+
+#[test]
+#[ignore = "exports a busy sidebar for visual review"]
+fn orcha_sidebar_busy_preview() {
+    let Ok(path) = std::env::var("ORCHA_SIDEBAR_PREVIEW_OUT") else {
+        return;
+    };
+    let mut state = busy_sidebar_state();
+    let theme =
+        std::env::var("ORCHA_SIDEBAR_PREVIEW_THEME").unwrap_or_else(|_| "orcha-dark".into());
+    let config: Config = toml::from_str(&format!("[theme]\nname = '{theme}'\n")).expect("theme");
+    state.config.palette = ClientShellConfig::from_config(&config).palette;
+    state.config.theme_name = theme;
+    let frame = state.compose(120, 46).expect("frame");
+    let cells: Vec<_> = frame
+        .cells
+        .iter()
+        .map(|cell| serde_json::json!([cell.symbol, cell.fg, cell.bg, cell.modifier]))
+        .collect();
+    std::fs::write(
+        path,
+        serde_json::json!({"width":frame.width,"height":frame.height,"cells":cells}).to_string(),
+    )
+    .expect("preview");
+}
+
+#[test]
+fn projects_reorder_by_dragging_even_with_new_at_the_top() {
+    let mut state = sidebar_state(4, false);
+    state.compose(120, 42).expect("frame");
+    let first = state.hits.workspaces[0].rect;
+    let last = state.hits.workspaces[3].rect;
+    assert!(
+        state.hits.new_workspace.y < first.y,
+        "orcha draws NEW above the list"
+    );
+    let mouse = |kind, column, row| {
+        RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::empty(),
+        })
+    };
+    state.handle_raw_events(vec![mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        first.x + 2,
+        first.y,
+    )]);
+    let drag = state.handle_raw_events(vec![mouse(
+        MouseEventKind::Drag(MouseButton::Left),
+        last.x + 2,
+        last.y,
+    )]);
+    assert!(drag.repaint);
+    assert!(
+        matches!(
+            state.chrome_drag,
+            Some(ClientChromeDrag::Workspace {
+                target: Some(_),
+                ..
+            })
+        ),
+        "a drag over the list has a drop target"
+    );
+    let release = state.handle_raw_events(vec![mouse(
+        MouseEventKind::Up(MouseButton::Left),
+        last.x + 2,
+        last.y,
+    )]);
+    assert!(
+        release.actions.iter().any(|action| matches!(
+            action,
+            ClientShellAction::Endpoint { request, .. }
+                if matches!(
+                    &request.method,
+                    crate::api::schema::Method::WorkspaceMove(params) if params.workspace_id == "ws_1"
+                )
+        )),
+        "dropping moves the project: {:?}",
+        release.actions
+    );
+}
+
+#[test]
+fn every_agent_row_names_its_state_and_the_open_pane_is_marked() {
+    let mut state = sidebar_state(4, true);
+    add_agent(&mut state, 0, "Claude", AgentStatus::Working);
+    add_agent(&mut state, 1, "Codex", AgentStatus::Done);
+    add_agent(&mut state, 2, "Cursor", AgentStatus::Idle);
+    add_agent(&mut state, 3, "Claude", AgentStatus::Blocked);
+    let frame = state.compose(120, 42).expect("frame");
+    let rows = frame_rows(&frame);
+    let row_of = |pane: &str| {
+        let (rect, _) = state
+            .hits
+            .agents
+            .iter()
+            .find(|(rect, id)| id == pane && rect.y < state.hits.workspace_body.bottom())
+            .expect("agent row");
+        rows[rect.y as usize].clone()
+    };
+    assert!(
+        row_of("pane_1").trim_end().ends_with("running"),
+        "{}",
+        row_of("pane_1")
+    );
+    assert!(
+        row_of("pane_2").trim_end().ends_with("done"),
+        "{}",
+        row_of("pane_2")
+    );
+    assert!(
+        row_of("pane_3").trim_end().ends_with("idle"),
+        "{}",
+        row_of("pane_3")
+    );
+    assert!(
+        row_of("pane_4").trim_end().ends_with("needs you"),
+        "{}",
+        row_of("pane_4")
+    );
+    // pane_1 is the open pane: only its row carries the bar
+    assert!(row_of("pane_1").contains("▌✳"), "{}", row_of("pane_1"));
+    assert!(!row_of("pane_2").contains("▌◎"), "{}", row_of("pane_2"));
 }

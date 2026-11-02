@@ -23,11 +23,7 @@ const SCREEN_LINES: &str = "800";
 const MAX_FILES: usize = 40;
 
 /// The agents a conversation can move to: (kind, command, display name).
-pub(crate) const AGENTS: [(&str, &str, &str); 3] = [
-    ("claude", "claude", "Claude"),
-    ("codex", "codex", "Codex"),
-    ("cursor", "cursor-agent", "Cursor"),
-];
+pub(crate) const AGENTS: [(&str, &str, &str); 3] = crate::orcha_accounts::HANDOFF_AGENTS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Mode {
@@ -320,7 +316,20 @@ fn codex_file(session: &str, home: &Path) -> Option<PathBuf> {
     newest(found)
 }
 
+/// A session id safe to put in a file name or a shell line as it is:
+/// letters, digits, `-` and `_` only (Claude and Codex ids are UUIDs).
+pub(crate) fn plain_session_id(session: &str) -> bool {
+    !session.is_empty()
+        && session
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+}
+
 fn transcript(source: &str, session: &str, home: &Path) -> Option<Transcript> {
+    // the id becomes part of a file name: nothing that could leave the folder
+    if !plain_session_id(session) {
+        return None;
+    }
     let (path, parse): (PathBuf, fn(&str) -> Transcript) = match source {
         "claude" => (claude_file(session, home)?, parse_claude),
         "codex" => (codex_file(session, home)?, parse_codex),
@@ -920,5 +929,29 @@ mod tests {
         let home = Path::new("/home/me");
         assert_eq!(expand("~/x", home), PathBuf::from("/home/me/x"));
         assert_eq!(expand("/abs", home), PathBuf::from("/abs"));
+    }
+
+    #[test]
+    fn only_plain_session_ids_pass() {
+        assert!(plain_session_id("0b46c1e2-77aa-4f00-9c1d-2e3f4a5b6c7d"));
+        assert!(plain_session_id("rollout_2026-01"));
+        for odd in ["", "../../secret", "a/b", "a\\b", "x; rm -rf ~", "a b", "é"] {
+            assert!(!plain_session_id(odd), "{odd:?}");
+        }
+    }
+
+    #[test]
+    fn a_session_id_cannot_reach_a_file_outside_the_projects() {
+        let home = std::env::temp_dir().join(format!("orcha-handoff-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let project = home.join(".claude").join("projects").join("p");
+        std::fs::create_dir_all(&project).expect("create project");
+        let chat = r#"{"type":"user","message":{"role":"user","content":"Add dark mode"}}"#;
+        std::fs::write(project.join("abc-123.jsonl"), chat).expect("write chat");
+        // projects/p/../../secret.jsonl is ~/.claude/secret.jsonl
+        std::fs::write(home.join(".claude").join("secret.jsonl"), chat).expect("write secret");
+        assert!(transcript("claude", "abc-123", &home).is_some());
+        assert!(transcript("claude", "../../secret", &home).is_none());
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

@@ -530,10 +530,12 @@ fn main() -> io::Result<()> {
     if let Some(code) = orcha_app::maybe_run_config_tool(&raw_args) {
         std::process::exit(code);
     }
-    if let Some(imported) = orcha_app::import_from_herdr_once() {
-        eprintln!(
+    match orcha_app::import_from_herdr_once() {
+        Ok(Some(imported)) => eprintln!(
             "orcha: imported {imported} from herdr (agents start fresh; herdr keeps its own)."
-        );
+        ),
+        Ok(None) => {}
+        Err(err) => eprintln!("orcha: could not import herdr's settings: {err}"),
     }
     #[cfg(windows)]
     if let Some(result) = platform::maybe_activate_desktop_notification(&raw_args) {

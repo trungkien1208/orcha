@@ -32,6 +32,9 @@ sidebar_start_collapsed = true
 sidebar_collapsed_mode = "hidden"
 hide_tab_bar_when_single_tab = true
 pane_scrollbars = false
+# These assertions describe a borderless terminal. Orcha's production default
+# frames even a lone pane, so do not inherit that presentation preference.
+pane_borders = "auto"
 "#;
 
 fn unique_test_dir() -> PathBuf {

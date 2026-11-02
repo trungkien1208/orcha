@@ -4,7 +4,7 @@ use super::*;
 use crate::client::shell::git_panel::GitPanelData;
 use crate::protocol::{ClientShellPane, ClientShellTabStatusSegment};
 
-fn orcha_state(right_panel: bool, status_bar: bool) -> ClientShellState {
+pub(super) fn orcha_state(right_panel: bool, status_bar: bool) -> ClientShellState {
     let mut projected = snapshot();
     projected.tab_bar_right = vec![
         ClientShellTabStatusSegment {
@@ -1374,4 +1374,178 @@ fn a_project_left_open_stays_open_when_another_is_selected() {
     back.workspaces[1].focused = false;
     state.set_snapshot(Box::new(back));
     assert!(!state.orcha_ui.open_projects.contains("ws_2"));
+}
+
+/// The popup's rows only, inside its box (the page under it is dimmed, not
+/// erased).
+fn popup_rows(frame: &FrameData, area: Rect) -> Vec<String> {
+    (area.y..area.bottom())
+        .map(|y| {
+            (area.x + 1..area.right().saturating_sub(1))
+                .map(|x| {
+                    frame.cells[usize::from(y) * usize::from(frame.width) + usize::from(x)]
+                        .symbol
+                        .as_str()
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn many_accounts(count: usize) -> Vec<crate::client::shell::accounts::Account> {
+    use crate::client::shell::accounts::{Account, FuelWindow};
+    (0..count)
+        .map(|index| Account {
+            id: format!("acct-{index}"),
+            kind: "claude".into(),
+            label: format!("Claude · acct{index:02}"),
+            email: Some(format!("a{index}@example.com")),
+            current: index == 0,
+            error: None,
+            windows: vec![FuelWindow {
+                key: "5h".into(),
+                label: "5H".into(),
+                left: 50,
+                reset: None,
+                reset_at: None,
+            }],
+            signed_in: None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_long_account_list_scrolls_to_keep_the_cursor_on_screen() {
+    use crate::client::shell::orcha_popup::OrchaPopup;
+    let mut state = orcha_state(true, true);
+    state.accounts.set_for_test(Some(many_accounts(14)));
+    state.orcha_ui.popup = Some(OrchaPopup::Accounts {
+        selected: 0,
+        pane: None,
+    });
+    let frame = state.compose(140, 30).expect("top of the list");
+    let text = popup_rows(&frame, state.hits.orcha.popup.area).join("\n");
+    assert!(text.contains("acct00"), "{text}");
+    assert!(!text.contains("acct12"), "the end does not fit:\n{text}");
+    assert!(
+        text.contains("↓ more") && !text.contains("↑ more"),
+        "{text}"
+    );
+
+    // keyboard down to the 13th account: it shows, and only drawn rows click
+    for _ in 0..12 {
+        state.route_orcha_popup_key(
+            &crate::input::TerminalKey::new(
+                crossterm::event::KeyCode::Down,
+                crossterm::event::KeyModifiers::NONE,
+            ),
+            &mut ClientShellInput::default(),
+        );
+    }
+    assert!(matches!(
+        state.orcha_ui.popup,
+        Some(OrchaPopup::Accounts { selected: 12, .. })
+    ));
+    let frame = state.compose(140, 30).expect("scrolled");
+    let area = state.hits.orcha.popup.area;
+    let rows = popup_rows(&frame, area);
+    let text = rows.join("\n");
+    assert!(
+        text.contains("acct12") && text.contains("CONTINUE ↵"),
+        "{text}"
+    );
+    assert!(!text.contains("acct00"), "scrolled past the top:\n{text}");
+    assert!(text.contains("↑ more") && text.contains("↓ more"), "{text}");
+    let hits = &state.hits.orcha.popup;
+    let (rect, _) = hits
+        .rows
+        .iter()
+        .find(|(_, index)| *index == 12)
+        .expect("the cursor's row is a click target");
+    assert!(rows[usize::from(rect.y - area.y)].contains("acct12"));
+    for (rect, index) in hits.rows.iter().filter(|(_, index)| *index < 14) {
+        assert!(
+            rows[usize::from(rect.y - area.y)].contains(&format!("acct{index:02}")),
+            "row {index} clicks where it is drawn"
+        );
+    }
+    assert!(
+        hits.rows.iter().any(|(_, index)| *index == 14),
+        "ADD ACCOUNT stays"
+    );
+}
+
+#[test]
+fn keys_do_nothing_but_esc_when_the_screen_is_too_small_for_the_popup() {
+    use crate::client::shell::orcha_popup::OrchaPopup;
+    let key = |code| crate::input::TerminalKey::new(code, crossterm::event::KeyModifiers::NONE);
+    let popup = || OrchaPopup::Update {
+        selected: 1,
+        release: crate::orcha_app::Release {
+            version: "9.9.9".into(),
+            notes: Vec::new(),
+        },
+    };
+    let mut state = orcha_state(true, true);
+    state.orcha_ui.popup = Some(popup());
+    let _ = state.compose(30, 8);
+    assert!(state.hits.orcha.popup.area.is_empty(), "nothing is drawn");
+    for code in [
+        crossterm::event::KeyCode::Enter,
+        crossterm::event::KeyCode::Char('j'),
+    ] {
+        state.route_orcha_popup_key(&key(code), &mut ClientShellInput::default());
+    }
+    assert_eq!(
+        state.orcha_ui.popup,
+        Some(popup()),
+        "an unseen popup does not act"
+    );
+    state.route_orcha_popup_key(
+        &key(crossterm::event::KeyCode::Esc),
+        &mut ClientShellInput::default(),
+    );
+    assert!(state.orcha_ui.popup.is_none(), "esc still closes it");
+
+    // with room, the same enter picks "not now" and closes it
+    state.orcha_ui.popup = Some(popup());
+    state.compose(140, 40).expect("frame");
+    state.route_orcha_popup_key(
+        &key(crossterm::event::KeyCode::Enter),
+        &mut ClientShellInput::default(),
+    );
+    assert!(state.orcha_ui.popup.is_none());
+}
+
+#[test]
+fn the_first_choice_row_keeps_the_heavy_rule_under_the_header() {
+    use crate::client::shell::orcha_popup::OrchaPopup;
+    let mut state = orcha_state(true, true);
+    state.orcha_ui.popup = Some(OrchaPopup::RulesOffer {
+        selected: 0,
+        folder: "/tmp/demo".into(),
+        file: "CLAUDE.md".into(),
+        rules: Vec::new(),
+    });
+    let frame = state.compose(140, 40).expect("frame");
+    let rows = popup_rows(&frame, state.hits.orcha.popup.area);
+    let header = rows
+        .iter()
+        .position(|row| row.contains("WORKING RULES"))
+        .expect("header");
+    let rule = &rows[header + 1];
+    assert!(
+        rule.contains("━━━") && !rule.contains('─'),
+        "row 0 draws no thin rule over the header's:\n{rule}"
+    );
+    assert!(
+        rows[header + 2].contains("Add them to CLAUDE.md"),
+        "the first row starts right under it"
+    );
+    // later rows still get their thin rule, one line above them
+    let second = rows
+        .iter()
+        .position(|row| row.contains("Choose in the browser"))
+        .expect("second row");
+    assert!(rows[second - 1].contains('─'));
 }

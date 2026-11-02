@@ -2787,7 +2787,8 @@ mod channel_tests {
             !path.exists(),
             "stable updates must not create a preview preference"
         );
-        fs::remove_dir(&dir).unwrap();
+        // the config writer keeps its lock file beside the config
+        fs::remove_dir_all(&dir).unwrap();
     }
 }
 

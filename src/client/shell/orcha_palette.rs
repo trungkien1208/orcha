@@ -726,25 +726,36 @@ impl ClientShellState {
         }
         self.orcha_ui.popup = None;
         let count = panes.len();
-        let _ = crate::thread_spawn::spawn_named("orcha-broadcast", move || {
-            for pane in panes {
-                if !crate::orcha_handoff::send_prompt(&pane, &prompt) {
-                    tracing::warn!("orcha: could not send the prompt to {pane}");
-                }
-            }
-        });
         self.show_notice(format!(
             "sent to {count} agent{}",
             if count == 1 { "" } else { "s" }
         ));
+        self.start_notice_job("orcha-broadcast", None, move || {
+            let missed = panes
+                .iter()
+                .filter(|pane| {
+                    let sent = crate::orcha_handoff::send_prompt(pane, &prompt);
+                    if !sent {
+                        tracing::warn!("orcha: could not send the prompt to {pane}");
+                    }
+                    !sent
+                })
+                .count();
+            match missed {
+                0 => Ok(String::new()),
+                missed => Err(format!("{missed} of {count} agents did not get the prompt")),
+            }
+        });
     }
 
     pub(super) fn open_palette(&mut self) {
+        self.open_palette_with(String::new());
+    }
+
+    /// COMMANDS with `query` typed in already.
+    pub(super) fn open_palette_with(&mut self, query: String) {
         refresh_plugin_actions();
-        self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::Palette {
-            selected: 0,
-            query: String::new(),
-        });
+        self.orcha_ui.popup = Some(super::orcha_popup::OrchaPopup::Palette { selected: 0, query });
     }
 
     /// Typing, moving and running inside COMMANDS.
@@ -925,13 +936,7 @@ impl ClientShellState {
                     })
                     .unwrap_or_default();
                 for id in ids {
-                    if open {
-                        self.orcha_ui.folded_projects.remove(&id);
-                        self.orcha_ui.open_projects.insert(id);
-                    } else {
-                        self.orcha_ui.open_projects.remove(&id);
-                        self.orcha_ui.folded_projects.insert(id);
-                    }
+                    self.orcha_ui.set_project_expanded(&id, open);
                 }
                 self.persist_chrome_preferences(outcome);
                 outcome.repaint = true;

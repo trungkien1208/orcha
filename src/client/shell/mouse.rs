@@ -520,7 +520,7 @@ impl ClientShellState {
     fn workspace_drop_target_at(&self, point: (u16, u16)) -> Option<(Option<String>, u16)> {
         if self.hits.workspace_body.height == 0
             || point.1 < self.hits.workspace_body.y.saturating_sub(1)
-            || point.1 >= self.hits.new_workspace.y
+            || point.1 >= self.hits.workspace_body.bottom()
             || self.hits.workspaces.iter().any(|hit| {
                 hit.endpoint_id != self.active_endpoint_id && super::contains(hit.rect, point)
             })
@@ -582,7 +582,7 @@ impl ClientShellState {
                     .map(|workspace| workspace.workspace_id.clone())
             });
             let row = last_hit.rect.bottom();
-            if row < self.hits.new_workspace.y {
+            if row < self.hits.workspace_body.bottom() {
                 slots.push((before, row));
             }
         }
@@ -1016,6 +1016,11 @@ impl ClientShellState {
         {
             self.visible_endpoint_notice = None;
             outcome.repaint = true;
+            return;
+        }
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+            && self.click_notice(point, outcome)
+        {
             return;
         }
         if self.overlay.is_none()

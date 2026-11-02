@@ -80,19 +80,11 @@ pub(super) fn status_rank(status: AgentStatus) -> u8 {
     }
 }
 
+/// An agent's mark in lists: its state, the same color everywhere (yellow
+/// running, red needs you, green done, muted idle), so a glance tells them
+/// apart whatever the agent.
 pub(super) fn agent_color(agent: &ClientShellAgent, t: &Brutal) -> Color {
-    match agent.agent_status {
-        AgentStatus::Blocked => t.red,
-        AgentStatus::Working => {
-            let color = t.agent(agent.agent.as_deref());
-            if color == t.card {
-                t.yellow
-            } else {
-                color
-            }
-        }
-        _ => t.muted,
-    }
+    t.state(agent.agent_status).unwrap_or(t.muted)
 }
 
 /// The two top buttons, three rows tall: a raised green NEW and an
@@ -342,13 +334,25 @@ impl ProjectActivity {
         }
     }
 
-    fn label(self) -> &'static str {
-        match self {
-            Self::Idle => "idle",
-            Self::Done => "done",
-            Self::Running => "running",
-            Self::NeedsYou => "needs you",
+    /// The state as one word, short when `room` is tight.
+    fn word(self, room: u16) -> &'static str {
+        let (long, short) = match self {
+            Self::Idle => ("idle", "idle"),
+            Self::Done => ("done", "done"),
+            Self::Running => ("running", "run"),
+            Self::NeedsYou => ("needs you", "wait"),
+        };
+        if display_width(long) <= room {
+            long
+        } else {
+            short
         }
+    }
+
+    /// The word beside a project. Idle projects say nothing, so the ones
+    /// that are busy stand out; each agent row still names its own state.
+    fn label(self, room: u16) -> Option<&'static str> {
+        (self != Self::Idle).then(|| self.word(room))
     }
 
     fn color(self, t: &Brutal) -> Color {
@@ -367,7 +371,7 @@ struct ProjectRows<'a> {
     rows: Vec<(usize, ProjectRow<'a>)>,
     tabs: usize,
     activity: ProjectActivity,
-    // At most three distinct agent logos. Active agents replace idle ones.
+    // At most three logos, one per kind of agent. Busier agents win a slot.
     logos: [Option<&'a ClientShellAgent>; 3],
 }
 
@@ -375,31 +379,39 @@ impl<'a> ProjectRows<'a> {
     fn push(&mut self, tab: usize, row: ProjectRow<'a>) {
         if let ProjectRow::Agent(agent) = row {
             let activity = ProjectActivity::from_status(agent.agent_status);
-            if activity >= ProjectActivity::Running && self.activity < ProjectActivity::Running {
-                self.logos = [None; 3];
-            }
             self.activity = self.activity.max(activity);
-            if activity >= ProjectActivity::Running || self.activity < ProjectActivity::Running {
-                let kind = agent.agent.as_deref().unwrap_or("");
-                if let Some(slot) = self.logos.iter_mut().find(|slot| {
-                    slot.is_some_and(|seen| {
-                        seen.agent
-                            .as_deref()
-                            .unwrap_or("")
-                            .eq_ignore_ascii_case(kind)
-                    })
-                }) {
-                    if slot.is_none_or(|seen| {
-                        ProjectActivity::from_status(seen.agent_status) < activity
-                    }) {
-                        *slot = Some(agent);
-                    }
-                } else if let Some(slot) = self.logos.iter_mut().find(|slot| slot.is_none()) {
-                    *slot = Some(agent);
+            let urgency = |seen: &ClientShellAgent| ProjectActivity::from_status(seen.agent_status);
+            let kind = agent.agent.as_deref().unwrap_or("");
+            // one logo per kind of agent, in its most urgent state; when the
+            // slots are full, a busier agent takes the quietest one's place
+            if let Some(seen) = self.logos.iter_mut().flatten().find(|seen| {
+                seen.agent
+                    .as_deref()
+                    .unwrap_or("")
+                    .eq_ignore_ascii_case(kind)
+            }) {
+                if urgency(seen) < activity {
+                    *seen = agent;
                 }
+            } else if let Some(slot) = self.logos.iter_mut().find(|slot| slot.is_none()) {
+                *slot = Some(agent);
+            } else if let Some(slot) = self
+                .logos
+                .iter_mut()
+                .min_by_key(|slot| slot.map(urgency))
+                .filter(|slot| slot.is_some_and(|seen| urgency(seen) < activity))
+            {
+                *slot = Some(agent);
             }
         }
         self.rows.push((tab, row));
+    }
+
+    /// The logos, most urgent first.
+    fn logos_by_urgency(&self) -> impl Iterator<Item = &'a ClientShellAgent> {
+        let mut logos = self.logos;
+        logos.sort_by_key(|slot| slot.map_or(u8::MAX, |agent| status_rank(agent.agent_status)));
+        logos.into_iter().flatten()
     }
 }
 
@@ -618,21 +630,32 @@ pub(crate) fn render_sidebar_tree(
         Rect::new(x, area.bottom(), width, 0)
     };
 
-    // One continuous project list. Details belong below the selected name.
+    // One continuous project list: the label on the left, the count on the
+    // right, both lined up with the rows below.
     let label_y = area.y + 2;
+    let row_width = width.saturating_sub(1);
+    let label_style = Style::default()
+        .fg(t.muted)
+        .bg(t.bg)
+        .add_modifier(Modifier::BOLD);
     put_text(
         buffer,
-        x,
+        x + 1,
         label_y,
-        width,
-        &format!("PROJECTS · {}", snapshot.workspaces.len()),
-        Style::default()
-            .fg(t.muted)
-            .bg(t.bg)
-            .add_modifier(Modifier::BOLD),
+        row_width.saturating_sub(1),
+        "PROJECTS",
+        label_style,
+    );
+    put_right_text(
+        buffer,
+        Rect::new(x, label_y, row_width.saturating_sub(1), 1),
+        label_y,
+        &snapshot.workspaces.len().to_string(),
+        label_style,
     );
     // orcha keeps its sidebar open: no fold button
 
+    let focused_git = focused_pane_git(snapshot, state.focused_git);
     let entries = super::sidebar::workspace_entries(snapshot, state.collapsed_groups);
     let rows_by_workspace = project_rows_by_workspace(snapshot);
     let empty = ProjectRows::default();
@@ -644,15 +667,9 @@ pub(crate) fn render_sidebar_tree(
         let project = rows_by_workspace
             .get(workspace.workspace_id.as_str())
             .unwrap_or(&empty);
-        let expanded = !state
+        let expanded = state
             .orcha_ui
-            .folded_projects
-            .contains(&workspace.workspace_id)
-            && (workspace.focused
-                || state
-                    .orcha_ui
-                    .open_projects
-                    .contains(&workspace.workspace_id));
+            .project_expanded(&workspace.workspace_id, workspace.focused);
         items.push((workspace, project, expanded));
     }
     let heights: Vec<u16> = items
@@ -661,9 +678,9 @@ pub(crate) fn render_sidebar_tree(
             if !expanded {
                 1
             } else {
-                let branch = shown_branch(workspace, state.focused_git).is_some();
-                // The last row stays blank to separate the next project.
-                2u16.saturating_add(u16::from(branch))
+                // No blank rows: the indent shows where a project ends.
+                let branch = shown_branch(workspace, focused_git).is_some();
+                1u16.saturating_add(u16::from(branch))
                     .saturating_add(u16::try_from(project.rows.len()).unwrap_or(u16::MAX))
             }
         })
@@ -696,7 +713,6 @@ pub(crate) fn render_sidebar_tree(
         .max_offset_from_bottom
         .saturating_sub(metrics.offset_from_bottom);
 
-    let row_width = width.saturating_sub(1);
     let mut y = body.y;
     for (index, (workspace, project, expanded)) in
         items.iter().enumerate().skip(*state.workspace_scroll)
@@ -707,11 +723,6 @@ pub(crate) fn render_sidebar_tree(
         if y.saturating_add(height) > body.bottom() {
             break;
         }
-        let content = if *expanded {
-            height.saturating_sub(1).max(1)
-        } else {
-            height
-        };
         let icon = state
             .orcha_ui
             .project_icons
@@ -719,9 +730,9 @@ pub(crate) fn render_sidebar_tree(
             .map(String::as_str);
         render_project(
             buffer,
-            Rect::new(x, y, row_width, content),
+            Rect::new(x, y, row_width, height),
             workspace,
-            shown_branch(workspace, state.focused_git).as_deref(),
+            shown_branch(workspace, focused_git),
             icon,
             project,
             *expanded,
@@ -751,33 +762,55 @@ pub(crate) fn render_sidebar_tree(
     }
 }
 
-fn tab_number_width(tab: usize) -> u16 {
-    if tab == usize::MAX {
-        1
-    } else {
-        u16::try_from(tab.to_string().len()).unwrap_or(1)
-    }
+/// The right panel's read, only when it is about the focused pane's folder.
+/// Right after a switch it can still hold the previous project's read;
+/// the server's branch is right in the meantime.
+fn focused_pane_git<'a>(
+    snapshot: &ClientShellSnapshot,
+    git_panel: Option<&'a super::git_panel::GitPanelData>,
+) -> Option<&'a super::git_panel::GitPanelData> {
+    let data = git_panel?;
+    let focused = snapshot.focused_pane_id.as_deref()?;
+    let pane = snapshot.panes.iter().find(|pane| pane.pane_id == focused)?;
+    let folder = pane.foreground_cwd.as_deref().or(pane.cwd.as_deref())?;
+    same_or_inside(folder, &data.root).then_some(data)
 }
 
-/// The branch under the focused project. The right panel's read wins when
-/// there is one: it follows the focused pane, so both sides name the same
-/// checkout. The workspace's own branch (its first pane's folder) is the
-/// fallback while the panel is off or has not read yet.
-fn shown_branch(
-    workspace: &ClientShellWorkspace,
-    git_panel: Option<&super::git_panel::GitPanelData>,
-) -> Option<String> {
+/// `folder` is `root` or inside it, whichever slash each one uses.
+fn same_or_inside(folder: &str, root: &str) -> bool {
+    let slash = |c: char| if c == '\\' { '/' } else { c };
+    let mut folder = folder.chars().map(slash);
+    for c in root.trim_end_matches(['/', '\\']).chars().map(slash) {
+        if folder.next() != Some(c) {
+            return false;
+        }
+    }
+    matches!(folder.next(), None | Some('/'))
+}
+
+/// The branch under the focused project: the right panel's read of the
+/// focused pane's checkout when it has one, else the workspace's own branch
+/// (its first pane's folder), which the server keeps fresh.
+fn shown_branch<'a>(
+    workspace: &'a ClientShellWorkspace,
+    git: Option<&'a super::git_panel::GitPanelData>,
+) -> Option<&'a str> {
     if !workspace.focused {
         return None;
     }
-    match git_panel {
-        Some(data) if data.branch.is_empty() => Some("(no branch)".to_owned()),
-        Some(data) => Some(data.branch.clone()),
-        None => workspace.branch.clone(),
+    match git {
+        Some(data) if data.branch.is_empty() => Some("(no branch)"),
+        Some(data) => Some(data.branch.as_str()),
+        None => workspace.branch.as_deref(),
     }
 }
 
-/// Project row with an optional branch and its panes as a tree grouped by tab.
+/// Cells kept for a project's icon, so every name starts in the same column.
+const ICON_WIDTH: u16 = 2;
+
+/// One project: its name row, then (when open) its branch and panes,
+/// indented under the name. Idle says nothing; busy projects show their
+/// agents' logos and one word on the right.
 #[allow(clippy::too_many_arguments)] // Render inputs are independent view facts.
 fn render_project(
     buffer: &mut Buffer,
@@ -805,85 +838,82 @@ fn render_project(
             );
         }
     }
-    let arrow = Rect::new(rect.x + 1, rect.y, 2, 1);
-    // the click area is wider than the arrow: the edge column counts too
-    let toggle = Rect::new(rect.x, rect.y, 3, 1);
     put_text(
         buffer,
-        arrow.x,
-        arrow.y,
-        arrow.width,
+        rect.x + 1,
+        rect.y,
+        1,
         if expanded { "▾" } else { "▸" },
         Style::default().fg(t.muted).bg(fill),
     );
-    hits.orcha
-        .project_toggles
-        .push((toggle, workspace.workspace_id.clone()));
-    let name_x = rect.x + 3;
+    // the click area is wider than the arrow: the edge column counts too
+    hits.orcha.project_toggles.push((
+        Rect::new(rect.x, rect.y, 3, 1),
+        workspace.workspace_id.clone(),
+    ));
+
+    let icon_x = rect.x + 3;
+    let name_x = icon_x + ICON_WIDTH + 1;
     let right = rect.right().saturating_sub(1);
-    let available = right.saturating_sub(name_x);
-    // Reserve at least half the row for the name. Narrow sidebars show fewer logos.
-    let summary_budget = available / 2;
-    let label = project.activity.label();
-    let label = if display_width(label) <= summary_budget {
-        label
-    } else {
-        match project.activity {
-            ProjectActivity::NeedsYou => "wait",
-            ProjectActivity::Running => "run",
-            ProjectActivity::Done => "done",
-            ProjectActivity::Idle => "idle",
-        }
-    };
-    let status_width = display_width(label).min(summary_budget);
+    match icon {
+        Some(icon) => put_text(
+            buffer,
+            icon_x,
+            rect.y,
+            ICON_WIDTH,
+            icon,
+            Style::default().bg(fill),
+        ),
+        // a quiet stand-in keeps the name in line with the others
+        None => put_text(
+            buffer,
+            icon_x,
+            rect.y,
+            1,
+            "·",
+            Style::default().fg(t.muted).bg(fill),
+        ),
+    }
+
+    // Right side: logos (folded only) then the word. At most half the row,
+    // so the name keeps its room.
+    let budget = right.saturating_sub(name_x) / 2;
+    let word = project.activity.label(budget);
+    let word_width = word.map_or(0, display_width);
     let mut logo_count = 0usize;
     let mut logos_width = 0u16;
     if !expanded {
-        for agent in project.logos.iter().flatten() {
+        for agent in project.logos_by_urgency() {
             let width = display_width(brutal::agent_logo(agent.agent.as_deref(), icon_font));
-            if status_width + 1 + logos_width + width > summary_budget {
+            let gap = u16::from(word_width > 0);
+            if logos_width + width + gap + word_width > budget {
                 break;
             }
             logos_width += width;
             logo_count += 1;
         }
     }
-    let summary_width = status_width + logos_width + u16::from(logo_count > 0);
+    let gap = u16::from(logo_count > 0 && word_width > 0);
+    let summary_width = logos_width + gap + word_width;
     let summary_x = right.saturating_sub(summary_width);
-    let name_width = summary_x.saturating_sub(name_x + 1);
+    let name_width = summary_x
+        .saturating_sub(name_x)
+        .saturating_sub(u16::from(summary_width > 0));
+    let name_style = Style::default().fg(t.ink).bg(fill);
     put_text(
         buffer,
         name_x,
         rect.y,
         name_width,
-        &brutal::clip(
-            &match icon {
-                Some(icon) => Cow::Owned(format!("{icon} {}", workspace.label)),
-                None => Cow::Borrowed(workspace.label.as_str()),
-            },
-            usize::from(name_width),
-        ),
+        &brutal::clip(&workspace.label, usize::from(name_width)),
         if workspace.focused {
-            Style::default()
-                .fg(t.ink)
-                .bg(fill)
-                .add_modifier(Modifier::BOLD)
+            name_style.add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(t.ink).bg(fill)
+            name_style
         },
     );
-    put_text(
-        buffer,
-        summary_x,
-        rect.y,
-        status_width,
-        label,
-        Style::default()
-            .fg(t.text(project.activity.color(t), fill))
-            .bg(fill),
-    );
-    let mut logo_x = summary_x + status_width + 1;
-    for agent in project.logos.iter().flatten().take(logo_count) {
+    let mut logo_x = summary_x;
+    for agent in project.logos_by_urgency().take(logo_count) {
         let logo = brutal::agent_logo(agent.agent.as_deref(), icon_font);
         let width = display_width(logo);
         put_text(
@@ -898,8 +928,20 @@ fn render_project(
         );
         logo_x += width;
     }
+    if let Some(word) = word {
+        put_text(
+            buffer,
+            logo_x + gap,
+            rect.y,
+            word_width,
+            word,
+            Style::default()
+                .fg(t.text(project.activity.color(t), fill))
+                .bg(fill),
+        );
+    }
     hits.workspaces.push(WorkspaceHit {
-        rect: Rect::new(name_x, rect.y, right.saturating_sub(name_x), 1),
+        rect: Rect::new(icon_x, rect.y, right.saturating_sub(icon_x), 1),
         endpoint_id: ClientEndpointId::Local,
         workspace_id: workspace.workspace_id.clone(),
         indented: false,
@@ -908,6 +950,8 @@ fn render_project(
     if !expanded {
         return;
     }
+
+    let content_width = right.saturating_sub(name_x);
     let mut y = rect.y + 1;
     if let Some(branch) = branch {
         if y < rect.bottom() {
@@ -915,93 +959,89 @@ fn render_project(
                 buffer,
                 name_x,
                 y,
-                available,
-                &brutal::clip(&format!("git · {branch}"), usize::from(available)),
+                content_width,
+                &brutal::clip(&format!("⎇ {branch}"), usize::from(content_width)),
                 Style::default().fg(t.muted).bg(fill),
             );
             y += 1;
         }
     }
-    // Tab numbers only help when there is more than one tab.
-    let number_width = if project.tabs > 1 {
-        project
-            .rows
-            .iter()
-            .map(|(tab, _)| tab_number_width(*tab))
-            .max()
-            .unwrap_or(1)
-            + 1
-    } else {
-        0
-    };
-    let last_tab = project.rows.last().map(|(tab, _)| *tab);
-    let guide_x = rect.x + 2;
-    let content_x = guide_x + 2 + number_width;
-    let content_width = right.saturating_sub(content_x);
+    // Tab numbers sit in the icon column, on each tab's first pane, and
+    // only when the project has more than one tab.
+    let numbered = project.tabs > 1;
+    // the open tab's number stands out like the open pane
+    let open_tab = project
+        .rows
+        .iter()
+        .find(|(_, row)| match row {
+            ProjectRow::Agent(agent) => agent.focused,
+            ProjectRow::Shell(pane) => pane.focused,
+        })
+        .map(|(tab, _)| *tab);
     for (index, (tab, project_row)) in project.rows.iter().enumerate() {
         if y >= rect.bottom() {
             break;
         }
         let first_in_tab = index == 0 || project.rows[index - 1].0 != *tab;
-        let in_last_tab = Some(*tab) == last_tab;
-        let guide = match (first_in_tab, in_last_tab) {
-            (true, true) => "└",
-            (true, false) => "├",
-            (false, true) => " ",
-            (false, false) => "│",
-        };
-        put_text(
-            buffer,
-            guide_x,
-            y,
-            1,
-            guide,
-            Style::default().fg(t.muted).bg(fill),
-        );
-        if number_width > 0 && first_in_tab && *tab != usize::MAX {
-            let number = tab.to_string();
-            put_text(
-                buffer,
-                guide_x + 2,
-                y,
-                number_width,
-                &number,
-                Style::default().fg(t.muted).bg(fill),
-            );
-        }
-        let (focused, pane_id, name, task, status, logo, color) = match project_row {
+        let (focused, pane_id, name, task, status, logo, color, shell) = match project_row {
             ProjectRow::Agent(agent) => (
                 agent.focused,
                 agent.pane_id.as_str(),
-                row_name(&brutal::agent_label(agent)),
+                Cow::Owned(row_name(&brutal::agent_label(agent))),
                 brutal::agent_task(agent),
                 agent.agent_status,
                 brutal::agent_logo(agent.agent.as_deref(), icon_font),
                 agent_color(agent, t),
+                false,
             ),
             ProjectRow::Shell(pane) => (
                 pane.focused,
                 pane.pane_id.as_str(),
-                pane.label
-                    .as_deref()
-                    .filter(|label| !label.is_empty())
-                    .unwrap_or("Shell")
-                    .to_owned(),
+                Cow::Borrowed(
+                    pane.label
+                        .as_deref()
+                        .filter(|label| !label.is_empty())
+                        .unwrap_or("Shell"),
+                ),
                 String::new(),
                 AgentStatus::Idle,
                 "›_",
                 t.muted,
+                true,
             ),
         };
-        let row = Rect::new(content_x, y, content_width, 1);
+        // the pane in the open tab: a tinted row, one cell of padding before it
+        let row = Rect::new(
+            name_x.saturating_sub(1),
+            y,
+            right.saturating_sub(name_x) + 1,
+            1,
+        );
         let row_bg = if focused { t.frame } else { fill };
         buffer.set_style(row, Style::default().bg(row_bg));
-        let logo_width = display_width(logo);
+        if numbered && first_in_tab && *tab != usize::MAX {
+            put_text(
+                buffer,
+                icon_x,
+                y,
+                ICON_WIDTH,
+                &tab.to_string(),
+                if open_tab == Some(*tab) {
+                    Style::default()
+                        .fg(t.ink)
+                        .bg(fill)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(t.muted).bg(fill)
+                },
+            );
+        }
         let active = matches!(status, AgentStatus::Working | AgentStatus::Blocked);
+        let logo_width = display_width(logo);
         let icon_style = Style::default().fg(t.mark(color, row_bg)).bg(row_bg);
         put_text(
             buffer,
-            row.x,
+            name_x,
             y,
             logo_width,
             logo,
@@ -1011,16 +1051,25 @@ fn render_project(
                 icon_style
             },
         );
-        let text_x = row.x + logo_width + 1;
-        let note = if status == AgentStatus::Blocked {
-            "needs you"
-        } else {
+        let text_x = name_x + logo_width + 1;
+        // Every agent names its state on the right; shells have none. The
+        // long word unless it would squeeze the name.
+        let state = ProjectActivity::from_status(status);
+        let note = if shell {
             ""
+        } else {
+            let room = right
+                .saturating_sub(text_x)
+                .saturating_sub(display_width(&name).min(8) + 1);
+            state.word(room)
         };
         let note_width = display_width(note);
-        let text_width = right.saturating_sub(text_x + note_width + u16::from(!note.is_empty()));
+        let text_width = right.saturating_sub(text_x + note_width + u16::from(note_width > 0));
         let name_width = display_width(&name).min(text_width);
-        let name_style = Style::default().fg(t.ink).bg(row_bg);
+        // shells step back so agents stand out, unless one is open
+        let name_style = Style::default()
+            .fg(if shell && !focused { t.muted } else { t.ink })
+            .bg(row_bg);
         put_text(
             buffer,
             text_x,
@@ -1034,26 +1083,48 @@ fn render_project(
             },
         );
         // Two spaces keep the agent's name apart from its task.
-        let task_x = text_x + name_width + 2;
         let task_width = text_width.saturating_sub(name_width + 2);
-        put_text(
-            buffer,
-            task_x,
-            y,
-            task_width,
-            &brutal::clip(&task, usize::from(task_width)),
-            Style::default().fg(t.muted).bg(row_bg),
-        );
-        if !note.is_empty() {
-            put_right_text(
+        if task_width > 0 && !task.is_empty() {
+            put_text(
                 buffer,
-                row,
+                text_x + name_width + 2,
                 y,
-                note,
-                Style::default().fg(t.text(t.red, row_bg)).bg(row_bg),
+                task_width,
+                &brutal::clip(&task, usize::from(task_width)),
+                Style::default().fg(t.muted).bg(row_bg),
             );
         }
-        hits.agents.push((row, pane_id.to_owned()));
+        if note_width > 0 {
+            let style = Style::default()
+                .fg(t.text(state.color(t), row_bg))
+                .bg(row_bg);
+            put_right_text(
+                buffer,
+                Rect::new(row.x, y, right.saturating_sub(row.x), 1),
+                y,
+                note,
+                if state == ProjectActivity::NeedsYou {
+                    style.add_modifier(Modifier::BOLD)
+                } else {
+                    style
+                },
+            );
+        }
+        // the open pane: an ink bar on its left edge, like the open tab
+        if focused {
+            put_text(
+                buffer,
+                row.x,
+                y,
+                1,
+                "▌",
+                Style::default().fg(t.ink).bg(row_bg),
+            );
+        }
+        hits.agents.push((
+            Rect::new(icon_x, y, right.saturating_sub(icon_x), 1),
+            pane_id.to_owned(),
+        ));
         y += 1;
     }
 }
@@ -1079,6 +1150,42 @@ mod tests {
         assert_eq!(row_name("OPUS 5.5"), "Opus 5.5");
         assert_eq!(row_name("GPT-6 LUNA"), "GPT-6 Luna");
         assert_eq!(row_name("Claude"), "Claude");
+    }
+
+    #[test]
+    fn git_read_counts_only_for_folders_inside_its_repository() {
+        assert!(same_or_inside("/repo", "/repo"));
+        assert!(same_or_inside("/repo/src/app", "/repo/"));
+        assert!(same_or_inside(r"C:\work\repo\src", "C:/work/repo"));
+        assert!(!same_or_inside("/repository", "/repo"));
+        assert!(!same_or_inside("/other", "/repo"));
+        assert!(!same_or_inside("/re", "/repo"));
+    }
+
+    #[test]
+    fn a_read_of_the_previous_project_gives_way_to_the_servers_branch() {
+        let mut snapshot = super::super::tests::snapshot();
+        snapshot.workspaces[0].focused = true;
+        snapshot.workspaces[0].branch = Some("server-branch".into());
+        let read = |root: &str| super::super::git_panel::GitPanelData {
+            root: root.into(),
+            branch: "panel-branch".into(),
+            ..Default::default()
+        };
+        // the read is about the focused pane's repository: it wins
+        let here = read("/repo");
+        let git = focused_pane_git(&snapshot, Some(&here));
+        assert_eq!(
+            shown_branch(&snapshot.workspaces[0], git),
+            Some("panel-branch")
+        );
+        // a read left over from another project: the server's branch shows
+        let elsewhere = read("/other-project");
+        let git = focused_pane_git(&snapshot, Some(&elsewhere));
+        assert_eq!(
+            shown_branch(&snapshot.workspaces[0], git),
+            Some("server-branch")
+        );
     }
 
     #[test]

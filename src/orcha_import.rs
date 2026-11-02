@@ -230,15 +230,19 @@ fn jetbrains_recent(root: &Path, home: &Path) -> Vec<(String, String)> {
     let Ok(products) = std::fs::read_dir(root) else {
         return Vec::new();
     };
-    let mut files: Vec<PathBuf> = products
+    let mut files: Vec<(String, PathBuf)> = products
         .flatten()
-        .map(|entry| entry.path().join("options/recentProjects.xml"))
-        .filter(|file| file.is_file())
+        .map(|entry| {
+            (
+                entry.file_name().to_string_lossy().into_owned(),
+                entry.path().join("options/recentProjects.xml"),
+            )
+        })
+        .filter(|(_, file)| file.is_file())
         .collect();
-    files.sort();
-    files.reverse();
+    files.sort_by(|(a, _), (b, _)| newest_ide_first(a, b));
     let mut out = Vec::new();
-    for file in files {
+    for (_, file) in files {
         if let Ok(text) = std::fs::read_to_string(file) {
             for (name, path) in parse_jetbrains_recent(&text, home) {
                 push_unique(&mut out, Some(&name), &path);
@@ -247,6 +251,23 @@ fn jetbrains_recent(root: &Path, home: &Path) -> Vec<(String, String)> {
     }
     out.truncate(RECENT_LIMIT);
     out
+}
+
+/// The version in a JetBrains settings folder name, as numbers:
+/// "IntelliJIdea2025.10" is [2025, 10].
+fn ide_version(folder: &str) -> Vec<u64> {
+    let Some(start) = folder.find(|ch: char| ch.is_ascii_digit()) else {
+        return Vec::new();
+    };
+    folder[start..]
+        .split(|ch: char| !ch.is_ascii_digit())
+        .filter_map(|part| part.parse().ok())
+        .collect()
+}
+
+/// Newer IDE versions first by number (2025.10 before 2025.2), then by name.
+fn newest_ide_first(a: &str, b: &str) -> std::cmp::Ordering {
+    ide_version(b).cmp(&ide_version(a)).then_with(|| b.cmp(a))
 }
 
 fn parse_jetbrains_recent(text: &str, home: &Path) -> Vec<(String, String)> {
@@ -322,6 +343,28 @@ mod tests {
         assert!(key_within("/p/app/src", "/p/app"));
         assert!(!key_within("/p/application", "/p/app"));
         assert!(key_within("/p/app", "/"));
+    }
+
+    #[test]
+    fn newer_ide_versions_come_first_by_number() {
+        assert_eq!(ide_version("IntelliJIdea2025.10"), vec![2025, 10]);
+        assert_eq!(ide_version("Rider"), Vec::<u64>::new());
+        let mut folders = vec![
+            "IntelliJIdea2025.2",
+            "WebStorm2023.1",
+            "IntelliJIdea2025.10",
+            "PyCharm2024.3",
+        ];
+        folders.sort_by(|a, b| newest_ide_first(a, b));
+        assert_eq!(
+            folders,
+            [
+                "IntelliJIdea2025.10",
+                "IntelliJIdea2025.2",
+                "PyCharm2024.3",
+                "WebStorm2023.1",
+            ]
+        );
     }
 
     #[test]

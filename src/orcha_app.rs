@@ -31,6 +31,100 @@ const IMPORT_MARKER: &str = ".imported-from-herdr";
 /// orcha-config's own commands, handed to its CLI.
 const CONFIG_TOOL_COMMANDS: [&str; 6] = ["setup", "menu", "edit", "logos", "plugin", "apply"];
 
+/// Serialize read/modify/write operations across settings and account processes.
+/// Lock a stable sibling, since replacing the data file changes its inode.
+/// Keep the returned file alive until the atomic replacement has completed.
+pub(crate) fn lock_for_update(path: &Path) -> std::io::Result<std::fs::File> {
+    let target = crate::persist::resolve_write_target(path)?;
+    let name = target.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "missing config file name")
+    })?;
+    let folder = target
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    std::fs::create_dir_all(folder)?;
+    let lock = folder.join(format!(".{}.orcha-lock", name.to_string_lossy()));
+    let file = match crate::platform::create_private_state_file(&lock) {
+        Ok(file) => file,
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+            // a planted link must not make us open (and lock) some other file
+            if !std::fs::symlink_metadata(&lock)?.file_type().is_file() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("{} is not a plain file", lock.display()),
+                ));
+            }
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(lock)?
+        }
+        Err(err) => return Err(err),
+    };
+    file.lock()?;
+    Ok(file)
+}
+
+/// Writes `text` to `path` through a temporary file in the same folder, so a
+/// reader never sees half of it and a failed write leaves the old file whole.
+/// A symlink keeps its link: the file it points at gets the new text.
+///
+/// The file keeps the old one's permissions; a new file is private (0600).
+/// Private is the default on purpose: account profiles, fuel and the
+/// default-account choice go through here as well as config files, and an
+/// owner-only config.toml in the user's own config folder costs nothing.
+/// Contents and the rename are flushed to disk before this returns.
+pub(crate) fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let target = crate::persist::resolve_write_target(path)?;
+    let name = target.file_name().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("{} is not a file", target.display()),
+        )
+    })?;
+    let folder = target
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(folder)?;
+    let tmp = folder.join(format!(
+        ".{}.orcha-tmp-{}-{}",
+        name.to_string_lossy(),
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    // Create exclusively and privately: do not follow a stale temporary
+    // symlink or expose an account profile before permissions are copied.
+    let mut file = crate::platform::create_private_state_file(&tmp)?;
+    use std::io::Write;
+    let written = file
+        .write_all(text.as_bytes())
+        .and_then(|()| match std::fs::metadata(&target) {
+            // the new file keeps the old one's permissions
+            Ok(old) => file.set_permissions(old.permissions()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err),
+        })
+        // a rename can reach the disk before the contents do: flush them first
+        .and_then(|()| file.sync_all());
+    drop(file);
+    let written = written.and_then(|()| crate::platform::replace_file(&tmp, &target));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return written;
+    }
+    // The new text is in place either way; a folder that cannot be flushed
+    // only weakens crash safety, so it is logged rather than reported as
+    // a failed save.
+    if let Err(err) = crate::platform::sync_parent_directory(folder) {
+        tracing::warn!(%err, path = %target.display(), "could not flush the folder after saving");
+    }
+    Ok(())
+}
+
 /// Run as orcha. Children (the server, pane shells) inherit it through the
 /// environment, so one session never mixes the two identities.
 pub(crate) fn is_orcha() -> bool {
@@ -674,8 +768,16 @@ fn uninstall() -> i32 {
         println!("Nothing changed.");
         return 1;
     }
+    // what could not be removed, told at the end
+    let mut left: Vec<String> = Vec::new();
+    let remove = |left: &mut Vec<String>, path: &Path, removed: std::io::Result<()>| match removed {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => left.push(format!("{} ({err})", path.display())),
+    };
     let me = std::env::current_exe().ok();
     if let Some(me) = &me {
+        // fails when no server runs, which is fine
         let _ = std::process::Command::new(me)
             .args(["server", "stop"])
             .stdout(std::process::Stdio::null())
@@ -684,7 +786,15 @@ fn uninstall() -> i32 {
     }
     if let Some(tool) = config_tool() {
         let args = ["uninstall".to_owned(), "--all".to_owned()];
-        let _ = crate::platform::orcha_tool_command(&tool, &args).status();
+        match crate::platform::orcha_tool_command(&tool, &args).status() {
+            Ok(status) if status.success() => {}
+            Ok(status) => left.push(format!(
+                "what orcha-config set up (its uninstall stopped: {status})"
+            )),
+            Err(err) => left.push(format!(
+                "what orcha-config set up (its uninstall did not run: {err})"
+            )),
+        }
         // the extras' folder, when the installer made it
         let installed = std::env::var_os("ORCHA_DIR")
             .map(PathBuf::from)
@@ -694,7 +804,7 @@ fn uninstall() -> i32 {
             std::fs::canonicalize(&installed),
         ) {
             if checkout == installed {
-                let _ = std::fs::remove_dir_all(checkout);
+                remove(&mut left, checkout, std::fs::remove_dir_all(checkout));
             } else {
                 println!("kept {} (not made by the installer)", checkout.display());
             }
@@ -716,11 +826,11 @@ fn uninstall() -> i32 {
         ))
     {
         for folder in &folders {
-            let _ = std::fs::remove_dir_all(folder);
+            remove(&mut left, folder, std::fs::remove_dir_all(folder));
         }
     }
     if let Some(me) = me.filter(|me| me.starts_with(home.join(".local/bin"))) {
-        let _ = std::fs::remove_file(me);
+        remove(&mut left, &me, std::fs::remove_file(&me));
     }
     match crate::platform::remove_orcha_installation() {
         #[cfg(not(windows))]
@@ -733,10 +843,15 @@ fn uninstall() -> i32 {
         Ok(crate::platform::OrchaUninstallResult::Scheduled(path)) => {
             println!("Removing {} after this process exits.", path.display());
         }
-        Err(err) => {
-            eprintln!("could not remove the managed installation: {err}");
-            return 1;
+        Err(err) => left.push(format!("the managed installation ({err})")),
+    }
+    if !left.is_empty() {
+        eprintln!("orcha could not remove everything. Still there:");
+        for item in &left {
+            eprintln!("  {item}");
         }
+        eprintln!("Delete these by hand, or run orcha uninstall again.");
+        return 1;
     }
     println!("orcha is uninstalled. Thanks for trying it 🐋🍵");
     0
@@ -829,21 +944,26 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 /// First run as orcha: bring herdr's config, workspaces, plugins and sounds
-/// over once. Returns what was imported, for the startup notice.
-pub(crate) fn import_from_herdr_once() -> Option<String> {
+/// over once. Returns what was imported, for the startup notice. When the
+/// config cannot be saved nothing is marked done, so the next start tries
+/// again.
+pub(crate) fn import_from_herdr_once() -> Result<Option<String>, String> {
     if !is_orcha() {
-        return None;
+        return Ok(None);
     }
     let dir = crate::config::config_dir();
     let marker = dir.join(IMPORT_MARKER);
     if marker.exists() || dir.join("config.toml").exists() {
-        return None;
+        return Ok(None);
     }
     let legacy = legacy_dir();
-    let config = std::fs::read_to_string(legacy.join("config.toml")).ok()?;
-    std::fs::create_dir_all(&dir).ok()?;
+    let Ok(config) = std::fs::read_to_string(legacy.join("config.toml")) else {
+        return Ok(None);
+    };
+    let target = dir.join("config.toml");
+    write_atomic(&target, &import_config(&config))
+        .map_err(|err| format!("could not save {}: {err}", target.display()))?;
     let mut imported = vec!["config"];
-    let _ = std::fs::write(dir.join("config.toml"), import_config(&config));
     if let Some(session) = std::fs::read_to_string(legacy.join("session.json"))
         .ok()
         .and_then(|text| import_session(&text))
@@ -863,7 +983,7 @@ pub(crate) fn import_from_herdr_once() -> Option<String> {
         &marker,
         format!("imported {summary} from {}\n", legacy.display()),
     );
-    Some(summary)
+    Ok(Some(summary))
 }
 
 #[cfg(test)]
@@ -893,5 +1013,82 @@ mod tests {
         let out = import_session(text).expect("json");
         assert!(out.contains("/x"));
         assert!(!out.contains("agent_session") && !out.contains("agent_resume"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_writes_keep_private_permissions_and_preserve_existing_modes() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("orcha-atomic-mode-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("test folder");
+        let path = dir.join("profile.json");
+        write_atomic(&path, "first").expect("new private file");
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+        write_atomic(&path, "second").expect("replace existing file");
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "second");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn atomic_writes_create_the_folder_and_leave_no_temporary_files() {
+        let dir = std::env::temp_dir().join(format!(
+            "orcha-atomic-new-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = dir.join("nested").join("config.toml");
+        write_atomic(&path, "a = 1\n").expect("new file in a new folder");
+        write_atomic(&path, "a = 2\n").expect("replace it");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "a = 2\n");
+        assert_eq!(
+            std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+            1
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_lock_file_is_refused_and_its_target_left_alone() {
+        let dir = std::env::temp_dir().join(format!("orcha-lock-link-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("test folder");
+        let path = dir.join("config.toml");
+        // an honest lock works, twice in a row
+        drop(lock_for_update(&path).expect("first lock"));
+        drop(lock_for_update(&path).expect("the lock file is reused"));
+        let lock = dir.join(".config.toml.orcha-lock");
+        std::fs::remove_file(&lock).unwrap();
+        let elsewhere = dir.join("elsewhere");
+        std::fs::write(&elsewhere, "keep").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &lock).unwrap();
+        assert!(lock_for_update(&path).is_err());
+        assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "keep");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_writes_refuse_a_symlink_loop() {
+        let dir = std::env::temp_dir().join(format!("orcha-atomic-loop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("test folder");
+        let (one, two) = (dir.join("one.toml"), dir.join("two.toml"));
+        std::os::unix::fs::symlink(&two, &one).unwrap();
+        std::os::unix::fs::symlink(&one, &two).unwrap();
+        assert!(write_atomic(&one, "x").is_err());
+        assert!(lock_for_update(&one).is_err());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

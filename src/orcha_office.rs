@@ -121,9 +121,10 @@ pub(crate) fn summary() -> Option<(bool, Option<u64>)> {
 }
 
 /// Stops Easy Job's server and panes without questions (the caller asked).
-pub(crate) fn stop_quietly() {
-    stop_bridge();
+pub(crate) fn stop_quietly() -> Result<(), String> {
+    let server = stop_bridge();
     stop_panes();
+    server
 }
 
 /// The server's pid from the state file Easy Job keeps, when it still runs.
@@ -167,18 +168,23 @@ pub(crate) fn open_quietly() -> Result<(), String> {
 }
 
 /// Stops the server Easy Job started by itself (`open`), which is not a pane.
-fn stop_bridge() {
+fn stop_bridge() -> Result<(), String> {
     if bridge_pid().is_none() {
-        return;
+        return Ok(());
     }
-    if let Some(root) = plugin_root() {
-        let _ = Command::new(root.join("bin").join("easy-job"))
-            .arg("stop")
-            .current_dir(&root)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+    let root = plugin_root().ok_or("could not find Easy Job's files to stop its server")?;
+    let status = Command::new(root.join("bin").join("easy-job"))
+        .arg("stop")
+        .current_dir(&root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|err| format!("could not stop Easy Job's server: {err}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("Easy Job's server did not stop ({status})"))
     }
 }
 
@@ -189,7 +195,11 @@ pub(crate) fn restart_detached_office() {
     if bridge_pid().is_none() {
         return;
     }
-    stop_bridge();
+    if let Err(err) = stop_bridge() {
+        // the old server still runs: a second one would fight it for the port
+        tracing::warn!(%err, "Easy Job was not restarted after its update");
+        return;
+    }
     let Some(root) = plugin_root() else {
         return;
     };
@@ -212,8 +222,10 @@ pub(crate) fn restart_detached_office() {
 /// Removes Easy Job without questions (the caller asked): stops its server
 /// and panes, then uninstalls it. Its data in ~/.easy-job stays.
 pub(crate) fn remove_quietly() -> Result<(), String> {
-    stop_bridge();
-    stop_panes();
+    if let Err(err) = stop_quietly() {
+        // remove it anyway, so a broken install can still be taken out
+        tracing::warn!(%err, "Easy Job's server did not stop before its removal");
+    }
     let output = orcha(&["plugin", "uninstall", PLUGIN_ID])
         .stdin(Stdio::null())
         .output()
@@ -282,7 +294,10 @@ fn stop() -> i32 {
         println!("Easy Job is not running. Nothing to stop.");
         return 0;
     }
-    stop_quietly();
+    if let Err(err) = stop_quietly() {
+        eprintln!("{err}. Try again: orcha office stop");
+        return 1;
+    }
     println!("Easy Job stopped. Open it again with: orcha office");
     0
 }
@@ -350,8 +365,9 @@ fn remove() -> i32 {
         println!("Nothing changed.");
         return 1;
     }
-    stop_bridge();
-    stop_panes();
+    if let Err(err) = stop_quietly() {
+        eprintln!("{err}. Removing it anyway.");
+    }
     if !status_of(orcha(&["plugin", "uninstall", PLUGIN_ID]).stdin(Stdio::null())) {
         eprintln!("Easy Job was not removed.");
         return 1;

@@ -16,12 +16,16 @@ fn session_history_path() -> PathBuf {
     crate::session::data_dir().join("session-history.json")
 }
 
+/// How many symlinks a write follows before it gives up on a loop.
+const MAX_SYMLINK_HOPS: usize = 16;
+
 // Follow symlinks manually so a write through a (possibly dangling) symlink
 // lands on the target. `fs::canonicalize` requires the target to exist, which
 // excludes the dangling-symlink case stow users hit on the very first save.
-fn resolve_write_target(path: &Path) -> std::io::Result<PathBuf> {
+pub(crate) fn resolve_write_target(path: &Path) -> std::io::Result<PathBuf> {
     let mut current = path.to_path_buf();
-    for _ in 0..16 {
+    let mut hops = 0;
+    loop {
         let meta = match std::fs::symlink_metadata(&current) {
             Ok(meta) => meta,
             Err(_) => return Ok(current),
@@ -29,6 +33,14 @@ fn resolve_write_target(path: &Path) -> std::io::Result<PathBuf> {
         if !meta.file_type().is_symlink() {
             return Ok(current);
         }
+        // a loop, or a chain too long to trust: never write through its last link
+        if hops == MAX_SYMLINK_HOPS {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("{} has too many levels of symbolic links", path.display()),
+            ));
+        }
+        hops += 1;
         let link = std::fs::read_link(&current)?;
         current = if link.is_absolute() {
             link
@@ -39,7 +51,6 @@ fn resolve_write_target(path: &Path) -> std::io::Result<PathBuf> {
                 .join(link)
         };
     }
-    Ok(current)
 }
 
 pub(super) fn save_to_path(path: &Path, snapshot: &SessionSnapshot) -> std::io::Result<()> {
@@ -345,6 +356,33 @@ mod tests {
             .file_type()
             .is_symlink());
         assert!(target.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_write_target_refuses_a_symlink_loop_but_follows_a_long_chain() {
+        let session = temp_session_path("symlink-loop");
+        let dir = session.parent().unwrap();
+        std::fs::create_dir_all(dir).unwrap();
+        let (one, two) = (dir.join("one.json"), dir.join("two.json"));
+        std::os::unix::fs::symlink(&two, &one).unwrap();
+        std::os::unix::fs::symlink(&one, &two).unwrap();
+        assert!(resolve_write_target(&one).is_err());
+        assert!(save_to_path(&one, &empty_snapshot()).is_err());
+
+        // exactly MAX_SYMLINK_HOPS links still reach the file
+        let target = dir.join("real.json");
+        let mut next = target.clone();
+        for hop in 0..MAX_SYMLINK_HOPS {
+            let link = dir.join(format!("link-{hop}.json"));
+            std::os::unix::fs::symlink(&next, &link).unwrap();
+            next = link;
+        }
+        assert_eq!(resolve_write_target(&next).unwrap(), target);
+        let longer = dir.join("one-more.json");
+        std::os::unix::fs::symlink(&next, &longer).unwrap();
+        assert!(resolve_write_target(&longer).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[cfg(unix)]

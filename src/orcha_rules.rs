@@ -366,11 +366,21 @@ pub(crate) fn should_offer(folder: &Path) -> bool {
             .is_empty()
 }
 
+/// The team's instruction file as it is: empty when there is none yet, an
+/// error when it cannot be read (so it is never written over).
+fn read_instructions(file: &Path) -> Result<String, String> {
+    match std::fs::read_to_string(file) {
+        Ok(text) => Ok(text),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(err) => Err(format!("could not read {}: {err}", file.display())),
+    }
+}
+
 /// What applying `ids` to `project` would change: (file, diff, changed).
 pub(crate) fn preview(project: &Path, ids: &[String]) -> Result<(PathBuf, String, bool), String> {
     let ids = known(ids)?;
     let file = instruction_file(project);
-    let old = std::fs::read_to_string(&file).unwrap_or_default();
+    let old = read_instructions(&file)?;
     let new = with_rules(&old, &ids);
     Ok((file, diff(&old, &new), old != new))
 }
@@ -378,10 +388,11 @@ pub(crate) fn preview(project: &Path, ids: &[String]) -> Result<(PathBuf, String
 pub(crate) fn apply(project: &Path, ids: &[String]) -> Result<PathBuf, String> {
     let ids = known(ids)?;
     let file = instruction_file(project);
-    let old = std::fs::read_to_string(&file).unwrap_or_default();
+    let old = read_instructions(&file)?;
     let new = with_rules(&old, &ids);
     if new != old {
-        std::fs::write(&file, new)
+        // all or nothing: a failed write leaves the team's file whole
+        crate::orcha_app::write_atomic(&file, &new)
             .map_err(|err| format!("could not write {}: {err}", file.display()))?;
     }
     tracing::info!(file = %file.display(), rules = ?ids, "orcha: project rules written");
@@ -554,6 +565,36 @@ mod tests {
         assert_eq!(instruction_file(&dir), dir.join("AGENTS.md"));
         std::fs::write(dir.join("CLAUDE.md"), "Own rules here.\n").unwrap();
         assert_eq!(instruction_file(&dir), dir.join("CLAUDE.md"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn applying_rules_writes_through_a_symlinked_claude_md() {
+        let dir = std::env::temp_dir().join(format!("orcha-rules-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("shared")).unwrap();
+        let real = dir.join("shared").join("team.md");
+        std::fs::write(&real, "# Team rules\n\nUse tabs.\n").unwrap();
+        let link = dir.join("CLAUDE.md");
+        std::os::unix::fs::symlink("shared/team.md", &link).unwrap();
+
+        assert_eq!(apply(&dir, &ids(&["verify"])).unwrap(), link);
+
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        let text = std::fs::read_to_string(&real).unwrap();
+        assert!(text.starts_with("# Team rules\n\nUse tabs."));
+        assert_eq!(applied_in(&text), ids(&["verify"]));
+        // no temporary file left next to either
+        for folder in [dir.clone(), dir.join("shared")] {
+            for entry in std::fs::read_dir(folder).unwrap() {
+                let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+                assert!(!name.contains("orcha-tmp"), "{name}");
+            }
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

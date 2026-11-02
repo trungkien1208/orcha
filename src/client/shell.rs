@@ -20,6 +20,7 @@ mod file_tree;
 mod file_viewer;
 pub(super) use endpoints::*;
 mod accounts;
+mod background_job;
 mod brutal;
 mod git_panel;
 mod global_menu;

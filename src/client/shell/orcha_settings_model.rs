@@ -3,28 +3,163 @@
 //! rules and skills, the accounts and the background list. The web server
 //! in `orcha_settings_web` only routes requests here.
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::ops::RangeInclusive;
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
 use super::settings::{
     installed_apps, ACCENTS, FONT_SIZES, GIT_GUI_APPS, IDE_APPS, SIDEBAR_WIDTHS,
 };
+use crate::config::{
+    Config, ConfigEdit, FuelPlacement, IconMode, ProcessPlacement, SidebarSide,
+    StatusIndicatorStyle, SwitchMode, ToastDelivery,
+};
+
+/// How low an account runs, in percent, before each hand-off step: the
+/// page's sliders and what saving accepts. 0 turns a step off.
+const CHECKLIST_PERCENT: RangeInclusive<u8> = 0..=60;
+const LOW_FUEL_PERCENT: RangeInclusive<u8> = 1..=50;
+const AUTO_HANDOFF_PERCENT: RangeInclusive<u8> = 0..=50;
+
+/// The lines of text the page edits in config.json: "table.field", or a
+/// key at the top.
+const JSON_TEXTS: &[&str] = &[
+    "weather_city",
+    "tracker.task_pattern",
+    "tracker.azure_pat_file",
+    "repo.branch_prefix",
+    "repo.base",
+    "repo.protected",
+    "repo.check",
+];
+
+/// Each variant, the value config.toml and the page call it, and the
+/// page's words for it, in the order the page lists them.
+type Choices<T> = &'static [(T, &'static str, &'static str)];
+
+/// A config.toml choice the page offers. Showing it and saving it both
+/// read its one table, so the two cannot drift apart.
+trait Choice: Copy + PartialEq + 'static {
+    const CHOICES: Choices<Self>;
+
+    fn as_str(self) -> &'static str {
+        Self::CHOICES
+            .iter()
+            .find(|(each, _, _)| *each == self)
+            .map_or("", |(_, value, _)| value)
+    }
+
+    /// The variant the page sent; any other value is refused, never guessed.
+    fn parse(value: &Value) -> Result<Self, String> {
+        let text = value.as_str().ok_or("expected text")?;
+        Self::CHOICES
+            .iter()
+            .find(|(_, each, _)| *each == text)
+            .map(|(variant, _, _)| *variant)
+            .ok_or_else(|| not_one_of(text, Self::CHOICES.iter().map(|(_, value, _)| *value)))
+    }
+}
+
+impl Choice for SidebarSide {
+    const CHOICES: Choices<Self> = &[
+        (Self::Left, "left", "left"),
+        (Self::Right, "right", "right"),
+    ];
+}
+
+impl Choice for FuelPlacement {
+    const CHOICES: Choices<Self> = &[
+        (Self::Panel, "panel", "right panel"),
+        (Self::StatusBar, "status_bar", "status bar"),
+    ];
+}
+
+impl Choice for ProcessPlacement {
+    const CHOICES: Choices<Self> = &[
+        (Self::Sidebar, "sidebar", "sidebar"),
+        (Self::Panel, "panel", "right panel"),
+        (Self::Off, "off", "hidden"),
+    ];
+}
+
+impl Choice for IconMode {
+    const CHOICES: Choices<Self> = &[
+        (Self::Auto, "auto", "auto"),
+        (Self::Font, "font", "icon font"),
+        (Self::Symbols, "symbols", "plain symbols"),
+    ];
+}
+
+impl Choice for StatusIndicatorStyle {
+    const CHOICES: Choices<Self> = &[
+        (Self::Dots, "dots", "dots"),
+        (Self::Symbols, "symbols", "symbols"),
+    ];
+}
+
+impl Choice for ToastDelivery {
+    const CHOICES: Choices<Self> = &[
+        (Self::Off, "off", "off"),
+        (Self::Herdr, "herdr", "in orcha"),
+        (Self::Terminal, "terminal", "terminal"),
+        (Self::System, "system", "system"),
+    ];
+}
+
+impl Choice for SwitchMode {
+    const CHOICES: Choices<Self> = &[
+        (Self::Ask, "ask", "ask me"),
+        (Self::Keep, "keep", "keep it running"),
+        (Self::Restart, "restart", "restart the agent"),
+        (Self::NewPane, "new_pane", "new pane"),
+    ];
+}
 
 fn option(value: &str, label: &str) -> Value {
     json!({"value": value, "label": label})
 }
 
-fn select(key: &str, label: &str, help: &str, value: &str, options: Vec<Value>) -> Value {
-    json!({"key": key, "label": label, "help": help, "kind": "select", "value": value, "options": options})
+/// One setting as the page draws it, in the words WORDS has for `key`;
+/// `extra` (an object) adds the options or a slider's bounds.
+fn field(key: &str, kind: &str, value: impl Into<Value>, extra: Value) -> Value {
+    let (label, help) = words(key);
+    let mut out =
+        json!({"key": key, "label": label, "help": help, "kind": kind, "value": value.into()});
+    if let (Some(out), Value::Object(extra)) = (out.as_object_mut(), extra) {
+        out.extend(extra);
+    }
+    out
 }
 
-fn toggle(key: &str, label: &str, help: &str, value: bool) -> Value {
-    json!({"key": key, "label": label, "help": help, "kind": "toggle", "value": value})
+fn select(key: &str, value: &str, options: Vec<Value>) -> Value {
+    field(key, "select", value, json!({"options": options}))
 }
 
-fn text(key: &str, label: &str, help: &str, value: &str) -> Value {
-    json!({"key": key, "label": label, "help": help, "kind": "text", "value": value})
+fn toggle(key: &str, value: bool) -> Value {
+    field(key, "toggle", value, Value::Null)
+}
+
+fn text(key: &str, value: &str) -> Value {
+    field(key, "text", value, Value::Null)
+}
+
+fn percent_slider(key: &str, range: &RangeInclusive<u8>, value: u8) -> Value {
+    field(
+        key,
+        "range",
+        value,
+        json!({"min": range.start(), "max": range.end(), "unit": "%"}),
+    )
+}
+
+fn choice<T: Choice>(key: &str, current: T) -> Value {
+    let options = T::CHOICES
+        .iter()
+        .map(|(_, value, label)| option(value, label))
+        .collect();
+    select(key, current.as_str(), options)
 }
 
 /// orcha-config's checkout (palettes, languages), when it is installed.
@@ -68,7 +203,7 @@ fn fonts() -> Vec<String> {
     FONTS.get_or_init(super::settings::ghostty_fonts).clone()
 }
 
-fn palettes(root: &std::path::Path) -> Vec<Value> {
+fn palettes(root: &Path) -> Vec<Value> {
     names_in(root.join("palettes"))
         .into_iter()
         .map(|name| {
@@ -86,32 +221,278 @@ fn palettes(root: &std::path::Path) -> Vec<Value> {
         .collect()
 }
 
-pub(super) fn state() -> Value {
-    let config = crate::config::Config::load().config;
-    let mut sections = regroup(sections_for(&config));
-    // what each setting is out of the box: a dot marks a change, ↺ goes back
-    let defaults: std::collections::HashMap<String, Value> =
-        sections_for(&crate::config::Config::default())
+/// A line of text the page edits in config.json (JSON_TEXTS).
+fn json_text<'a>(json: &'a Value, key: &str) -> &'a str {
+    match key.split_once('.') {
+        Some((table, field)) => &json[table][field],
+        None => &json[key],
+    }
+    .as_str()
+    .unwrap_or_default()
+}
+
+fn language_name(code: &str) -> &str {
+    match code {
+        "en" => "English",
+        "vi" => "Tiếng Việt",
+        other => other,
+    }
+}
+
+/// What orcha-config keeps: its config.json and its checkout (palettes,
+/// languages, the widgets' words). Read once per request.
+struct ToolFiles {
+    /// config.json; `{}` when it is missing or broken.
+    json: Value,
+    /// orcha-config's checkout, when it is installed.
+    root: Option<PathBuf>,
+}
+
+impl ToolFiles {
+    fn read() -> Self {
+        Self {
+            json: orcha_json(),
+            root: config_tool_root(),
+        }
+    }
+
+    fn lang(&self) -> &str {
+        self.json["lang"].as_str().unwrap_or("en")
+    }
+
+    fn font_family(&self) -> &str {
+        self.json["font"]["family"].as_str().unwrap_or_default()
+    }
+
+    /// The settings orcha-config keeps, as the page shows them.
+    fn fields(&self) -> Vec<Value> {
+        let mut fields = self.terminal_fields();
+        fields.extend(self.widget_fields());
+        fields.extend(self.project_fields());
+        fields
+    }
+
+    /// Ghostty's colors and font.
+    fn terminal_fields(&self) -> Vec<Value> {
+        let font = &self.json["font"];
+        let mut fields = Vec::new();
+        if let Some(root) = &self.root {
+            fields.push(field(
+                "palette",
+                "palettes",
+                self.json["palette"].clone(),
+                json!({"options": palettes(root)}),
+            ));
+        }
+        let font_names = fonts();
+        let family = self.font_family();
+        if !font_names.is_empty() {
+            let mut options: Vec<Value> =
+                font_names.iter().map(|name| option(name, name)).collect();
+            if !family.is_empty() && !font_names.iter().any(|name| name == family) {
+                options.insert(0, option(family, family));
+            }
+            fields.push(select("font", family, options));
+        }
+        fields.push(field(
+            "font_size",
+            "range",
+            font["size"].as_u64().unwrap_or(15),
+            json!({"min": FONT_SIZES.start(), "max": FONT_SIZES.end()}),
+        ));
+        fields.push(toggle(
+            "ligatures",
+            font["ligatures"].as_bool().unwrap_or(true),
+        ));
+        fields
+    }
+
+    /// Each widget orcha-config has, in its own words, and the weather
+    /// city; nothing when there are no widgets.
+    fn widget_fields(&self) -> Vec<Value> {
+        let Some(widgets) = self.json["widgets"].as_object() else {
+            return Vec::new();
+        };
+        let words: Value = self
+            .root
+            .as_ref()
+            .and_then(|root| {
+                std::fs::read(root.join("i18n").join(format!("{}.json", self.lang()))).ok()
+            })
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        let mut fields: Vec<Value> = widgets
             .iter()
-            .flat_map(|section| section["fields"].as_array().cloned().unwrap_or_default())
-            .filter(|field| DEFAULT_KEYS.contains(&field["key"].as_str().unwrap_or_default()))
-            .filter_map(|field| Some((field["key"].as_str()?.to_owned(), field["value"].clone())))
+            .map(|(name, on)| {
+                let label = words[format!("w_{name}")].as_str().unwrap_or(name);
+                widget_field(name, label, on.as_bool().unwrap_or(false))
+            })
             .collect();
-    for section in &mut sections {
-        for field in section["fields"].as_array_mut().into_iter().flatten() {
-            let key = field["key"].as_str().unwrap_or_default().to_owned();
-            if let Some(default) = defaults.get(&key) {
-                field["default"] = default.clone();
-            }
-            if let Some(warning) = warning_for(&key, &config) {
-                field["warn"] = json!(warning);
-            }
+        fields.push(text("weather_city", json_text(&self.json, "weather_city")));
+        fields
+    }
+
+    /// Branch rules, the task tracker and the language.
+    fn project_fields(&self) -> Vec<Value> {
+        let mut fields: Vec<Value> = JSON_TEXTS
+            .iter()
+            .filter(|key| key.contains('.'))
+            .map(|key| text(key, json_text(&self.json, key)))
+            .collect();
+        if let Some(root) = &self.root {
+            let options = names_in(root.join("i18n"))
+                .iter()
+                .map(|name| option(name, language_name(name)))
+                .collect();
+            fields.push(select("lang", self.lang(), options));
+        }
+        fields
+    }
+}
+
+/// A widget's switch. orcha-config words it "Place: what" ("Header",
+/// "Claude"); the page says the place in plain words under it.
+fn widget_field(name: &str, words: &str, on: bool) -> Value {
+    let (place, label) = words.split_once(": ").unwrap_or(("", words));
+    let place = match place.to_lowercase().as_str() {
+        "" => String::new(),
+        "claude" => "in Claude Code".to_owned(),
+        other => format!("in the {other}"),
+    };
+    let mut letters = label.chars();
+    let label = letters
+        .next()
+        .map(|first| first.to_uppercase().collect::<String>() + letters.as_str())
+        .unwrap_or_default();
+    json!({"key": format!("widgets.{name}"), "label": label, "help": place, "kind": "toggle", "value": on})
+}
+
+/// The settings kept in config.toml, as the page shows them. No files are
+/// read here, so the defaults come from this too.
+fn config_fields(config: &Config) -> Vec<Value> {
+    let orcha = &config.orcha;
+    let ui = &config.ui;
+    let accent_color = config
+        .theme
+        .custom
+        .as_ref()
+        .and_then(|custom| custom.mauve.clone());
+    let accent = ACCENTS
+        .iter()
+        .find(|(_, color)| color.map(str::to_owned) == accent_color)
+        .map_or("theme", |(name, _)| name);
+    let accents: Vec<Value> = ACCENTS
+        .iter()
+        .map(|(name, color)| json!({"value": name, "label": name, "color": color}))
+        .collect();
+    let width = SIDEBAR_WIDTHS
+        .iter()
+        .min_by_key(|(_, columns)| columns.abs_diff(ui.sidebar_width))
+        .map_or("normal", |(name, _)| name);
+    let widths = SIDEBAR_WIDTHS
+        .iter()
+        .map(|(name, _)| option(name, name))
+        .collect();
+    vec![
+        field(
+            "theme",
+            "themes",
+            config.theme.name.as_deref().unwrap_or("orcha"),
+            json!({"options": theme_cards()}),
+        ),
+        field("accent", "swatches", accent, json!({"options": accents})),
+        choice("sidebar_side", orcha.sidebar_side),
+        select("sidebar_width", width, widths),
+        toggle("right_panel", ui.right_panel),
+        choice("fuel", orcha.fuel),
+        choice("process", orcha.process),
+        choice("icons", orcha.icons),
+        toggle("pane_paper", orcha.pane_paper),
+        choice("status_indicators", ui.status_indicators),
+        toggle("sound", ui.sound.enabled),
+        choice("toast", ui.toast.delivery),
+        percent_slider(
+            "checklist_percent",
+            &CHECKLIST_PERCENT,
+            orcha.checklist_percent,
+        ),
+        percent_slider(
+            "low_fuel_percent",
+            &LOW_FUEL_PERCENT,
+            orcha.low_fuel_percent,
+        ),
+        percent_slider(
+            "auto_handoff_percent",
+            &AUTO_HANDOFF_PERCENT,
+            orcha.auto_handoff_percent,
+        ),
+        choice("switch_mode", orcha.switch_mode),
+        text("checklist_file", &orcha.checklist_file),
+        toggle("update_plugins", orcha.update_plugins),
+    ]
+}
+
+/// The apps that open a project's folder and its repository: the ones
+/// installed, and the one set now even when it is not found.
+fn app_fields(config: &Config) -> Vec<Value> {
+    let apps = |key: &str, names: &[&str], current: &str| {
+        let mut options: Vec<Value> = installed_apps(names)
+            .into_iter()
+            .map(|(label, command)| option(&command, &label))
+            .collect();
+        if !current.is_empty() && !options.iter().any(|option| option["value"] == current) {
+            options.push(option(current, current));
+        }
+        select(key, current, options)
+    };
+    vec![
+        apps("ide", IDE_APPS, &config.orcha.ide),
+        apps("git_gui", GIT_GUI_APPS, &config.orcha.git_gui),
+    ]
+}
+
+/// Every setting, ungrouped.
+fn fields(config: &Config, files: &ToolFiles) -> Vec<Value> {
+    let mut fields = config_fields(config);
+    fields.extend(app_fields(config));
+    fields.extend(files.fields());
+    fields
+}
+
+/// What each DEFAULT_KEYS setting is out of the box: a dot marks a change,
+/// ↺ goes back.
+fn default_values() -> HashMap<String, Value> {
+    config_fields(&Config::default())
+        .into_iter()
+        .filter_map(|field| {
+            let key = field["key"].as_str()?;
+            DEFAULT_KEYS
+                .contains(&key)
+                .then(|| (key.to_owned(), field["value"].clone()))
+        })
+        .collect()
+}
+
+/// Everything the page shows. config.toml, config.json and orcha-config's
+/// files are each read once.
+pub(super) fn state() -> Value {
+    let config = Config::load().config;
+    let files = ToolFiles::read();
+    let defaults = default_values();
+    let mut fields = fields(&config, &files);
+    for field in &mut fields {
+        let key = field["key"].as_str().unwrap_or_default().to_owned();
+        if let Some(default) = defaults.get(&key) {
+            field["default"] = default.clone();
+        }
+        if let Some(warning) = warning_for(&key, &config, &files) {
+            field["warn"] = json!(warning);
         }
     }
     json!({
         "version": crate::orcha_app::ORCHA_VERSION,
-        "sections": sections,
-        "has_config_tool": config_tool_root().is_some(),
+        "sections": regroup(&fields),
+        "has_config_tool": files.root.is_some(),
         "page_theme": page_theme(&config),
     })
 }
@@ -194,7 +575,9 @@ const GROUPS: &[(&str, &str, &str, &[Group])] = &[
     ),
 ];
 
-/// Plain words for each setting: (key, label, help).
+/// Plain words for each setting: (key, label, help). The only place a
+/// setting's label and help are written; a choice's option words live in
+/// its `Choice` table, widgets bring theirs from orcha-config.
 const WORDS: &[(&str, &str, &str)] = &[
     (
         "theme",
@@ -314,12 +697,16 @@ const WORDS: &[(&str, &str, &str)] = &[
     ),
 ];
 
-/// The settings, regrouped by task and reworded; keys stay as they are.
-fn regroup(sections: Vec<Value>) -> Vec<Value> {
-    let fields: Vec<Value> = sections
+/// A setting's label and help, from WORDS.
+fn words(key: &str) -> (&str, &str) {
+    WORDS
         .iter()
-        .flat_map(|section| section["fields"].as_array().cloned().unwrap_or_default())
-        .collect();
+        .find(|(each, _, _)| *each == key)
+        .map_or((key, ""), |(_, label, help)| (*label, *help))
+}
+
+/// The settings, grouped by task; keys stay as they are.
+fn regroup(fields: &[Value]) -> Vec<Value> {
     let take = |key: &str| -> Vec<Value> {
         fields
             .iter()
@@ -340,37 +727,6 @@ fn regroup(sections: Vec<Value>) -> Vec<Value> {
             for (group, keys) in *groups {
                 for key in *keys {
                     for mut field in take(key) {
-                        let k = field["key"].as_str().unwrap_or_default().to_owned();
-                        if let Some((_, label, help)) = WORDS.iter().find(|(each, _, _)| *each == k)
-                        {
-                            field["label"] = json!(label);
-                            field["help"] = json!(help);
-                        }
-                        if let Some(place) = k.strip_prefix("widgets.").and(field["help"].as_str())
-                        {
-                            // orcha-config says where a widget lives ("Header", "Claude")
-                            let place = match place.to_lowercase().as_str() {
-                                "" => String::new(),
-                                "claude" => "in Claude Code".to_owned(),
-                                other => format!("in the {other}"),
-                            };
-                            field["help"] = json!(place);
-                            let label = field["label"].as_str().unwrap_or_default().to_owned();
-                            let mut letters = label.chars();
-                            if let Some(first) = letters.next() {
-                                field["label"] = json!(
-                                    first.to_uppercase().collect::<String>() + letters.as_str()
-                                );
-                            }
-                        }
-                        if k == "switch_mode" {
-                            field["options"] = json!([
-                                option("ask", "ask me"),
-                                option("keep", "keep it running"),
-                                option("restart", "restart the agent"),
-                                option("new_pane", "new pane"),
-                            ]);
-                        }
                         field["group"] = json!(group);
                         out.push(field);
                     }
@@ -409,7 +765,7 @@ const DEFAULT_KEYS: &[&str] = &[
 ];
 
 /// A setting that clashes with another, or cannot work on this machine.
-fn warning_for(key: &str, config: &crate::config::Config) -> Option<String> {
+fn warning_for(key: &str, config: &Config, files: &ToolFiles) -> Option<String> {
     let orcha = &config.orcha;
     match key {
         "checklist_percent"
@@ -428,18 +784,16 @@ fn warning_for(key: &str, config: &crate::config::Config) -> Option<String> {
                 orcha.low_fuel_percent
             ))
         }
-        "process"
-            if orcha.process == crate::config::ProcessPlacement::Panel && !config.ui.right_panel =>
-        {
+        "process" if orcha.process == ProcessPlacement::Panel && !config.ui.right_panel => {
             Some("the right panel is off, so PROCESS shows in the sidebar for now".to_owned())
         }
-        "fuel" if orcha.fuel == crate::config::FuelPlacement::Panel && !config.ui.right_panel => {
+        "fuel" if orcha.fuel == FuelPlacement::Panel && !config.ui.right_panel => {
             Some("the right panel is off: turn it on, or move the gauges to the status bar".to_owned())
         }
         "font" => {
-            let family = orcha_json()["font"]["family"].as_str().unwrap_or_default().to_owned();
+            let family = files.font_family();
             let found = fonts();
-            (!family.is_empty() && !found.is_empty() && !found.contains(&family))
+            (!family.is_empty() && !found.is_empty() && !found.iter().any(|name| name == family))
                 .then(|| format!("{family} is not installed: Ghostty falls back to another font"))
         }
         _ => None,
@@ -601,218 +955,11 @@ pub(super) fn account_action(action: &str, body: &Value) -> Result<Value, String
     Ok(json!({"ok": true, "note": note, "state": accounts_state(false)}))
 }
 
-fn sections_for(config: &crate::config::Config) -> Vec<Value> {
-    let orcha = &config.orcha;
-    let ui = &config.ui;
-    let json_config = orcha_json();
-    let tool = config_tool_root();
-    let lang = json_config["lang"].as_str().unwrap_or("en").to_owned();
-    let words: Value = tool
-        .as_ref()
-        .and_then(|root| std::fs::read(root.join("i18n").join(format!("{lang}.json"))).ok())
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default();
-
-    let accent_value = config
-        .theme
-        .custom
-        .as_ref()
-        .and_then(|custom| custom.mauve.clone());
-    let accent = ACCENTS
-        .iter()
-        .find(|(_, color)| color.map(str::to_owned) == accent_value)
-        .map_or("theme", |(name, _)| name);
-    let width = SIDEBAR_WIDTHS
-        .iter()
-        .min_by_key(|(_, columns)| columns.abs_diff(ui.sidebar_width))
-        .map_or("normal", |(name, _)| name);
-    let apps = |names: &[&str], current: &str| {
-        let mut options: Vec<Value> = installed_apps(names)
-            .into_iter()
-            .map(|(label, command)| option(&command, &label))
-            .collect();
-        if !current.is_empty() && !options.iter().any(|option| option["value"] == current) {
-            options.push(option(current, current));
-        }
-        options
-    };
-
-    let mut sections = vec![json!({"id": "look", "title": "Look", "fields": [
-            json!({"key": "theme", "label": "Theme", "help": "orcha's colors for panes, panels and this page", "kind": "themes",
-                "value": config.theme.name.as_deref().unwrap_or("orcha"), "options": theme_cards()}),
-        json!({"key": "accent", "label": "Accent", "help": "the brand color on buttons and highlights", "kind": "swatches", "value": accent,
-            "options": ACCENTS.iter().map(|(name, color)| json!({"value": name, "label": name, "color": color})).collect::<Vec<_>>()}),
-        select("sidebar_side", "Sidebar side", "the right panel takes the other side", match orcha.sidebar_side {
-            crate::config::SidebarSide::Left => "left", crate::config::SidebarSide::Right => "right" },
-            vec![option("left", "left"), option("right", "right")]),
-        select("sidebar_width", "Sidebar width", "", width,
-            SIDEBAR_WIDTHS.iter().map(|(name, _)| option(name, name)).collect()),
-        toggle("right_panel", "Right panel", "accounts, changes and PROCESS beside your panes", ui.right_panel),
-        select("fuel", "Fuel gauges", "how much each account has left", match orcha.fuel {
-            crate::config::FuelPlacement::Panel => "panel", crate::config::FuelPlacement::StatusBar => "status_bar" },
-            vec![option("panel", "right panel"), option("status_bar", "status bar")]),
-        select("process", "Process", "the running agents as little trains", match orcha.process {
-            crate::config::ProcessPlacement::Panel => "panel", crate::config::ProcessPlacement::Sidebar => "sidebar",
-            crate::config::ProcessPlacement::Off => "off" },
-            vec![option("sidebar", "sidebar"), option("panel", "right panel"), option("off", "hidden")]),
-        select("icons", "Agent logos", "", match orcha.icons {
-            crate::config::IconMode::Auto => "auto", crate::config::IconMode::Font => "font",
-            crate::config::IconMode::Symbols => "symbols" },
-            vec![option("auto", "auto"), option("font", "icon font"), option("symbols", "plain symbols")]),
-        toggle("pane_paper", "Pane paper", "paint empty pane cells with the theme's paper", orcha.pane_paper),
-    ]})];
-
-    let mut font_fields = Vec::new();
-    if let Some(root) = tool.as_ref() {
-        font_fields.push(json!({"key": "palette", "label": "Terminal palette", "help": "Ghostty's colors, set by orcha-config", "kind": "palettes",
-            "value": json_config["palette"], "options": palettes(root)}));
-    }
-    let font_names = fonts();
-    let family = json_config["font"]["family"].as_str().unwrap_or_default();
-    if !font_names.is_empty() {
-        let mut options: Vec<Value> = font_names.iter().map(|name| option(name, name)).collect();
-        if !family.is_empty() && !font_names.iter().any(|name| name == family) {
-            options.insert(0, option(family, family));
-        }
-        font_fields.push(select(
-            "font",
-            "Font",
-            "Ghostty reloads it with ⌘⇧,",
-            family,
-            options,
-        ));
-    }
-    font_fields.push(
-        json!({"key": "font_size", "label": "Font size", "help": "", "kind": "range",
-        "min": FONT_SIZES.start(), "max": FONT_SIZES.end(),
-        "value": json_config["font"]["size"].as_u64().unwrap_or(15)}),
-    );
-    font_fields.push(toggle(
-        "ligatures",
-        "Ligatures",
-        "-> and != drawn as one symbol",
-        json_config["font"]["ligatures"].as_bool().unwrap_or(true),
-    ));
-    sections.push(json!({"id": "font", "title": "Terminal & font", "fields": font_fields}));
-
-    sections.push(json!({"id": "apps", "title": "Apps", "fields": [
-        select("ide", "IDE", "opens a project's folder", &orcha.ide, apps(IDE_APPS, &orcha.ide)),
-        select("git_gui", "Git app", "opens a project's repository", &orcha.git_gui, apps(GIT_GUI_APPS, &orcha.git_gui)),
-    ]}));
-
-    sections.push(json!({"id": "alerts", "title": "Notifications", "fields": [
-        select("status_indicators", "Status indicators", "how an agent's state is drawn", ui.status_indicators.as_str(),
-            vec![option("dots", "dots"), option("symbols", "symbols")]),
-        toggle("sound", "Sound", "a sound when an agent finishes or needs you", ui.sound.enabled),
-        select("toast", "Toasts", "where a pop-up note goes", match ui.toast.delivery {
-            crate::config::ToastDelivery::Off => "off", crate::config::ToastDelivery::Herdr => "herdr",
-            crate::config::ToastDelivery::Terminal => "terminal", crate::config::ToastDelivery::System => "system" },
-            vec![option("off", "off"), option("herdr", "in orcha"), option("terminal", "terminal"), option("system", "system")]),
-    ]}));
-
-    sections.push(json!({"id": "handoff", "title": "Hand-off", "fields": [
-        json!({"key": "checklist_percent", "label": "Ask for a checklist below", "help": "orcha asks you, then the agent writes what is done and what is next while it still can; 0: never",
-            "kind": "range", "min": 0, "max": 60, "unit": "%", "value": orcha.checklist_percent}),
-        json!({"key": "low_fuel_percent", "label": "Offer to switch below", "help": "orcha asks where to continue",
-            "kind": "range", "min": 1, "max": 50, "unit": "%", "value": orcha.low_fuel_percent}),
-        json!({"key": "auto_handoff_percent", "label": "Move on by itself below", "help": "the chat goes to the account with the most fuel, no question; 0: never",
-            "kind": "range", "min": 0, "max": 50, "unit": "%", "value": orcha.auto_handoff_percent}),
-        select("switch_mode", "Switching account", "how a chat moves to another account of the same agent", orcha.switch_mode.as_str(), vec![
-            option("ask", "ask each time"), option("keep", "keep the chat running"),
-            option("restart", "restart the agent"), option("new_pane", "new pane")]),
-        text("checklist_file", "Checklist file", "in the project; a hand-off points the next agent at it", &orcha.checklist_file),
-    ]}));
-
-    if let Some(widgets) = json_config["widgets"].as_object() {
-        let mut fields: Vec<Value> = widgets
-            .iter()
-            .map(|(name, on)| {
-                let label = words[format!("w_{name}")].as_str().unwrap_or(name);
-                let (place, text_label) = label.split_once(": ").unwrap_or(("", label));
-                json!({"key": format!("widgets.{name}"), "label": text_label, "help": place, "kind": "toggle",
-                    "value": on.as_bool().unwrap_or(false)})
-            })
-            .collect();
-        fields.push(text(
-            "weather_city",
-            "Weather city",
-            "empty: found from your location",
-            json_config["weather_city"].as_str().unwrap_or_default(),
-        ));
-        sections.push(json!({"id": "widgets", "title": "Widgets", "fields": fields}));
-    }
-
-    let tracker = &json_config["tracker"];
-    let repo = &json_config["repo"];
-    let mut project = vec![
-        text(
-            "tracker.task_pattern",
-            "Task number in branch names",
-            "a regex; its first group is the task number",
-            tracker["task_pattern"].as_str().unwrap_or_default(),
-        ),
-        text(
-            "tracker.azure_pat_file",
-            "Azure DevOps token file",
-            "where the personal access token is kept",
-            tracker["azure_pat_file"].as_str().unwrap_or_default(),
-        ),
-        text(
-            "repo.branch_prefix",
-            "Branch prefix",
-            "new branches start with it",
-            repo["branch_prefix"].as_str().unwrap_or_default(),
-        ),
-        text(
-            "repo.base",
-            "Base branch",
-            "empty: found from the repo",
-            repo["base"].as_str().unwrap_or_default(),
-        ),
-        text(
-            "repo.protected",
-            "Protected branches",
-            "a regex; agents are warned before changing these",
-            repo["protected"].as_str().unwrap_or_default(),
-        ),
-        text(
-            "repo.check",
-            "Check command",
-            "auto: found from the repo, or a command like npm run typecheck",
-            repo["check"].as_str().unwrap_or_default(),
-        ),
-    ];
-    if let Some(root) = tool.as_ref() {
-        project.push(select(
-            "lang",
-            "Language",
-            "",
-            &lang,
-            names_in(root.join("i18n"))
-                .iter()
-                .map(|name| {
-                    option(
-                        name,
-                        match name.as_str() {
-                            "en" => "English",
-                            "vi" => "Tiếng Việt",
-                            other => other,
-                        },
-                    )
-                })
-                .collect(),
-        ));
-    }
-    sections.push(json!({"id": "project", "title": "Project & language", "fields": project}));
-
-    plugins_section(&mut sections, orcha.update_plugins);
-    sections
-}
-
-fn plugins_section(sections: &mut Vec<Value>, update_plugins: bool) {
-    sections.push(json!({"id": "plugins", "title": "Plugins", "fields": [
-        toggle("update_plugins", "Update plugins by themselves", "off: orcha asks before installing a new version", update_plugins),
-    ]}));
+fn not_one_of<'a>(text: &str, allowed: impl Iterator<Item = &'a str>) -> String {
+    format!(
+        "{text} is not one of {}",
+        allowed.collect::<Vec<_>>().join(", ")
+    )
 }
 
 fn one_of<'a>(value: &'a Value, allowed: &[&str]) -> Result<&'a str, String> {
@@ -820,8 +967,18 @@ fn one_of<'a>(value: &'a Value, allowed: &[&str]) -> Result<&'a str, String> {
     if allowed.contains(&text) {
         Ok(text)
     } else {
-        Err(format!("{text} is not one of {}", allowed.join(", ")))
+        Err(not_one_of(text, allowed.iter().copied()))
     }
+}
+
+/// The item a (name, item) table holds under the name the page sent.
+fn named<T: Copy>(value: &Value, table: &[(&str, T)]) -> Result<T, String> {
+    let text = value.as_str().ok_or("expected text")?;
+    table
+        .iter()
+        .find(|(name, _)| *name == text)
+        .map(|(_, item)| *item)
+        .ok_or_else(|| not_one_of(text, table.iter().map(|(name, _)| *name)))
 }
 
 fn flag(value: &Value) -> Result<bool, String> {
@@ -830,224 +987,275 @@ fn flag(value: &Value) -> Result<bool, String> {
         .ok_or_else(|| "expected on or off".to_owned())
 }
 
-/// Saves one setting. Ok(note) carries a hint for the page, if any.
-pub(super) fn apply(key: &str, value: &Value) -> Result<Option<String>, String> {
-    use crate::config::ConfigEdit;
-    let edit = match key {
-        "theme" => {
-            let name = one_of(value, crate::config::THEME_NAMES)?;
-            Some(ConfigEdit::Theme(name))
-        }
-        "accent" => {
-            let names: Vec<&str> = ACCENTS.iter().map(|(name, _)| *name).collect();
-            let name = one_of(value, &names)?;
-            let color = ACCENTS
-                .iter()
-                .find(|(each, _)| *each == name)
-                .and_then(|(_, color)| *color);
-            Some(ConfigEdit::Accent(color))
-        }
-        "sidebar_width" => {
-            let names: Vec<&str> = SIDEBAR_WIDTHS.iter().map(|(name, _)| *name).collect();
-            let name = one_of(value, &names)?;
-            let columns = SIDEBAR_WIDTHS
-                .iter()
-                .find(|(each, _)| *each == name)
-                .map_or(28, |(_, columns)| *columns);
-            Some(ConfigEdit::SidebarWidth(columns))
-        }
-        "right_panel" => Some(ConfigEdit::RightPanel(flag(value)?)),
-        "pane_paper" => Some(ConfigEdit::PanePaper(flag(value)?)),
-        "update_plugins" => Some(ConfigEdit::UpdatePlugins(flag(value)?)),
-        "sound" => Some(ConfigEdit::Sound(flag(value)?)),
-        "sidebar_side" => Some(ConfigEdit::SidebarSide(
-            match one_of(value, &["left", "right"])? {
-                "left" => crate::config::SidebarSide::Left,
-                _ => crate::config::SidebarSide::Right,
-            },
-        )),
-        "fuel" => Some(ConfigEdit::Fuel(
-            match one_of(value, &["panel", "status_bar"])? {
-                "panel" => crate::config::FuelPlacement::Panel,
-                _ => crate::config::FuelPlacement::StatusBar,
-            },
-        )),
-        "process" => Some(ConfigEdit::Process(
-            match one_of(value, &["panel", "sidebar", "off"])? {
-                "panel" => crate::config::ProcessPlacement::Panel,
-                "sidebar" => crate::config::ProcessPlacement::Sidebar,
-                _ => crate::config::ProcessPlacement::Off,
-            },
-        )),
-        "icons" => Some(ConfigEdit::Icons(
-            match one_of(value, &["auto", "font", "symbols"])? {
-                "auto" => crate::config::IconMode::Auto,
-                "font" => crate::config::IconMode::Font,
-                _ => crate::config::IconMode::Symbols,
-            },
-        )),
-        "status_indicators" => Some(ConfigEdit::StatusIndicators(
-            match one_of(value, &["dots", "symbols"])? {
-                "dots" => crate::config::StatusIndicatorStyle::Dots,
-                _ => crate::config::StatusIndicatorStyle::Symbols,
-            },
-        )),
-        "toast" => Some(ConfigEdit::ToastDelivery(
-            match one_of(value, &["off", "herdr", "terminal", "system"])? {
-                "off" => crate::config::ToastDelivery::Off,
-                "herdr" => crate::config::ToastDelivery::Herdr,
-                "terminal" => crate::config::ToastDelivery::Terminal,
-                _ => crate::config::ToastDelivery::System,
-            },
-        )),
-        _ => None,
-    };
-    if let Some(edit) = edit {
-        crate::config::write_edit(edit)?;
-        reload_server();
-        return Ok(None);
+fn on_off(value: &Value) -> Result<&'static str, String> {
+    Ok(if flag(value)? { "on" } else { "off" })
+}
+
+fn percent(value: &Value, range: &RangeInclusive<u8>) -> Result<u8, String> {
+    value
+        .as_u64()
+        .and_then(|percent| u8::try_from(percent).ok())
+        .filter(|percent| range.contains(percent))
+        .ok_or_else(|| format!("expected {} to {}", range.start(), range.end()))
+}
+
+fn one_line(value: &Value) -> Result<&str, String> {
+    let text = value.as_str().ok_or("expected text")?;
+    if text.contains('\n') || text.len() > 400 {
+        return Err("expected one short line".to_owned());
     }
-    match key {
-        "checklist_percent" | "auto_handoff_percent" => {
-            let percent = value
-                .as_u64()
-                .filter(|percent| *percent <= if key == "checklist_percent" { 60 } else { 50 })
-                .ok_or("expected a percentage")?;
-            write_orcha_value(key, &percent.to_string())?;
-            reload_server();
-            Ok(None)
-        }
+    Ok(text)
+}
+
+/// Text as a TOML string (a JSON string is one).
+fn toml_string(text: &str) -> String {
+    serde_json::to_string(text).unwrap_or_default()
+}
+
+fn checklist_file(value: &Value) -> Result<&str, String> {
+    let file = value.as_str().ok_or("expected text")?.trim();
+    let path = Path::new(file);
+    if file.is_empty()
+        || file.contains('\n')
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return Err("expected a path inside the project, like .orcha/handoff.md".to_owned());
+    }
+    Ok(file)
+}
+
+/// An app orcha found, or the one set now.
+fn app_command<'a>(key: &str, value: &'a Value) -> Result<&'a str, String> {
+    let command = value.as_str().ok_or("expected text")?;
+    let names = if key == "ide" { IDE_APPS } else { GIT_GUI_APPS };
+    let known = installed_apps(names)
+        .into_iter()
+        .any(|(_, each)| each == command);
+    let current = Config::load().config.orcha;
+    let unchanged = command
+        == if key == "ide" {
+            current.ide
+        } else {
+            current.git_gui
+        };
+    if !known && !unchanged {
+        return Err(format!("{command} is not an app orcha found"));
+    }
+    Ok(command)
+}
+
+/// A palette or a language orcha-config has a file for.
+fn tool_file<'a>(key: &str, value: &'a Value) -> Result<&'a str, String> {
+    let text = value.as_str().ok_or("expected text")?;
+    let root = config_tool_root().ok_or("orcha-config is not installed")?;
+    let dir = if key == "palette" { "palettes" } else { "i18n" };
+    if !names_in(root.join(dir)).iter().any(|name| name == text) {
+        return Err(format!("unknown {key}: {text}"));
+    }
+    Ok(text)
+}
+
+fn font_family(value: &Value) -> Result<&str, String> {
+    let family = value.as_str().ok_or("expected text")?;
+    if family.is_empty() || family.contains('\n') {
+        return Err("expected a font name".to_owned());
+    }
+    Ok(family)
+}
+
+/// orcha-config sets the size together with the font in use.
+fn font_size_args(value: &Value) -> Result<Vec<String>, String> {
+    let size = value
+        .as_u64()
+        .and_then(|size| u16::try_from(size).ok())
+        .filter(|size| FONT_SIZES.contains(size))
+        .ok_or("expected a font size")?;
+    let family = orcha_json()["font"]["family"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    if family.is_empty() {
+        return Err("pick a font first".to_owned());
+    }
+    Ok(vec!["font".to_owned(), family, size.to_string()])
+}
+
+fn widget_args(key: &str, value: &Value) -> Result<Vec<String>, String> {
+    let name = key.strip_prefix("widgets.").unwrap_or(key);
+    if !orcha_json()["widgets"]
+        .get(name)
+        .is_some_and(Value::is_boolean)
+    {
+        return Err(format!("unknown widget: {name}"));
+    }
+    Ok(args(&["widget", name, on_off(value)?]))
+}
+
+fn args(parts: &[&str]) -> Vec<String> {
+    parts.iter().map(|part| (*part).to_owned()).collect()
+}
+
+/// What saving one setting changes: checked, not written yet.
+enum Change<'a> {
+    /// A typed edit to config.toml.
+    Edit(ConfigEdit<'a>),
+    /// A value under `[orcha]` in config.toml, already written as TOML.
+    Orcha(String),
+    /// An orcha-config command; `ghostty` when Ghostty shows it only after
+    /// it reloads its config.
+    Tool { args: Vec<String>, ghostty: bool },
+    /// A line of text in config.json (JSON_TEXTS), which `orcha-config
+    /// apply` then hands on.
+    Json(&'a str),
+}
+
+/// Checks the value the page sent for `key` and says what saving it
+/// changes. Nothing is written here.
+fn change_for<'a>(key: &str, value: &'a Value) -> Result<Change<'a>, String> {
+    use ConfigEdit as Edit;
+    let change = match key {
+        "theme" => Change::Edit(Edit::Theme(one_of(value, crate::config::THEME_NAMES)?)),
+        "accent" => Change::Edit(Edit::Accent(named(value, &ACCENTS)?)),
+        "sidebar_width" => Change::Edit(Edit::SidebarWidth(named(value, &SIDEBAR_WIDTHS)?)),
+        "sidebar_side" => Change::Edit(Edit::SidebarSide(Choice::parse(value)?)),
+        "fuel" => Change::Edit(Edit::Fuel(Choice::parse(value)?)),
+        "process" => Change::Edit(Edit::Process(Choice::parse(value)?)),
+        "icons" => Change::Edit(Edit::Icons(Choice::parse(value)?)),
+        "status_indicators" => Change::Edit(Edit::StatusIndicators(Choice::parse(value)?)),
+        "toast" => Change::Edit(Edit::ToastDelivery(Choice::parse(value)?)),
+        "right_panel" => Change::Edit(Edit::RightPanel(flag(value)?)),
+        "pane_paper" => Change::Edit(Edit::PanePaper(flag(value)?)),
+        "update_plugins" => Change::Edit(Edit::UpdatePlugins(flag(value)?)),
+        "sound" => Change::Edit(Edit::Sound(flag(value)?)),
+        "checklist_percent" => Change::Orcha(percent(value, &CHECKLIST_PERCENT)?.to_string()),
+        "low_fuel_percent" => Change::Orcha(percent(value, &LOW_FUEL_PERCENT)?.to_string()),
+        "auto_handoff_percent" => Change::Orcha(percent(value, &AUTO_HANDOFF_PERCENT)?.to_string()),
         "switch_mode" => {
-            let mode = one_of(value, &["ask", "keep", "restart", "new_pane"])?;
-            write_orcha_value(key, &format!("\"{mode}\""))?;
+            let mode: SwitchMode = Choice::parse(value)?;
+            Change::Orcha(toml_string(Choice::as_str(mode)))
+        }
+        "checklist_file" => Change::Orcha(toml_string(checklist_file(value)?)),
+        "ide" | "git_gui" => Change::Orcha(toml_string(app_command(key, value)?)),
+        "palette" => Change::Tool {
+            args: args(&["theme", tool_file(key, value)?]),
+            ghostty: true,
+        },
+        "lang" => Change::Tool {
+            args: args(&["lang", tool_file(key, value)?]),
+            ghostty: true,
+        },
+        "font" => Change::Tool {
+            args: args(&["font", font_family(value)?]),
+            ghostty: true,
+        },
+        "font_size" => Change::Tool {
+            args: font_size_args(value)?,
+            ghostty: true,
+        },
+        "ligatures" => Change::Tool {
+            args: args(&["ligatures", on_off(value)?]),
+            ghostty: true,
+        },
+        _ if key.starts_with("widgets.") => Change::Tool {
+            args: widget_args(key, value)?,
+            ghostty: false,
+        },
+        _ if JSON_TEXTS.contains(&key) => Change::Json(one_line(value)?),
+        _ => return Err(format!("unknown setting: {key}")),
+    };
+    Ok(change)
+}
+
+/// What saving one setting did, once it was written.
+#[derive(Debug, Default, PartialEq)]
+pub(super) struct Saved {
+    /// A hint for the page, if any.
+    pub(super) note: Option<String>,
+    /// The value is saved, but a step after it failed: the page shows it
+    /// as a problem, not as a failed save.
+    pub(super) warning: Option<String>,
+}
+
+/// Saves one setting. Err means nothing was saved.
+pub(super) fn apply(key: &str, value: &Value) -> Result<Saved, String> {
+    match change_for(key, value)? {
+        Change::Edit(edit) => {
+            crate::config::write_edit(edit)?;
             reload_server();
-            Ok(None)
+            Ok(Saved::default())
         }
-        "checklist_file" => {
-            let file = value.as_str().ok_or("expected text")?.trim();
-            let path = std::path::Path::new(file);
-            if file.is_empty()
-                || file.contains('\n')
-                || path.is_absolute()
-                || path
-                    .components()
-                    .any(|part| matches!(part, std::path::Component::ParentDir))
-            {
-                return Err("expected a path inside the project, like .orcha/handoff.md".to_owned());
-            }
-            write_orcha_value(key, &serde_json::to_string(file).unwrap_or_default())?;
+        Change::Orcha(toml) => {
+            write_orcha_value(key, &toml)?;
             reload_server();
-            Ok(None)
+            Ok(Saved::default())
         }
-        "low_fuel_percent" => {
-            let percent = value
-                .as_u64()
-                .filter(|percent| (1..=50).contains(percent))
-                .ok_or("expected 1 to 50")?;
-            write_orcha_value("low_fuel_percent", &percent.to_string())?;
-            reload_server();
-            Ok(None)
+        Change::Tool { args, ghostty } => {
+            run_config_tool(&args)?;
+            Ok(Saved {
+                note: ghostty.then(ghostty_note),
+                warning: None,
+            })
         }
-        "ide" | "git_gui" => {
-            let command = value.as_str().ok_or("expected text")?;
-            let names = if key == "ide" { IDE_APPS } else { GIT_GUI_APPS };
-            let known = installed_apps(names)
-                .into_iter()
-                .any(|(_, each)| each == command);
-            let current = crate::config::Config::load().config.orcha;
-            let unchanged = command
-                == if key == "ide" {
-                    current.ide
-                } else {
-                    current.git_gui
-                };
-            if !known && !unchanged {
-                return Err(format!("{command} is not an app orcha found"));
-            }
-            write_orcha_value(key, &serde_json::to_string(command).unwrap_or_default())?;
-            reload_server();
-            Ok(None)
+        Change::Json(text) => {
+            save_json_text(&orcha_json_path(), key, text)?;
+            Ok(applied_after_saving(run_config_tool(&["apply"])))
         }
-        "palette" | "lang" => {
-            let text = value.as_str().ok_or("expected text")?;
-            let root = config_tool_root().ok_or("orcha-config is not installed")?;
-            let dir = if key == "palette" { "palettes" } else { "i18n" };
-            if !names_in(root.join(dir)).iter().any(|name| name == text) {
-                return Err(format!("unknown {key}: {text}"));
-            }
-            let command = if key == "palette" { "theme" } else { "lang" };
-            run_config_tool(&[command, text])?;
-            Ok(Some(ghostty_note()))
-        }
-        "font" => {
-            let family = value.as_str().ok_or("expected text")?;
-            if family.is_empty() || family.contains('\n') {
-                return Err("expected a font name".to_owned());
-            }
-            run_config_tool(&["font", family])?;
-            Ok(Some(ghostty_note()))
-        }
-        "font_size" => {
-            let size = value
-                .as_u64()
-                .and_then(|size| u16::try_from(size).ok())
-                .filter(|size| FONT_SIZES.contains(size))
-                .ok_or("expected a font size")?;
-            let family = orcha_json()["font"]["family"]
-                .as_str()
-                .unwrap_or_default()
-                .to_owned();
-            if family.is_empty() {
-                return Err("pick a font first".to_owned());
-            }
-            run_config_tool(&["font", &family, &size.to_string()])?;
-            Ok(Some(ghostty_note()))
-        }
-        "ligatures" => {
-            run_config_tool(&["ligatures", if flag(value)? { "on" } else { "off" }])?;
-            Ok(Some(ghostty_note()))
-        }
-        _ if key.starts_with("widgets.") => {
-            let name = &key["widgets.".len()..];
-            if !orcha_json()["widgets"]
-                .get(name)
-                .is_some_and(Value::is_boolean)
-            {
-                return Err(format!("unknown widget: {name}"));
-            }
-            run_config_tool(&["widget", name, if flag(value)? { "on" } else { "off" }])?;
-            Ok(None)
-        }
-        "weather_city"
-        | "tracker.task_pattern"
-        | "tracker.azure_pat_file"
-        | "repo.branch_prefix"
-        | "repo.base"
-        | "repo.protected"
-        | "repo.check" => {
-            let text = value.as_str().ok_or("expected text")?;
-            if text.contains('\n') || text.len() > 400 {
-                return Err("expected one short line".to_owned());
-            }
-            let mut config = orcha_json();
-            let slot = match key.split_once('.') {
-                Some((table, field)) => {
-                    if !config[table].is_object() {
-                        config[table] = json!({});
-                    }
-                    &mut config[table][field]
-                }
-                None => &mut config[key],
-            };
-            *slot = Value::String(text.to_owned());
-            let pretty = serde_json::to_string_pretty(&config).map_err(|err| err.to_string())?;
-            std::fs::write(orcha_json_path(), pretty + "\n")
-                .map_err(|err| format!("could not save config.json: {err}"))?;
-            run_config_tool(&["apply"])?;
-            Ok(None)
-        }
-        _ => Err(format!("unknown setting: {key}")),
     }
+}
+
+/// config.json is written before `orcha-config apply` hands it on: when
+/// that fails the value stays saved, so it is a warning, not an error.
+fn applied_after_saving(applied: Result<(), String>) -> Saved {
+    Saved {
+        note: None,
+        warning: applied
+            .err()
+            .map(|why| format!("Saved, but orcha-config could not apply it yet: {why}")),
+    }
+}
+
+/// Puts one line of text at `key` ("table.field" or a top-level key).
+fn set_json_text(config: &mut Value, key: &str, text: &str) -> Result<(), String> {
+    if !config.is_object() {
+        return Err("config.json is not a JSON object, so it was left alone".to_owned());
+    }
+    let slot = match key.split_once('.') {
+        Some((table, field)) => {
+            if config.get(table).is_some_and(|value| !value.is_object()) {
+                return Err(format!(
+                    "{table} in config.json is not a JSON object, so it was left alone"
+                ));
+            }
+            if config.get(table).is_none() {
+                config[table] = json!({});
+            }
+            &mut config[table][field]
+        }
+        None => &mut config[key],
+    };
+    *slot = Value::String(text.to_owned());
+    Ok(())
+}
+
+/// Puts one line of text into config.json through the helper that saves
+/// config.toml (`write_orcha_value`): the file is read right before it is
+/// written, and one that is not valid JSON is left alone.
+fn save_json_text(path: &Path, key: &str, text: &str) -> Result<(), String> {
+    crate::config::update_file_at(path, "config.json", |content| {
+        let mut config: Value = if content.trim().is_empty() {
+            json!({})
+        } else {
+            serde_json::from_str(content).map_err(|err| {
+                format!("config.json is not valid JSON, so it was left alone: {err}")
+            })?
+        };
+        set_json_text(&mut config, key, text)?;
+        let pretty = serde_json::to_string_pretty(&config).map_err(|err| err.to_string())?;
+        Ok(pretty + "\n")
+    })
 }
 
 /// The rules and skills catalogs, the defaults for new projects and
@@ -1155,7 +1363,7 @@ pub(super) fn background_action(body: &Value) -> Result<String, String> {
             Ok("stopped".to_owned())
         }
         "office" => {
-            crate::orcha_office::stop_quietly();
+            crate::orcha_office::stop_quietly()?;
             Ok("Easy Job stopped".to_owned())
         }
         "server" => {
@@ -1179,10 +1387,10 @@ fn write_orcha_value(key: &str, value: &str) -> Result<(), String> {
     })
 }
 
-fn run_config_tool(args: &[&str]) -> Result<(), String> {
+fn run_config_tool<S: AsRef<str>>(args: &[S]) -> Result<(), String> {
     let tool =
         crate::orcha_app::config_tool().ok_or("orcha-config is not installed: nothing changed")?;
-    let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
+    let args: Vec<String> = args.iter().map(|arg| arg.as_ref().to_owned()).collect();
     let output = crate::platform::orcha_tool_command(&tool, &args)
         .stdin(std::process::Stdio::null())
         .output()
@@ -1212,22 +1420,164 @@ fn reload_server() {
 mod tests {
     use super::*;
 
+    /// orcha-config's files as a test sees them: widgets, no checkout.
+    fn tool_files() -> ToolFiles {
+        ToolFiles {
+            json: json!({"widgets": {"clock": true, "weather": false}, "repo": {"base": "main"}}),
+            root: None,
+        }
+    }
+
+    fn keys(fields: &[Value]) -> std::collections::BTreeSet<String> {
+        fields
+            .iter()
+            .filter_map(|field| field["key"].as_str().map(str::to_owned))
+            .collect()
+    }
+
     #[test]
     fn grouping_keeps_every_setting() {
-        let keys = |sections: &[Value]| -> std::collections::BTreeSet<String> {
-            sections
-                .iter()
-                .flat_map(|section| section["fields"].as_array().cloned().unwrap_or_default())
-                .filter_map(|field| field["key"].as_str().map(str::to_owned))
-                .collect()
-        };
-        let all = sections_for(&crate::config::Config::default());
-        let grouped = regroup(all.clone());
+        let all = fields(&Config::default(), &tool_files());
+        let grouped: Vec<Value> = regroup(&all)
+            .iter()
+            .flat_map(|section| section["fields"].as_array().cloned().unwrap_or_default())
+            .collect();
         assert_eq!(
             keys(&grouped),
             keys(&all),
             "a setting is missing from GROUPS"
         );
+    }
+
+    #[test]
+    fn every_setting_has_its_words() {
+        for field in fields(&Config::default(), &tool_files()) {
+            let key = field["key"].as_str().unwrap_or_default();
+            if key.starts_with("widgets.") {
+                continue;
+            }
+            assert!(
+                WORDS.iter().any(|(each, _, _)| *each == key),
+                "{key} has no entry in WORDS"
+            );
+        }
+        let clock = widget_field("clock", "header: clock", true);
+        assert_eq!(clock["label"], "Clock");
+        assert_eq!(clock["help"], "in the header");
+    }
+
+    #[test]
+    fn sliders_and_saving_share_their_bounds() {
+        let fields = config_fields(&Config::default());
+        for (key, range) in [
+            ("checklist_percent", &CHECKLIST_PERCENT),
+            ("low_fuel_percent", &LOW_FUEL_PERCENT),
+            ("auto_handoff_percent", &AUTO_HANDOFF_PERCENT),
+        ] {
+            let field = fields.iter().find(|field| field["key"] == key).unwrap();
+            assert_eq!(field["min"], json!(range.start()), "{key}");
+            assert_eq!(field["max"], json!(range.end()), "{key}");
+            for ok in [*range.start(), *range.end()] {
+                assert!(
+                    matches!(change_for(key, &json!(ok)), Ok(Change::Orcha(text)) if text == ok.to_string()),
+                    "{key} refused {ok}"
+                );
+            }
+            assert!(change_for(key, &json!(range.end() + 1)).is_err(), "{key}");
+            if let Some(below) = range.start().checked_sub(1) {
+                assert!(change_for(key, &json!(below)).is_err(), "{key}");
+            }
+            assert!(change_for(key, &json!(-1)).is_err(), "{key}");
+            assert!(change_for(key, &json!("10")).is_err(), "{key}");
+        }
+    }
+
+    /// Every value a choice shows comes back as its own variant, and is the
+    /// name config.toml itself reads.
+    fn round_trip<T>()
+    where
+        T: Choice + serde::de::DeserializeOwned + std::fmt::Debug,
+    {
+        let mut seen = std::collections::BTreeSet::new();
+        for (variant, value, label) in T::CHOICES {
+            assert!(seen.insert(*value), "{value} is listed twice");
+            assert!(!label.is_empty(), "{value} has no words");
+            assert_eq!(variant.as_str(), *value);
+            assert_eq!(T::parse(&json!(value)), Ok(*variant));
+            let from_toml: T = serde_json::from_value(json!(value)).unwrap();
+            assert_eq!(from_toml, *variant, "config.toml reads {value} differently");
+        }
+        assert!(T::parse(&json!("nowhere")).is_err());
+        assert!(T::parse(&json!(1)).is_err());
+    }
+
+    #[test]
+    fn choices_round_trip_and_refuse_unknown_values() {
+        round_trip::<SidebarSide>();
+        round_trip::<FuelPlacement>();
+        round_trip::<ProcessPlacement>();
+        round_trip::<IconMode>();
+        round_trip::<StatusIndicatorStyle>();
+        round_trip::<ToastDelivery>();
+        round_trip::<SwitchMode>();
+        let fuel = choice("fuel", FuelPlacement::StatusBar);
+        assert_eq!(fuel["value"], "status_bar");
+        assert_eq!(
+            fuel["options"][1],
+            json!({"value": "status_bar", "label": "status bar"})
+        );
+        assert_eq!(
+            change_for("fuel", &json!("roof")).err().as_deref(),
+            Some("roof is not one of panel, status_bar")
+        );
+        assert!(matches!(
+            change_for("switch_mode", &json!("new_pane")),
+            Ok(Change::Orcha(text)) if text == "\"new_pane\""
+        ));
+        assert!(change_for("toast", &json!("pigeon")).is_err());
+        assert!(change_for("sidebar_width", &json!("huge")).is_err());
+        assert!(change_for("accent", &json!("plaid")).is_err());
+    }
+
+    /// Every variant of an enum, through a match with no wildcard: a variant
+    /// added to the enum stops this compiling until it is listed here too.
+    macro_rules! every_variant {
+        ($ty:ident: $($variant:ident),+ $(,)?) => {{
+            let _exhaustive = |value: $ty| match value {
+                $($ty::$variant)|+ => (),
+            };
+            [$($ty::$variant),+]
+        }};
+    }
+
+    /// Each variant has a row in its `Choice` table, so `as_str` never
+    /// falls back to "" and the page never shows a blank value.
+    fn listed<T: Choice + std::fmt::Debug>(variants: &[T]) {
+        assert_eq!(variants.len(), T::CHOICES.len(), "{variants:?}");
+        for variant in variants {
+            assert!(!variant.as_str().is_empty(), "{variant:?} has no value");
+        }
+    }
+
+    #[test]
+    fn every_choice_variant_has_a_value() {
+        listed(&every_variant!(SidebarSide: Left, Right));
+        listed(&every_variant!(FuelPlacement: Panel, StatusBar));
+        listed(&every_variant!(ProcessPlacement: Sidebar, Panel, Off));
+        listed(&every_variant!(IconMode: Auto, Font, Symbols));
+        listed(&every_variant!(StatusIndicatorStyle: Dots, Symbols));
+        listed(&every_variant!(ToastDelivery: Off, Herdr, Terminal, System));
+        listed(&every_variant!(SwitchMode: Ask, Keep, Restart, NewPane));
+    }
+
+    #[test]
+    fn a_failed_apply_after_saving_is_a_warning_not_an_error() {
+        assert_eq!(applied_after_saving(Ok(())), Saved::default());
+        let saved = applied_after_saving(Err("no palette".to_owned()));
+        assert_eq!(saved.note, None);
+        let warning = saved.warning.unwrap_or_default();
+        assert!(warning.starts_with("Saved, but"), "{warning}");
+        assert!(warning.ends_with("no palette"), "{warning}");
     }
 
     #[test]
@@ -1250,5 +1600,49 @@ mod tests {
         assert!(account_action("add", &json!({"name": ""})).is_err());
         assert!(project_action("apply", &json!({"path": "/etc", "rules": ["slices"]})).is_err());
         assert!(background_action(&json!({"what": "focus"})).is_err());
+    }
+
+    #[test]
+    fn config_json_texts_keep_the_rest_of_the_file() {
+        let dir = std::env::temp_dir().join(format!("orcha-settings-json-{}", std::process::id()));
+        let path = dir.join("config.json");
+        let _ = std::fs::remove_dir_all(&dir);
+        // a missing file starts empty
+        save_json_text(&path, "weather_city", "Hanoi").unwrap();
+        let fresh = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, r#"{"lang": "en", "repo": {"base": "main"}}"#).unwrap();
+        save_json_text(&path, "repo.check", "npm test").unwrap();
+        save_json_text(&path, "tracker.task_pattern", "#(\\d+)").unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, "{ not json").unwrap();
+        let broken = save_json_text(&path, "repo.base", "dev");
+        let left = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(
+            serde_json::from_str::<Value>(&fresh).unwrap(),
+            json!({"weather_city": "Hanoi"})
+        );
+        assert!(written.ends_with("}\n"));
+        let config: Value = serde_json::from_str(&written).unwrap();
+        assert_eq!(config["lang"], "en");
+        assert_eq!(json_text(&config, "repo.base"), "main");
+        assert_eq!(json_text(&config, "repo.check"), "npm test");
+        assert_eq!(json_text(&config, "tracker.task_pattern"), "#(\\d+)");
+        assert!(broken.is_err());
+        assert_eq!(left, "{ not json", "a broken config.json was overwritten");
+        assert!(set_json_text(&mut json!([]), "weather_city", "Hanoi").is_err());
+    }
+
+    #[test]
+    fn a_json_table_with_an_unexpected_type_is_left_untouched() {
+        let dir = std::env::temp_dir().join(format!("orcha-settings-shape-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        let old = r#"{"repo":"managed elsewhere","weather_city":"Hanoi"}"#;
+        std::fs::write(&path, old).unwrap();
+        assert!(save_json_text(&path, "repo.base", "main").is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), old);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

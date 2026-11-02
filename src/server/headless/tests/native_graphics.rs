@@ -934,6 +934,7 @@ async fn quiet_native_producer_geometry_retirement_schedules_full_inline_recover
 async fn native_file_render_scale_profile() {
     use base64::Engine as _;
     use ratatui::layout::Direction;
+    use std::os::fd::AsRawFd;
 
     const WARMUP: usize = 5;
     const SAMPLES: usize = 35;
@@ -1009,6 +1010,33 @@ async fn native_file_render_scale_profile() {
             let producer_store = crate::pane_graphics_files::FileStore::native_sources();
             let producer = source_retention
                 .then(|| producer_store.export(&rgba).expect("private producer file"));
+            if let Some(producer) = &producer {
+                // CoW source forwarding is deliberately Linux-only and can also
+                // be unavailable on a Linux test filesystem. Probe the actual
+                // capability, while preserving assertions for supported hosts.
+                let file = std::fs::File::open(producer.path()).expect("open producer");
+                match producer_store.snapshot(i64::from(file.as_raw_fd()), rgba.len()) {
+                    Ok(_) => {}
+                    Err(err)
+                        if err.kind() == std::io::ErrorKind::Unsupported
+                            || matches!(
+                                err.raw_os_error(),
+                                Some(
+                                    libc::EOPNOTSUPP
+                                        | libc::ENOTTY
+                                        | libc::EXDEV
+                                        | libc::EINVAL
+                                        | libc::ENOSYS
+                                )
+                            ) =>
+                    {
+                        eprintln!("native_file_render_scale source_retention=true populated_panes={count} SKIP: {err}");
+                        shutdown_test_runtimes(&mut server);
+                        continue;
+                    }
+                    Err(err) => panic!("unexpected source snapshot failure: {err}"),
+                }
+            }
             let mut previous_source_path: Option<PathBuf> = None;
             let mut times = Vec::with_capacity(SAMPLES);
             for sample in 0..WARMUP + SAMPLES {

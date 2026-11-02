@@ -92,6 +92,10 @@ build:
 bench-render-scale:
     cargo test --release --locked --bin herdr render_scale_profile -- --ignored --nocapture --test-threads=1
 
+# Synthetic Orcha load in an isolated named session; never runs paid agents.
+bench-orcha-load binary='target/release/herdr' projects='15' agents='3' seconds='10':
+    {{python}} scripts/orcha_load.py --binary '{{binary}}' --projects '{{projects}}' --agents '{{agents}}' --seconds '{{seconds}}'
+
 # Profile terminal target name resolution at increasing pane counts.
 bench-terminal-targets:
     cargo test --release --locked --bin herdr terminal_target_lookup_profile -- --ignored --nocapture --test-threads=1

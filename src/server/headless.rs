@@ -3368,7 +3368,10 @@ impl HeadlessServer {
         }
 
         changed |= self.app.release_host_appearance_if_ready(now);
-        changed |= self.app.handle_tab_bar_status_tasks(now);
+        // Tab bar commands follow attached clients, like periodic Git refresh.
+        changed |= self
+            .app
+            .handle_tab_bar_status_tasks(now, self.has_app_client());
 
         if geometry_dirty {
             self.app.pending_agent_resume_deadline = None;

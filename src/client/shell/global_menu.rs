@@ -10,6 +10,20 @@ pub(super) enum ClientGlobalMenuAction {
     NewAgent,
     /// orcha: the first-run setup again.
     Setup,
+    /// orcha: install the newer orcha.
+    UpdateOrcha,
+    /// orcha: COMMANDS with the plugin updates.
+    UpdatePlugins,
+}
+
+/// orcha's own news (herdr's update check is off in orcha): each lights the
+/// menu and adds an item to it. Client state, see `OrchaUiState::menu_news`.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(super) struct OrchaMenuNews {
+    /// A newer orcha is out.
+    pub(super) update: bool,
+    /// A plugin has an update this orcha can run.
+    pub(super) plugin_update: bool,
 }
 
 pub(super) fn global_menu_attention(snapshot: &ClientShellSnapshot) -> bool {
@@ -20,13 +34,17 @@ pub(super) fn global_menu_item_has_badge(
     snapshot: &ClientShellSnapshot,
     action: ClientGlobalMenuAction,
 ) -> bool {
-    (action == ClientGlobalMenuAction::WhatsNew && snapshot.update_available.is_some())
+    matches!(
+        action,
+        ClientGlobalMenuAction::UpdateOrcha | ClientGlobalMenuAction::UpdatePlugins
+    ) || (action == ClientGlobalMenuAction::WhatsNew && snapshot.update_available.is_some())
         || (action == ClientGlobalMenuAction::Binding(crate::input::KeybindAction::Settings)
             && snapshot.integration_updates_available)
 }
 
 pub(super) fn global_menu_items(
     snapshot: &ClientShellSnapshot,
+    news: OrchaMenuNews,
 ) -> Vec<(&'static str, ClientGlobalMenuAction)> {
     let mut items = vec![
         (
@@ -51,6 +69,12 @@ pub(super) fn global_menu_items(
             },
             ClientGlobalMenuAction::WhatsNew,
         ));
+    }
+    if news.update {
+        items.push(("update orcha", ClientGlobalMenuAction::UpdateOrcha));
+    }
+    if news.plugin_update {
+        items.push(("update plugins", ClientGlobalMenuAction::UpdatePlugins));
     }
     let orcha = crate::orcha_app::is_orcha();
     if orcha {
@@ -78,11 +102,11 @@ impl ClientShellState {
     }
 
     pub(super) fn move_global_menu_selection(&mut self, delta: isize) {
+        let news = self.orcha_ui.menu_news();
         let item_count = self
             .snapshot
             .as_deref()
-            .map(global_menu_items)
-            .map_or(0, |items| items.len());
+            .map_or(0, |snapshot| global_menu_items(snapshot, news).len());
         let Some(ClientShellOverlay::GlobalMenu(menu)) = self.overlay.as_mut() else {
             return;
         };
@@ -95,13 +119,22 @@ impl ClientShellState {
         index: usize,
         outcome: &mut ClientShellInput,
     ) {
+        let news = self.orcha_ui.menu_news();
         let Some(action) = self.snapshot.as_deref().and_then(|snapshot| {
-            global_menu_items(snapshot)
+            global_menu_items(snapshot, news)
                 .get(index)
                 .map(|(_, action)| *action)
         }) else {
             return;
         };
+        self.activate_global_menu_action(action, outcome);
+    }
+
+    pub(super) fn activate_global_menu_action(
+        &mut self,
+        action: ClientGlobalMenuAction,
+        outcome: &mut ClientShellInput,
+    ) {
         if action == ClientGlobalMenuAction::WhatsNew
             && self
                 .snapshot
@@ -120,6 +153,8 @@ impl ClientShellState {
             ClientGlobalMenuAction::ImportProjects => self.start_import_scan(),
             ClientGlobalMenuAction::NewAgent => self.open_new_agent_popup(),
             ClientGlobalMenuAction::Setup => self.open_welcome(outcome),
+            ClientGlobalMenuAction::UpdateOrcha => self.start_update(),
+            ClientGlobalMenuAction::UpdatePlugins => self.open_palette_with("update".to_owned()),
         }
         outcome.repaint = true;
     }
