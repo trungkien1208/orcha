@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::{json, Value};
+use serde_json::Value;
 
 const BLOCK_START: &str =
     "<!-- orcha:rules start · managed by orcha (Settings › Projects); edit them there -->";
@@ -297,45 +297,46 @@ fn choices_path() -> PathBuf {
     crate::config::config_dir().join("project-rules.json")
 }
 
-fn choices() -> Value {
-    std::fs::read(choices_path())
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_else(|| json!({}))
+/// What the user chose about project rules (`project-rules.json`).
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct Choices {
+    /// The rules new projects are offered; None until changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    defaults: Option<Vec<String>>,
+    /// Folders never to offer rules for again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    declined: Vec<String>,
+    /// Anything else in the file, kept as it is.
+    #[serde(flatten)]
+    other: serde_json::Map<String, Value>,
 }
 
-fn save_choices(value: &Value) -> Result<(), String> {
-    let text = serde_json::to_string_pretty(value).map_err(|err| err.to_string())?;
-    std::fs::write(choices_path(), text + "\n").map_err(|err| format!("could not save: {err}"))
+fn choices() -> Choices {
+    crate::orcha_state::load_or_default(&choices_path())
 }
 
 /// The rules new projects are offered.
 pub(crate) fn defaults() -> Vec<String> {
-    match choices()["defaults"].as_array() {
-        Some(ids) => ids
-            .iter()
-            .filter_map(|id| id.as_str().map(str::to_owned))
-            .collect(),
-        None => FIRST_DEFAULTS.iter().map(|id| (*id).to_owned()).collect(),
-    }
+    choices()
+        .defaults
+        .unwrap_or_else(|| FIRST_DEFAULTS.iter().map(|id| (*id).to_owned()).collect())
 }
 
 pub(crate) fn set_defaults(ids: &[String]) -> Result<(), String> {
-    let mut value = choices();
-    value["defaults"] = json!(known(ids)?);
-    save_choices(&value)
+    let ids = known(ids)?;
+    crate::orcha_state::update(&choices_path(), |choices: &mut Choices| {
+        choices.defaults = Some(ids);
+    })
 }
 
 /// Never offer rules for this folder again.
 pub(crate) fn decline(folder: &Path) -> Result<(), String> {
-    let mut value = choices();
     let key = folder.to_string_lossy().into_owned();
-    let mut declined: Vec<Value> = value["declined"].as_array().cloned().unwrap_or_default();
-    if !declined.iter().any(|entry| entry == &json!(key)) {
-        declined.push(json!(key));
-    }
-    value["declined"] = json!(declined);
-    save_choices(&value)
+    crate::orcha_state::update(&choices_path(), |choices: &mut Choices| {
+        if !choices.declined.contains(&key) {
+            choices.declined.push(key);
+        }
+    })
 }
 
 fn known(ids: &[String]) -> Result<Vec<String>, String> {
@@ -355,10 +356,10 @@ fn known(ids: &[String]) -> Result<Vec<String>, String> {
 /// orcha block yet, was not declined, and there are defaults to offer.
 /// Blocking (two small reads): call it off hot paths.
 pub(crate) fn should_offer(folder: &Path) -> bool {
-    let declined = choices()["declined"].as_array().is_some_and(|list| {
-        list.iter()
-            .any(|entry| entry.as_str() == Some(&folder.to_string_lossy()))
-    });
+    let declined = choices()
+        .declined
+        .iter()
+        .any(|entry| *entry == folder.to_string_lossy());
     !declined
         && folder.is_dir()
         && !defaults().is_empty()

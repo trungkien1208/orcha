@@ -231,8 +231,6 @@ pub(super) fn render_mode_bar(
 
 pub(super) struct ShellRenderState<'a> {
     pub(super) git_panel: Option<&'a super::git_panel::GitPanelData>,
-    /// `git_panel`, only when it was read at the focused pane's folder.
-    pub(super) focused_git: Option<&'a super::git_panel::GitPanelData>,
     /// FILES: the tree's visible rows.
     pub(super) file_tree: &'a [super::file_tree::TreeRow],
     pub(super) orcha_ui: &'a super::OrchaUiState,
@@ -245,7 +243,9 @@ pub(super) struct ShellRenderState<'a> {
     pub(super) collapsed_groups: &'a HashSet<String>,
     pub(super) remote_collapsed_groups: &'a HashMap<ClientEndpointId, HashSet<String>>,
     pub(super) workspace_scroll: &'a mut usize,
-    pub(super) agent_scroll: &'a mut usize,
+    /// The agent list's scroll as stored; drawing clamps a copy and
+    /// reports it in `ShellHitMap::agent_list_start`.
+    pub(super) agent_scroll: usize,
     pub(super) tab_scroll: &'a mut usize,
     pub(super) reveal_focused_workspace: &'a mut bool,
     pub(super) reveal_focused_tab: &'a mut bool,
@@ -256,6 +256,26 @@ pub(super) struct ShellRenderState<'a> {
     pub(super) reveal_navigation_workspace: &'a mut bool,
     pub(super) dragged_workspace_id: Option<&'a str>,
     pub(super) workspace_drop_indicator_row: Option<u16>,
+    /// orcha's sidebar, laid out before drawing (`layout_sidebar_tree`).
+    pub(super) sidebar_tree: Option<&'a super::sidebar_tree::SidebarTree<'a>>,
+    /// orcha's tab strip, laid out before drawing (`layout_tabs`).
+    pub(super) tab_strip: Option<&'a super::orcha_chrome::TabStrip<'a>>,
+}
+
+/// Where orcha's sidebar tree is drawn this frame: `Some(process_here)`
+/// when `render_shell` draws it, `process_here` saying PROCESS sits at its
+/// foot (not in the right panel, not turned off).
+pub(super) fn sidebar_tree_placement(
+    layout: &ClientShellLayout,
+    config: &ClientShellConfig,
+    endpoint_count: usize,
+) -> Option<bool> {
+    let drawn = layout.sidebar.width > 0 && endpoint_count <= 1 && config.sidebar_tree;
+    drawn.then_some(match config.orcha.process {
+        crate::config::ProcessPlacement::Sidebar => true,
+        crate::config::ProcessPlacement::Panel => layout.right_panel.width == 0,
+        crate::config::ProcessPlacement::Off => false,
+    })
 }
 
 pub(super) fn render_shell(
@@ -313,20 +333,17 @@ pub(super) fn render_shell(
                 &mut hits,
             );
         } else if config.sidebar_tree {
-            let process_here = match config.orcha.process {
-                crate::config::ProcessPlacement::Sidebar => true,
-                crate::config::ProcessPlacement::Panel => layout.right_panel.width == 0,
-                crate::config::ProcessPlacement::Off => false,
-            };
-            super::sidebar_tree::render_sidebar_tree(
-                buffer,
-                layout.sidebar,
-                snapshot,
-                config,
-                &mut state,
-                process_here,
-                &mut hits,
-            );
+            if let Some(tree) = state.sidebar_tree {
+                super::sidebar_tree::render_sidebar_tree(
+                    buffer,
+                    layout.sidebar,
+                    tree,
+                    snapshot,
+                    config,
+                    &state,
+                    &mut hits,
+                );
+            }
         } else {
             render_sidebar(
                 buffer,
@@ -339,17 +356,17 @@ pub(super) fn render_shell(
         }
     }
     if layout.main_frame.width > 0 {
-        super::orcha_chrome::render_frame_and_tabs(
-            buffer,
-            layout.main_frame,
-            layout.tab_bar,
-            snapshot,
-            config,
-            state.tab_scroll,
-            state.reveal_focused_tab,
-            state.tab_drag_insert_index,
-            &mut hits,
-        );
+        if let Some(strip) = state.tab_strip {
+            super::orcha_chrome::render_frame_and_tabs(
+                buffer,
+                layout.main_frame,
+                layout.tab_bar,
+                strip,
+                config,
+                state.tab_drag_insert_index,
+                &mut hits,
+            );
+        }
     } else if layout.tab_bar.height > 0 {
         render_tab_bar(
             buffer,

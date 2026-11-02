@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::api::schema::{InstalledPluginInfo, PluginSourceKind};
+use crate::orcha_state::now_secs;
 
 const CACHE: &str = ".plugin-updates.json";
 const CHECK_EVERY_SECS: u64 = 24 * 60 * 60;
@@ -71,27 +72,17 @@ struct Cache {
     plugins: Vec<PluginUpdate>,
 }
 
-fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs())
-        .unwrap_or_default()
-}
-
 fn cache_path() -> std::path::PathBuf {
     crate::config::config_dir().join(CACHE)
 }
 
 fn read_cache() -> Cache {
-    std::fs::read(cache_path())
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+    crate::orcha_state::load_or_default(&cache_path())
 }
 
 fn write_cache(cache: &Cache) {
-    if let Ok(text) = serde_json::to_string_pretty(cache) {
-        let _ = std::fs::write(cache_path(), text);
+    if let Err(err) = crate::orcha_state::save(&cache_path(), cache) {
+        tracing::warn!(%err, "could not save the plugin update check");
     }
 }
 
@@ -220,17 +211,7 @@ pub(crate) fn follow_self_update() {
 }
 
 fn run_update(id: &str) -> FollowOutcome {
-    let Ok(exe) = std::env::current_exe() else {
-        return FollowOutcome::Failed("could not find orcha".to_owned());
-    };
-    let output = crate::noninteractive_process::command(exe)
-        .args(["plugin", "update", id, "--yes"])
-        .env(
-            crate::api::SOCKET_PATH_ENV_VAR,
-            crate::session::active_api_socket_path(),
-        )
-        .stdin(Stdio::null())
-        .output();
+    let output = crate::orcha_cli::OrchaCli::new(&["plugin", "update", id, "--yes"]).output();
     let Ok(output) = output else {
         return FollowOutcome::Failed("could not run orcha plugin update".to_owned());
     };
@@ -282,32 +263,25 @@ pub(crate) fn cached() -> Vec<PluginUpdate> {
 /// plugin list keeps the Update.
 pub(crate) fn first_notice(update: &PluginUpdate) -> bool {
     let path = crate::config::config_dir().join(NOTICES);
-    let mut shown: std::collections::HashMap<String, String> = std::fs::read(&path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default();
-    if shown.get(&update.id) == Some(&update.latest_version) {
-        return false;
-    }
-    shown.insert(update.id.clone(), update.latest_version.clone());
-    if let Ok(text) = serde_json::to_string_pretty(&shown) {
-        let _ = std::fs::write(path, text);
-    }
-    true
+    crate::orcha_state::update(
+        &path,
+        |shown: &mut std::collections::HashMap<String, String>| {
+            shown.insert(update.id.clone(), update.latest_version.clone())
+                != Some(update.latest_version.clone())
+        },
+    )
+    .unwrap_or_else(|err| {
+        // shown each time until the file is fixed, rather than never
+        tracing::warn!(%err, "could not remember a plugin notice");
+        true
+    })
 }
 
 /// Updates a GitHub plugin with `orcha plugin update <id> --yes` and returns
 /// its new version, or the tail of the update's output. Running panes keep
 /// the old files until restarted (`restart_running_panes`). Blocking.
 pub(crate) fn update_plugin(id: &str) -> Result<String, String> {
-    let exe = std::env::current_exe().map_err(|err| format!("could not find orcha: {err}"))?;
-    let output = crate::noninteractive_process::command(exe)
-        .args(["plugin", "update", id, "--yes"])
-        .env(
-            crate::api::SOCKET_PATH_ENV_VAR,
-            crate::session::active_api_socket_path(),
-        )
-        .stdin(Stdio::null())
+    let output = crate::orcha_cli::OrchaCli::new(&["plugin", "update", id, "--yes"])
         .output()
         .map_err(|err| format!("could not run orcha plugin update: {err}"))?;
     if !output.status.success() {
@@ -366,11 +340,10 @@ pub(crate) fn plugin_pane_ids(listed: &serde_json::Value, id: &str) -> Vec<Strin
 
 /// Forgets the cached answer for `id` (it was just updated).
 fn forget(id: &str) {
-    let mut cache = read_cache();
-    let before = cache.plugins.len();
-    cache.plugins.retain(|plugin| plugin.id != id);
-    if cache.plugins.len() != before {
-        write_cache(&cache);
+    if let Err(err) = crate::orcha_state::update(&cache_path(), |cache: &mut Cache| {
+        cache.plugins.retain(|plugin| plugin.id != id);
+    }) {
+        tracing::warn!(%err, "could not drop a plugin's update check");
     }
 }
 
@@ -499,34 +472,73 @@ fn git(args: &[&str], cwd: Option<&Path>) -> Option<String> {
     command
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GCM_INTERACTIVE", "never")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .env("GCM_INTERACTIVE", "never");
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
     }
+    run_bounded(command, GIT_TIMEOUT)
+}
+
+/// How long the output may take to finish once the command is done.
+const READ_GRACE: Duration = Duration::from_secs(2);
+
+/// Runs `command` for at most `timeout` and returns its output when it
+/// succeeded. It runs in its own process group (a job on Windows): when it
+/// is done or out of time, whatever it left running is killed, so a helper
+/// still holding the output cannot keep the read waiting. The read itself
+/// gives up after `READ_GRACE`.
+fn run_bounded(mut command: std::process::Command, timeout: Duration) -> Option<String> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    crate::platform::configure_status_command(&mut command);
     let mut child = command.spawn().ok()?;
-    let mut stdout = child.stdout.take()?;
-    let reader = std::thread::spawn(move || {
-        let mut text = String::new();
-        let _ = std::io::Read::read_to_string(&mut stdout, &mut text);
-        text
-    });
-    let deadline = Instant::now() + GIT_TIMEOUT;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
+    let stop = |child: &mut std::process::Child| {
+        let _ = child.kill();
+        let _ = child.wait();
+    };
+    let mut tree = match crate::platform::StatusCommandGuard::for_child(&child) {
+        Ok(tree) => tree,
+        Err(err) => {
+            tracing::warn!(%err, "could not watch a git command");
+            stop(&mut child);
+            return None;
         }
     };
-    let text = reader.join().ok()?;
-    status.success().then_some(text)
+    let Some(mut stdout) = child.stdout.take() else {
+        tree.terminate();
+        stop(&mut child);
+        return None;
+    };
+    let (sender, received) = std::sync::mpsc::channel();
+    let reader = std::thread::Builder::new()
+        .name("orcha-git-output".to_owned())
+        .spawn(move || {
+            let mut text = String::new();
+            let _ = std::io::Read::read_to_string(&mut stdout, &mut text);
+            let _ = sender.send(text);
+        });
+    if reader.is_err() {
+        tree.terminate();
+        stop(&mut child);
+        return None;
+    }
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            _ => break None,
+        }
+    };
+    // done or out of time: nothing it started keeps running (or the output open)
+    tree.terminate();
+    if status.is_none() {
+        stop(&mut child);
+    }
+    let text = received.recv_timeout(READ_GRACE).ok()?;
+    status?.success().then_some(text)
 }
 
 /// The commit `reference` (a branch or tag; HEAD when none) points at, or
@@ -801,6 +813,29 @@ mod tests {
             FollowOutcome::NeedsNewerOrcha.line("easy-job"),
             "  easy-job: needs a newer Orcha"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_helper_left_holding_the_output_does_not_hang_the_read() {
+        let mut command = std::process::Command::new("sh");
+        command.args(["-c", "sleep 30 & echo hi"]);
+        let started = Instant::now();
+        assert_eq!(
+            run_bounded(command, Duration::from_secs(10)).as_deref(),
+            Some("hi\n")
+        );
+        assert!(started.elapsed() < READ_GRACE + Duration::from_secs(1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_past_its_deadline_is_stopped() {
+        let mut command = std::process::Command::new("sh");
+        command.args(["-c", "echo partial; sleep 30"]);
+        let started = Instant::now();
+        assert_eq!(run_bounded(command, Duration::from_millis(300)), None);
+        assert!(started.elapsed() < READ_GRACE + Duration::from_secs(1));
     }
 
     #[test]

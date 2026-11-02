@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use super::brutal::Brutal;
-use super::orcha_popup::{popup_frame, PopupHits};
+use super::orcha_popup::{popup_frame, PopupHits, PopupTarget};
 use super::render::put_text;
 use super::*;
 
@@ -94,7 +94,7 @@ pub(super) fn render(
         buffer.set_style(rect, Style::default().bg(fill));
         put_text(buffer, x + 1, y, 2, icon, Style::default().bg(fill));
         hits.rows.push((rect, index));
-        hits.actions.push((rect, index));
+        hits.actions.push((rect, PopupTarget::Row(index)));
     }
     let none = ICONS.len();
     let y = body.y + rows * 2;
@@ -113,7 +113,7 @@ pub(super) fn render(
             .add_modifier(Modifier::BOLD),
     );
     hits.rows.push((rect, none));
-    hits.actions.push((rect, none));
+    hits.actions.push((rect, PopupTarget::Row(none)));
     Some(())
 }
 

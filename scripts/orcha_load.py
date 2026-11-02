@@ -14,6 +14,7 @@ import argparse
 import json
 import math
 import os
+import re
 from pathlib import Path
 import shlex
 import shutil
@@ -26,21 +27,94 @@ import uuid
 
 
 PRODUCER = r'''
-import os, select, sys, time, tty
+import json, os, select, socket, sys, time, tty
 tty.setcbreak(sys.stdin.fileno())
 gate, label, hz = sys.argv[1], sys.argv[2], float(sys.argv[3])
+style, title_hz = sys.argv[4], float(sys.argv[5])
+working_s, idle_s, offset = float(sys.argv[6]), float(sys.argv[7]), float(sys.argv[8])
+api_path, pane = sys.argv[9], sys.argv[10]
+reported_state = None
+
+def report_state(state):
+    # Supported runtime protocol, no paid CLI and no subprocess per report.
+    request = {"id": "orcha-load", "method": "pane.report_agent", "params": {
+        "pane_id": pane, "source": "orcha-load", "agent": "claude", "state": state}}
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(2)
+        connection.connect(api_path)
+        connection.sendall(json.dumps(request).encode() + b"\n")
+        answer = connection.makefile("rb").readline()
+        reply = json.loads(answer)
+        if reply.get("error"):
+            raise RuntimeError(reply["error"])
 while not os.path.exists(gate): time.sleep(.01)
-seq, received = 0, b""
+seq, spin, received = 0, 0, b""
+started = time.monotonic()
+next_title = started
+SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+RULE = "─" * 60
 while True:
     ready, _, _ = select.select([sys.stdin], [], [], 1 / hz)
     if ready: received = (received + os.read(sys.stdin.fileno(), 4096))[-32:]
     seq += 1
-    title = "|/-\\"[seq % 4] + " " + label
-    sys.stdout.write("\033]0;" + title + "\007\033[H\033[2J"
-                     + "load-output-" + label + " " + str(seq) + "\r\n"
-                     + "INPUT:" + received.decode(errors="replace") + "\r\n")
+    now = time.monotonic()
+    out = ""
+    if style == "claude":
+        # A synthetic reported agent; terminal output exercises ordinary
+        # title/output paths, not compatibility with bundled Claude rules.
+        working = (now - started + offset) % (working_s + idle_s) < working_s
+        current_state = "working" if working else "idle"
+        if current_state != reported_state:
+            report_state(current_state)
+            reported_state = current_state
+        if now >= next_title:
+            spin += 1
+            next_title = now + 1 / title_hz
+            title = (SPINNER[spin % len(SPINNER)] if working else "✳") + " " + label
+            out += "\033]0;" + title + "\007"
+        status = ("✻ Thinking… (" + str(seq % 60) + "s · esc to interrupt)"
+                  if working else "")
+        out += ("\033[H\033[2J" + "load-output-" + label + " " + str(seq) + "\r\n"
+                + "INPUT:" + received.decode(errors="replace") + "\r\n"
+                + status + "\r\n" + RULE + "\r\n❯ \r\n" + RULE + "\r\n"
+                + "  ? for shortcuts\r\n")
+    else:
+        title = "|/-\\"[seq % 4] + " " + label
+        out = ("\033]0;" + title + "\007\033[H\033[2J"
+               + "load-output-" + label + " " + str(seq) + "\r\n"
+               + "INPUT:" + received.decode(errors="replace") + "\r\n")
+    sys.stdout.write(out)
     sys.stdout.flush()
 '''
+
+
+def parse_cpu_time(value: str) -> float:
+    """ps time: [[days-]hours:]minutes:seconds[.fraction]."""
+    days, separator, clock = value.strip().partition("-")
+    if not separator:
+        clock, days = days, "0"
+    parts = clock.split(":")
+    if len(parts) not in (2, 3):
+        raise ValueError(f"unexpected ps CPU time: {value!r}")
+    total = int(days) * 86400.0
+    seconds = 0.0
+    for part in parts:
+        seconds = seconds * 60 + float(part)
+    return total + seconds
+
+
+def cpu_seconds(pids: list[str]) -> float:
+    # Cumulative CPU time, unlike ps's decaying %cpu average.
+    lines = subprocess.check_output(["ps", "-p", ",".join(pids), "-o", "time="],
+                                    text=True).splitlines()
+    return sum(parse_cpu_time(line) for line in lines if line.strip())
+
+
+def positive_finite(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number) or number <= 0:
+        raise argparse.ArgumentTypeError("must be positive and finite")
+    return number
 
 
 def positive(value: str) -> int:
@@ -58,7 +132,18 @@ def main() -> None:
     parser.add_argument("--seconds", type=positive, default=10)
     parser.add_argument("--hz", type=positive, default=20)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--style", choices=["plain", "claude"], default="plain",
+                        help="claude: synthetic agents report working/idle through the isolated "
+                             "runtime API and spin a braille terminal title")
+    parser.add_argument("--title-hz", type=positive, default=10,
+                        help="claude style: spinner title changes per second")
+    parser.add_argument("--working-seconds", type=positive_finite, default=4.0)
+    parser.add_argument("--idle-seconds", type=positive_finite, default=2.0)
+    parser.add_argument("--prof-dir", type=Path,
+                        help="enable HERDR_RENDER_PROF and copy the isolated logs here")
     args = parser.parse_args()
+    if not math.isfinite(args.working_seconds + args.idle_seconds):
+        parser.error("the working/idle period must be finite")
     if os.name != "posix":
         parser.error("requires a Unix host")
     for tool in ["tmux", "lsof", "ps"]:
@@ -74,7 +159,10 @@ def main() -> None:
     report: dict = {"session": name, "projects": args.projects,
                     "producers": args.projects * args.agents,
                     "hz_per_producer": args.hz, "sample_seconds": args.seconds,
-                    "synthetic_agents": True, "geometry": [120, 42]}
+                    "synthetic_agents": True, "geometry": [120, 42], "style": args.style}
+    if args.style == "claude":
+        report.update(title_hz=args.title_hz, working_seconds=args.working_seconds,
+                      idle_seconds=args.idle_seconds)
     with tempfile.TemporaryDirectory(prefix="orcha-load-", dir="/var/tmp") as folder:
         root = Path(folder)
         config = root / "config.toml"
@@ -92,6 +180,8 @@ def main() -> None:
                          PATH=os.environ["PATH"])
         if "HERDR_ENV" in env:
             overrides["HERDR_ENV"] = env["HERDR_ENV"]
+        if args.prof_dir:
+            overrides["HERDR_RENDER_PROF"] = "1"
         env.update(overrides)
         for folder_name in ("home", "run"):
             (root / folder_name).mkdir(mode=0o700)
@@ -148,9 +238,14 @@ def main() -> None:
                     tab = api("tab", "create", "--workspace", workspace["workspace"]["workspace_id"],
                               "--cwd", str(cwd), "--label", f"producer-{agent}", "--no-focus")
                     panes.append(tab["root_pane"]["pane_id"])
+            session = next(s for s in json.loads(command("session", "list", "--json").stdout)["sessions"]
+                           if s["name"] == name)
+            period = args.working_seconds + args.idle_seconds
             for index, pane in enumerate(panes):
                 command("pane", "run", pane, sys.executable, str(producer), str(gate),
-                        f"p{index}", str(args.hz))
+                        f"p{index}", str(args.hz), args.style, str(args.title_hz),
+                        str(args.working_seconds), str(args.idle_seconds),
+                        f"{period * (index / max(len(panes), 1)):.3f}", session["socket_path"], pane)
             gate.touch()
             session = next(s for s in json.loads(command("session", "list", "--json").stdout)["sessions"]
                            if s["name"] == name)
@@ -164,7 +259,14 @@ def main() -> None:
                     if time.monotonic() > deadline:
                         raise RuntimeError(f"producer {index} did not emit output")
                     time.sleep(.05)
+            if args.style == "claude":
+                agents = api("agent", "list").get("agents", [])
+                verified = {agent["pane_id"] for agent in agents if agent.get("agent") == "claude"}
+                report["verified_agents"] = len(verified.intersection(panes))
+                if report["verified_agents"] != len(panes):
+                    raise RuntimeError("not every synthetic producer appeared in agent.list")
             latency, cpu, rss = [], [], []
+            cpu_started = (time.monotonic(), cpu_seconds([server]), cpu_seconds([client]))
             deadline = time.monotonic() + args.seconds
             while time.monotonic() < deadline:
                 token = uuid.uuid4().hex[:12]
@@ -183,12 +285,17 @@ def main() -> None:
                 cpu.append(sum(float(v[0]) for v in values))
                 rss.append(sum(int(v[1]) for v in values))
                 time.sleep(min(.25, max(0, deadline - time.monotonic())))
+            wall = time.monotonic() - cpu_started[0]
+            server_cpu = (cpu_seconds([server]) - cpu_started[1]) / wall * 100
+            client_cpu = (cpu_seconds([client]) - cpu_started[2]) / wall * 100
             # ps %cpu is a host-dependent rolling average, not a precise interval counter.
             ordered = sorted(latency)
             report.update(input_latency_ms_median=statistics.median(latency),
                           input_latency_ms_p95=ordered[math.ceil(len(ordered) * .95) - 1],
                           input_samples=len(latency), cpu_percent_ps_mean=statistics.mean(cpu),
-                          rss_kib_peak=max(rss), verified_producers=len(panes))
+                          rss_kib_peak=max(rss), verified_producers=len(panes),
+                          cpu_percent_server=round(server_cpu, 1),
+                          cpu_percent_client=round(client_cpu, 1))
         except Exception as error:
             report["error"] = str(error)
             if 'panes' in locals() and panes:
@@ -198,6 +305,9 @@ def main() -> None:
         finally:
             # Never raise from here: that would hide the run's own error and
             # skip the report. A cleanup problem is recorded in the report.
+            # Deleting the session removes its logs, so keep them first.
+            if args.prof_dir:
+                copy_logs(root, args.prof_dir, report)
             if started:
                 report["cleaned_up"] = cleanup(command, tmux, name, report)
             write_report(args.report, report)
@@ -232,6 +342,32 @@ def cleanup(command, tmux: list[str], name: str, report: dict) -> bool:
     if problems:
         report["cleanup_error"] = "; ".join(problems)
     return not problems
+
+
+def copy_logs(root: Path, destination: Path, report: dict) -> None:
+    """Keeps the isolated server and client logs; a failure is recorded, never raised."""
+    try:
+        destination.mkdir(parents=True, exist_ok=True)
+        copied = []
+        counters: dict[str, int] = {}
+        windows = 0
+        for log in root.rglob("*.log"):
+            name = "__".join(log.relative_to(root).parts)
+            shutil.copy2(log, destination / name)
+            copied.append(name)
+            for line in log.read_text(errors="replace").splitlines():
+                if "render profiler window" not in line:
+                    continue
+                windows += 1
+                for key, value in re.findall(r"([a-z_][a-z_0-9.]*)=(\d+)", line):
+                    if key.startswith(("shell_snapshot.", "full_render.", "retained_surface.", "render.")):
+                        counters[key] = counters.get(key, 0) + int(value)
+        report["logs"] = sorted(copied)
+        report["profile_windows"] = windows
+        report["profile_counters"] = counters
+        report["profile_counter_scope"] = "isolated_session_all_flushed_windows"
+    except OSError as error:
+        report["logs_error"] = str(error)
 
 
 def write_report(path: Path | None, report: dict) -> None:

@@ -283,6 +283,7 @@ fn activity_footer_starts_open_and_stops_rendering_animation_when_folded() {
 #[ignore = "manual fixed-geometry sidebar profile"]
 fn orcha_sidebar_render_scale_profile() {
     let with_agents = std::env::var("ORCHA_SIDEBAR_PROFILE_AGENTS").is_ok();
+    let with_accounts = std::env::var("ORCHA_SIDEBAR_PROFILE_ACCOUNTS").is_ok();
     for one_workspace in [false, true] {
         for count in [1, 15] {
             let mut state = sidebar_state(count, one_workspace);
@@ -295,6 +296,13 @@ fn orcha_sidebar_render_scale_profile() {
                         AgentStatus::Working,
                     );
                 }
+            }
+            if with_accounts {
+                state.accounts.set_for_test(Some(vec![
+                    fuel_account("claude", "claude", 8, true),
+                    fuel_account("codex", "codex", 9, false),
+                    fuel_account("cursor", "cursor", 7, false),
+                ]));
             }
             // Exercise every populated project when the viewport can show it.
             for workspace in &state.snapshot.as_ref().expect("snapshot").workspaces {
@@ -313,7 +321,7 @@ fn orcha_sidebar_render_scale_profile() {
             }
             samples.sort_unstable();
             eprintln!(
-                "orcha_sidebar agents={with_agents} layout={} populated={} geometry=120x42 median_ns={} p95_ns={}",
+                "orcha_sidebar agents={with_agents} accounts={with_accounts} layout={} populated={} geometry=120x42 median_ns={} p95_ns={}",
                 if one_workspace {
                     "active_panes"
                 } else {
@@ -716,4 +724,260 @@ fn every_agent_row_names_its_state_and_the_open_pane_is_marked() {
     // pane_1 is the open pane: only its row carries the bar
     assert!(row_of("pane_1").contains("▌✳"), "{}", row_of("pane_1"));
     assert!(!row_of("pane_2").contains("▌◎"), "{}", row_of("pane_2"));
+}
+
+/// Drawing is pure: the scroll is reconciled before the frame is drawn,
+/// so a second compose with no input in between draws the same frame and
+/// leaves every scroll and reveal flag as the first one left it.
+#[test]
+fn composing_twice_without_input_draws_the_same_and_changes_nothing() {
+    for one_workspace in [false, true] {
+        let mut state = sidebar_state(40, one_workspace);
+        // out of range on purpose: the layout step clamps them
+        state.workspace_scroll = 999;
+        state.tab_scroll = 999;
+        state.agent_scroll = 999;
+        state.reveal_focused_workspace = true;
+        state.reveal_focused_tab = true;
+        let first = state.compose(120, 24).expect("first frame").frame;
+        let scrolls = |state: &ClientShellState| {
+            (
+                state.workspace_scroll,
+                state.tab_scroll,
+                state.agent_scroll,
+                state.reveal_focused_workspace,
+                state.reveal_focused_tab,
+            )
+        };
+        let after_first = scrolls(&state);
+        assert!(!after_first.3 && !after_first.4, "the reveals were used");
+        assert!(after_first.0 < 40 && after_first.1 < 40, "{after_first:?}");
+        let second = state.compose(120, 24).expect("second frame").frame;
+        assert_eq!(first, second, "the same frame twice");
+        assert_eq!(scrolls(&state), after_first, "no state change");
+    }
+}
+
+fn fuel_account(
+    id: &str,
+    kind: &str,
+    left: u8,
+    current: bool,
+) -> crate::client::shell::accounts::Account {
+    crate::client::shell::accounts::Account {
+        id: id.into(),
+        kind: kind.into(),
+        label: format!("{kind} · {id}"),
+        email: None,
+        current,
+        error: None,
+        windows: vec![crate::client::shell::accounts::FuelWindow {
+            key: "session".into(),
+            label: "5H".into(),
+            left,
+            reset: None,
+            reset_at: None,
+        }],
+        signed_in: Some(true),
+    }
+}
+
+/// The text of `pane`'s sidebar row.
+fn agent_row_text(state: &ClientShellState, frame: &FrameData, pane: &str) -> String {
+    let rows = frame_rows(frame);
+    let (rect, _) = state
+        .hits
+        .agents
+        .iter()
+        .rev()
+        .find(|(rect, id)| id == pane && rect.y < state.hits.workspace_body.bottom())
+        .expect("agent row");
+    rows[rect.y as usize].trim_end().to_owned()
+}
+
+#[test]
+fn agents_on_an_account_low_on_fuel_carry_a_mark_and_join_the_hint() {
+    let mut state = sidebar_state(3, true);
+    add_agent(&mut state, 0, "Claude", AgentStatus::Working);
+    add_agent(&mut state, 1, "Codex", AgentStatus::Idle);
+    add_agent(&mut state, 2, "Cursor", AgentStatus::Idle);
+    state.accounts.set_for_test(Some(vec![
+        fuel_account("work", "claude", 60, true),
+        fuel_account("codex", "codex", 5, false),
+        fuel_account("cursor", "cursor", 15, false),
+    ]));
+    let frame = state.compose(120, 42).expect("frame");
+    let claude = agent_row_text(&state, &frame, "pane_1");
+    let codex = agent_row_text(&state, &frame, "pane_2");
+    let cursor = agent_row_text(&state, &frame, "pane_3");
+    assert!(!claude.contains('%'), "plenty of fuel, no mark: {claude}");
+    assert!(codex.contains("5%") && codex.ends_with("idle"), "{codex}");
+    assert!(
+        cursor.contains("15%") && cursor.ends_with("idle"),
+        "{cursor}"
+    );
+    // red under the switch line, yellow when only low
+    let color_of = |needle: &str| {
+        let rows = frame_rows(&frame);
+        let (y, row) = rows
+            .iter()
+            .enumerate()
+            .find(|(_, row)| row.contains(needle))
+            .expect("row");
+        let x = row[..row.find(needle).expect("needle")].chars().count();
+        frame.cells[y * usize::from(frame.width) + x].fg
+    };
+    assert_ne!(color_of("5%"), color_of("15%"), "two levels, two colors");
+    // the header counts the agent on the empty account in
+    assert!(state.update_low_fuel_hint());
+    assert_eq!(
+        state.orcha_ui.low_fuel_hint.as_deref(),
+        Some("1 agent low on fuel")
+    );
+}
+
+#[test]
+fn a_hand_off_shows_on_the_old_row_until_the_old_pane_is_focused_again() {
+    let mut state = sidebar_state(2, true);
+    add_agent(&mut state, 0, "Claude", AgentStatus::Idle);
+    add_agent(&mut state, 1, "Codex", AgentStatus::Working);
+    // under way
+    state.orcha_ui.handoff_source = Some("pane_1".into());
+    let frame = state.compose(120, 42).expect("frame");
+    let row = agent_row_text(&state, &frame, "pane_1");
+    assert!(row.ends_with("handing off…"), "{row}");
+    // done: the old row links to the new pane
+    state.orcha_ui.handoff_source = None;
+    state.mark_continued("pane_1".into(), "pane_2".into());
+    let frame = state.compose(120, 42).expect("frame");
+    let row = agent_row_text(&state, &frame, "pane_1");
+    assert!(row.ends_with("→ continued"), "{row}");
+    let row_y = state
+        .hits
+        .agents
+        .iter()
+        .rev()
+        .find(|(_, id)| id == "pane_1")
+        .map(|(rect, _)| rect.y)
+        .expect("old row");
+    let (link, _) = state
+        .hits
+        .agents
+        .iter()
+        .find(|(rect, id)| id == "pane_2" && rect.y == row_y)
+        .cloned()
+        .expect("the link on the old row");
+    let outcome =
+        state.handle_raw_events(vec![crate::raw_input::RawInputEvent::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: link.x,
+            row: link.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    assert!(
+        outcome.actions.iter().any(|action| matches!(
+            action,
+            ClientShellAction::Endpoint { request, .. }
+                if matches!(&request.method, crate::api::schema::Method::PaneFocus(target)
+                    if target.pane_id == "pane_2")
+        )),
+        "a click on → continued focuses the new pane"
+    );
+
+    let focus = |state: &mut ClientShellState, pane: &str| {
+        let data = state.snapshot.as_mut().expect("snapshot");
+        data.focused_pane_id = Some(pane.into());
+        for known in &mut data.panes {
+            known.focused = known.pane_id == pane;
+        }
+        for agent in &mut data.agents {
+            agent.focused = agent.pane_id == pane;
+        }
+    };
+    // still on the old pane, as when the hand-off ended: the mark stays
+    assert!(!state.reconcile_continued());
+    assert!(state.orcha_ui.continued.contains_key("pane_1"));
+    // away and back: the mark goes
+    focus(&mut state, "pane_2");
+    assert!(!state.reconcile_continued());
+    focus(&mut state, "pane_1");
+    assert!(state.reconcile_continued());
+    assert!(state.orcha_ui.continued.is_empty());
+    // closing the old pane clears it too
+    state.mark_continued("pane_1".into(), "pane_2".into());
+    let data = state.snapshot.as_mut().expect("snapshot");
+    data.panes.retain(|pane| pane.pane_id != "pane_1");
+    data.agents.retain(|agent| agent.pane_id != "pane_1");
+    assert!(state.reconcile_continued());
+    assert!(state.orcha_ui.continued.is_empty());
+}
+
+#[test]
+fn ambiguous_background_accounts_show_only_the_observed_owners_fuel() {
+    let mut state = sidebar_state(2, true);
+    add_agent(&mut state, 0, "Claude", AgentStatus::Idle);
+    add_agent(&mut state, 1, "Claude", AgentStatus::Idle);
+    state.accounts.set_for_test(Some(vec![
+        fuel_account("work", "claude", 80, true),
+        fuel_account("personal", "claude", 3, false),
+    ]));
+    let frame = state.compose(120, 42).expect("unknown owner");
+    assert!(!agent_row_text(&state, &frame, "pane_2").contains('%'));
+    state
+        .accounts
+        .set_pane_owner_for_test("pane_2", "claude", "personal");
+    let frame = state.compose(120, 42).expect("observed owner");
+    assert!(agent_row_text(&state, &frame, "pane_2").contains("3%"));
+    state
+        .accounts
+        .set_pane_owner_for_test("pane_1", "claude", "personal");
+    let frame = state.compose(120, 42).expect("fresh focused account");
+    assert!(
+        !agent_row_text(&state, &frame, "pane_1").contains('%'),
+        "the focused account's fresh fuel wins over stale cached ownership"
+    );
+    state
+        .snapshot
+        .as_deref_mut()
+        .expect("snapshot")
+        .agents
+        .iter_mut()
+        .find(|agent| agent.pane_id == "pane_2")
+        .expect("agent")
+        .agent = Some("codex".into());
+    let frame = state.compose(120, 42).expect("provider changed");
+    assert!(!agent_row_text(&state, &frame, "pane_2").contains('%'));
+}
+
+#[test]
+fn narrow_agent_rows_keep_their_logo_and_name_when_a_chat_moves() {
+    for width in 16..35 {
+        let mut state = sidebar_state(2, true);
+        state.config.icon_font = false;
+        state.config.sidebar_min_width = 12;
+        add_agent(&mut state, 0, "Claude", AgentStatus::Idle);
+        add_agent(&mut state, 1, "Codex", AgentStatus::Idle);
+        state.sidebar_width = width;
+        state.sidebar_width_manual = true;
+        state.mark_continued("pane_1".into(), "pane_2".into());
+        let frame = state.compose(120, 42).expect("frame");
+        let row = agent_row_text(&state, &frame, "pane_1");
+        assert!(row.contains('✳'), "width {width}: {row}");
+        assert!(row.contains("Clau"), "width {width}: {row}");
+        let y = state
+            .hits
+            .agents
+            .iter()
+            .rev()
+            .find(|(_, id)| id == "pane_1")
+            .expect("row")
+            .0
+            .y;
+        for (hit, _) in state.hits.agents.iter().filter(|(hit, _)| hit.y == y) {
+            assert!(
+                hit.x < width && hit.right() <= width,
+                "width {width}: {hit:?}"
+            );
+        }
+    }
 }

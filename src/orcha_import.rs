@@ -29,16 +29,36 @@ pub(crate) fn mark_asked() {
     let _ = std::fs::write(dir.join(ASKED_MARKER), "the import popup was shown\n");
 }
 
+/// What an import scan found.
+#[derive(Debug, Default)]
+pub(crate) struct ImportScan {
+    /// Every source with at least one folder still on disk.
+    pub sources: Vec<ImportSource>,
+    /// The editors skipped for a missing tool, as one line for the import
+    /// list ("VS Code, Cursor: needs sqlite3").
+    pub needs: Option<String>,
+}
+
 /// Every source with at least one folder still on disk.
 pub(crate) fn find_sources() -> Vec<ImportSource> {
+    let scan = scan();
+    if let Some(needs) = &scan.needs {
+        tracing::info!(%needs, "orcha import: some editors' recent folders were skipped");
+    }
+    scan.sources
+}
+
+/// The sources, and the editors that could not be read for a missing tool.
+pub(crate) fn scan() -> ImportScan {
     let Some(home) = crate::platform::user_home_dir() else {
-        return Vec::new();
+        return ImportScan::default();
     };
     let support = crate::platform::orcha_application_support_dir(&home);
     let mut sources = vec![ImportSource {
         name: "Orca".into(),
         projects: orca_projects(&home, &support),
     }];
+    let mut need_sqlite = Vec::new();
     for (name, folder) in [
         ("VS Code", "Code"),
         ("Cursor", "Cursor"),
@@ -46,9 +66,20 @@ pub(crate) fn find_sources() -> Vec<ImportSource> {
         ("VSCodium", "VSCodium"),
     ] {
         let db = support.join(folder).join("User/globalStorage/state.vscdb");
+        let projects = match vscode_recent(SQLITE, &db) {
+            Ok(projects) => projects,
+            Err(RecentError::NeedsSqlite3) => {
+                need_sqlite.push(name);
+                Vec::new()
+            }
+            Err(RecentError::Unreadable(why)) => {
+                tracing::warn!(editor = name, %why, "orcha import: recent folders unreadable");
+                Vec::new()
+            }
+        };
         sources.push(ImportSource {
             name: name.into(),
-            projects: vscode_recent(&db),
+            projects,
         });
     }
     sources.push(ImportSource {
@@ -65,7 +96,15 @@ pub(crate) fn find_sources() -> Vec<ImportSource> {
         });
     }
     sources.retain(|source| !source.projects.is_empty());
-    sources
+    ImportScan {
+        sources,
+        needs: needs_line(&need_sqlite, "sqlite3"),
+    }
+}
+
+/// "VS Code, Cursor: needs sqlite3", or None when nothing was skipped.
+fn needs_line(editors: &[&str], tool: &str) -> Option<String> {
+    (!editors.is_empty()).then(|| format!("{}: needs {tool}", editors.join(", ")))
 }
 
 /// Folders compare case-insensitively where the usual file systems do.
@@ -160,27 +199,44 @@ fn parse_orca(text: &str) -> Vec<(String, String)> {
     out
 }
 
-/// A VS Code-family editor's recent folders, from its state database.
-fn vscode_recent(db: &Path) -> Vec<(String, String)> {
+/// The tool that reads VS Code-family state databases.
+const SQLITE: &str = "sqlite3";
+
+/// Why an editor's recent folders could not be read.
+#[derive(Debug, PartialEq, Eq)]
+enum RecentError {
+    /// `sqlite3` is not installed (common on Windows).
+    NeedsSqlite3,
+    /// The database could not be read.
+    Unreadable(String),
+}
+
+/// A VS Code-family editor's recent folders, from its state database read
+/// with `sqlite` (no database: none).
+fn vscode_recent(sqlite: &str, db: &Path) -> Result<Vec<(String, String)>, RecentError> {
     if !db.is_file() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    let mut command = std::process::Command::new("sqlite3");
-    command
+    // no console window flashing up on Windows
+    let output = crate::noninteractive_process::command(sqlite)
         .arg("-readonly")
         .arg(db)
         .arg("select value from ItemTable where key = 'history.recentlyOpenedPathsList'")
         .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    // no console window flashing up on Windows
-    crate::platform::configure_background_command(&mut command);
-    let output = command.output();
-    match output {
-        Ok(output) if output.status.success() => {
-            parse_vscode_recent(&String::from_utf8_lossy(&output.stdout))
-        }
-        _ => Vec::new(),
+        .output()
+        .map_err(|err| match err.kind() {
+            std::io::ErrorKind::NotFound => RecentError::NeedsSqlite3,
+            _ => RecentError::Unreadable(err.to_string()),
+        })?;
+    if !output.status.success() {
+        let said = String::from_utf8_lossy(&output.stderr);
+        return Err(RecentError::Unreadable(
+            said.trim().chars().take(200).collect(),
+        ));
     }
+    Ok(parse_vscode_recent(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
 }
 
 fn parse_vscode_recent(text: &str) -> Vec<(String, String)> {
@@ -321,6 +377,32 @@ mod tests {
                 ("api".to_owned(), "/Users/me/api".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn a_missing_sqlite3_is_told_apart_from_a_bad_database() {
+        let dir = std::env::temp_dir().join(format!("orcha-import-db-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("state.vscdb");
+        // no database: nothing to read, nothing missing
+        assert_eq!(vscode_recent("orcha-no-such-sqlite3", &db), Ok(Vec::new()));
+        std::fs::write(&db, "not a database").unwrap();
+        assert_eq!(
+            vscode_recent("orcha-no-such-sqlite3", &db),
+            Err(RecentError::NeedsSqlite3)
+        );
+        // a tool that runs but cannot read it (git refuses these arguments)
+        assert!(matches!(
+            vscode_recent("git", &db),
+            Err(RecentError::Unreadable(_))
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            needs_line(&["VS Code", "Cursor"], "sqlite3").as_deref(),
+            Some("VS Code, Cursor: needs sqlite3")
+        );
+        assert_eq!(needs_line(&[], "sqlite3"), None);
     }
 
     #[test]

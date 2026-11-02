@@ -52,8 +52,13 @@ impl ClientShellState {
         point: (u16, u16),
         outcome: &mut ClientShellInput,
     ) -> bool {
-        if self.config.sidebar_tree && super::contains(self.hits.new_workspace, point) {
-            self.open_new_workspace_popup();
+        // + NEW and the tab strip's + both offer NEW AGENT (a new project is
+        // one of its rows)
+        if self.config.sidebar_tree
+            && (super::contains(self.hits.new_workspace, point)
+                || super::contains(self.hits.new_tab, point))
+        {
+            self.open_new_agent_popup();
             outcome.repaint = true;
             return true;
         }
@@ -399,8 +404,8 @@ impl AccountAction {
             Self::Import { chosen, dismissed } => {
                 accounts::import_found(&chosen, &dismissed).map(|added| match added.len() {
                     0 => "found accounts: not asking again".to_owned(),
-                    1 => format!("{} added to FUEL", added[0]),
-                    n => format!("{n} accounts added to FUEL"),
+                    1 => format!("{} added to Accounts", added[0]),
+                    n => format!("{n} accounts added to Accounts"),
                 })
             }
             Self::NewAgent { id, workspace, cwd } => {

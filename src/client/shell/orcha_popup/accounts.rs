@@ -43,7 +43,9 @@ pub(in crate::client::shell) fn best_account(accounts: &[Account]) -> Option<usi
         accounts
             .iter()
             .enumerate()
-            .filter(|(_, account)| usable(account) && (!same_kind || account.kind == current.kind))
+            .filter(|(_, account)| {
+                usable(account) && (!same_kind || brutal::same_agent(&account.kind, &current.kind))
+            })
             .max_by_key(|(_, account)| account.lowest().unwrap_or(0))
     };
     most(true)
@@ -64,6 +66,12 @@ pub(super) fn render_accounts(
 ) -> Option<()> {
     let loading = accounts.is_none();
     let accounts = accounts.unwrap_or(&[]);
+    let current_kind = pane
+        .and_then(|pane| snapshot.agents.iter().find(|agent| agent.pane_id == pane))
+        .and_then(|agent| agent.agent.as_deref());
+    let is_current = |account: &Account| {
+        account.current && current_kind.is_none_or(|kind| brutal::same_agent(kind, &account.kind))
+    };
     let context = pane
         .and_then(|pane| snapshot.agents.iter().find(|agent| agent.pane_id == pane))
         .map(|agent| {
@@ -83,28 +91,24 @@ pub(super) fn render_accounts(
     // running low: say how low
     let low = accounts
         .iter()
-        .find(|account| account.current)
+        .find(|account| is_current(account))
         .and_then(|account| account.lowest().map(|left| (account, left)))
         .filter(|(_, left)| fuel_is_low(*left, &config.orcha));
     let context = match low {
         Some((account, left)) => format!("{context} · ⚠ {} {left}% left", account.label),
         None => context,
     };
-    let current_kind = accounts
-        .iter()
-        .find(|account| account.current)
-        .map(|account| account.kind.clone());
     // alt ↵ hands a chat to another agent with a summary first, and opens
     // another account of the same agent in a new pane
-    let alternate = match (accounts.get(selected), current_kind.as_deref()) {
-        (Some(account), Some(kind)) if account.kind != kind => "summarize",
+    let alternate = match (accounts.get(selected), current_kind) {
+        (Some(account), Some(kind)) if !brutal::same_agent(&account.kind, kind) => "summarize",
         _ => "new pane",
     };
     let frame = popup_frame(
         buffer,
         88,
         rows_height(accounts.len().max(1)).saturating_add(2),
-        "CONTINUE ON",
+        "ACCOUNTS",
         &context,
         &[
             ("↵", "continue"),
@@ -151,10 +155,9 @@ pub(super) fn render_accounts(
                 return;
             };
             // another agent: the chat is handed off; the same agent: it goes on as is
-            let hand_off = current_kind
-                .as_deref()
-                .is_some_and(|kind| kind != account.kind);
-            let badge = if account.current {
+            let hand_off =
+                current_kind.is_some_and(|kind| !brutal::same_agent(kind, &account.kind));
+            let badge = if is_current(account) {
                 Some(("IN USE", t.ink, t.frame))
             } else if Some(index) == best {
                 Some(("BEST", t.chip_text, t.green))
@@ -165,7 +168,7 @@ pub(super) fn render_accounts(
             };
             let action = if account.signed_out() {
                 Some(("SIGN IN", ButtonKind::Plain))
-            } else if account.current {
+            } else if is_current(account) {
                 None
             } else if index == selected {
                 Some(("CONTINUE ↵", ButtonKind::Primary))
@@ -309,7 +312,7 @@ pub(super) fn render_add_account(
             fill,
             t,
         );
-        hits.actions.push((action, index));
+        hits.actions.push((action, PopupTarget::Row(index)));
         hits.rows.push((rect, index));
         y += 2;
     }
@@ -347,7 +350,7 @@ pub(super) fn render_add_account(
                 fill,
                 t,
             );
-            hits.actions.push((action, index));
+            hits.actions.push((action, PopupTarget::Row(index)));
         }
         hits.rows.push((rect, index));
     }
@@ -408,7 +411,7 @@ pub(super) fn account_row(
     }
     if let Some((label, kind)) = row.action {
         let action = button(buffer, right + 1, y, label, kind, fill, t);
-        hits.actions.push((action, index));
+        hits.actions.push((action, PopupTarget::Row(index)));
     }
     // second line: email (or why there is no fuel), then the gauges
     let shown = account.windows.iter().take(2).count() as u16;
@@ -509,7 +512,8 @@ pub(super) fn account_row(
 }
 
 /// NEW AGENT: which agent and account starts in a new tab of the project.
-/// Rows are the accounts (with their fuel), then a plain shell.
+/// Rows are the accounts (with their fuel), then a plain shell, then a new
+/// project.
 pub(super) fn render_new_agent(
     buffer: &mut Buffer,
     selected: usize,
@@ -523,7 +527,7 @@ pub(super) fn render_new_agent(
     let frame = popup_frame(
         buffer,
         88,
-        rows_height(accounts.len() + 1),
+        rows_height(accounts.len() + NEW_AGENT_EXTRA_ROWS),
         "NEW AGENT",
         &format!("new tab in {project}"),
         &[("↵", "start"), ("↑↓", "choose"), ("P", "new project")],
@@ -537,24 +541,35 @@ pub(super) fn render_new_agent(
         .filter(|(_, account)| !account.signed_out())
         .max_by_key(|(_, account)| account.lowest().unwrap_or(0))
         .map(|(index, _)| index);
-    // the accounts, then a plain shell
+    // the accounts, then a plain shell, then a new project
     draw_rows(
         buffer,
         frame.body,
         ROW,
-        accounts.len() + 1,
+        accounts.len() + NEW_AGENT_EXTRA_ROWS,
         selected,
         t,
         |buffer, rect, index, first| {
             let cursor = index == selected;
             let Some(account) = accounts.get(index) else {
-                let row = ChoiceRow {
-                    lead: Lead::Logo("▶", t.rail_ahead),
-                    ..ChoiceRow::new(
-                        "Shell",
-                        "no agent, just a terminal",
-                        RowButton::Always("OPEN"),
-                    )
+                let row = if index == accounts.len() {
+                    ChoiceRow {
+                        lead: Lead::Logo("▶", t.rail_ahead),
+                        ..ChoiceRow::new(
+                            "Shell",
+                            "no agent, just a terminal",
+                            RowButton::Always("OPEN"),
+                        )
+                    }
+                } else {
+                    ChoiceRow {
+                        lead: Lead::Logo("+", t.green),
+                        ..ChoiceRow::new(
+                            "New project…",
+                            "a folder on this computer, or a new worktree",
+                            RowButton::Always("CHOOSE"),
+                        )
+                    }
                 };
                 choice_row(buffer, rect, index, row.at(first, cursor), t, hits);
                 return;
@@ -603,7 +618,7 @@ pub(super) fn render_found_accounts(
         76,
         rows_height(found.len()) + 2,
         "FOUND ACCOUNTS",
-        "agents on this machine · import adds them to FUEL",
+        "agents on this machine · import adds them to Accounts",
         &[("↵", "import"), ("space", "check"), ("esc", "close")],
         "",
         t,
@@ -620,20 +635,23 @@ pub(super) fn render_found_accounts(
             let Some(account) = found.get(index) else {
                 return;
             };
-            let title = if account.kind == "claude" {
+            let claude = brutal::same_agent(&account.kind, "claude");
+            let title = if claude {
                 format!("Claude · {}  {}", account.name, account.email)
             } else {
                 format!("{}  {}", account.name, account.email)
             };
             let command = crate::orcha_accounts::agent_kind(&account.kind)
                 .map_or(account.kind.as_str(), |agent| agent.command);
-            let detail = match (account.kind.as_str(), account.signed_in) {
-                ("claude", _) => account
+            let detail = match (claude, account.signed_in) {
+                (true, _) => account
                     .dir
                     .clone()
                     .unwrap_or_else(|| "~/.claude (default)".to_owned()),
                 (_, true) => format!("signed in · runs {command}"),
-                (_, false) => format!("installed · sign in from FUEL after importing ({command})"),
+                (_, false) => {
+                    format!("installed · sign in from Accounts after importing ({command})")
+                }
             };
             let row = ChoiceRow {
                 lead: Lead::Check(chosen.get(index).copied().unwrap_or(false)),
@@ -649,7 +667,7 @@ pub(super) fn render_found_accounts(
             );
         },
     );
-    primary_under_list(buffer, frame.body, count, found.len(), t, hits);
+    primary_under_list(buffer, frame.body, count, t, hits);
     Some(())
 }
 
@@ -723,7 +741,7 @@ pub(super) fn render_open_with(
         );
         hits.actions.push((
             Rect::new(frame.body.x + 2, y, check + 1 + display_width(&label), 1),
-            choices.len(),
+            PopupTarget::Check,
         ));
     }
     Some(())

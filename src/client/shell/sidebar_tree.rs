@@ -573,15 +573,139 @@ pub(super) fn draw_process_area(
     );
 }
 
-/// `process_here`: PROCESS sits at the sidebar's foot (not in the right
-/// panel, not turned off).
+/// The sidebar laid out before it is drawn: where PROCESS and the project
+/// list go, each project's rows and height, and the list's scroll, already
+/// moved to reveal the focused project and clamped to the list. Drawing
+/// only reads it.
+pub(super) struct SidebarTree<'a> {
+    /// PROCESS at the sidebar's foot, with its rect; None when it lives
+    /// elsewhere.
+    process: Option<(ProcessView<'a>, Rect)>,
+    /// None when the sidebar is too small for anything but its paper.
+    list: Option<ProjectList<'a>>,
+}
+
+struct ProjectList<'a> {
+    x: u16,
+    width: u16,
+    label_y: u16,
+    body: Rect,
+    focused_git: Option<&'a super::git_panel::GitPanelData>,
+    rows_by_workspace: HashMap<&'a str, ProjectRows<'a>>,
+    /// Each shown project and whether it is open.
+    items: Vec<(&'a ClientShellWorkspace, bool)>,
+    heights: Vec<u16>,
+    /// The first project drawn.
+    scroll: usize,
+    metrics: crate::pane::ScrollMetrics,
+    /// Agents whose account runs low on fuel, by pane.
+    low_fuel: HashMap<&'a str, super::accounts::FuelMark>,
+}
+
+/// Lays the sidebar out in `area` (see `SidebarTree`). The only state it
+/// changes is the client's scroll: `scroll` comes back clamped, and moved
+/// to the focused project when `reveal` asks for it (which it clears).
+#[allow(clippy::too_many_arguments)] // one layout step, all inputs are distinct facts
+pub(super) fn layout_sidebar_tree<'a>(
+    area: Rect,
+    snapshot: &'a ClientShellSnapshot,
+    ui: &super::OrchaUiState,
+    collapsed_groups: &HashSet<String>,
+    focused_git: Option<&'a super::git_panel::GitPanelData>,
+    accounts: &super::accounts::AccountsPoller,
+    orcha: &crate::config::OrchaConfig,
+    process_here: bool,
+    scroll: &mut usize,
+    reveal: &mut bool,
+) -> SidebarTree<'a> {
+    if area.width < 12 || area.height < 6 {
+        return SidebarTree {
+            process: None,
+            list: None,
+        };
+    }
+    // a column of paper on the window's edge: the terminal stretches edge
+    // cells' colors into its padding
+    let x = area.x + 1;
+    let width = area.width.saturating_sub(1);
+
+    // PROCESS at the foot (unless it lives in the right panel or is off)
+    let process = process_here.then(|| {
+        let view = process_view(snapshot, ui.process_folded);
+        let height = process_height(&view, ui.process_folded, area.height.saturating_sub(10));
+        let rect = Rect::new(x, area.bottom().saturating_sub(height), width, height);
+        (view, rect)
+    });
+    let process_y = process.as_ref().map_or(area.bottom(), |(_, rect)| rect.y);
+
+    let label_y = area.y + 2;
+    let focused_git = focused_pane_git(snapshot, focused_git);
+    let entries = super::sidebar::workspace_entries(snapshot, collapsed_groups);
+    let rows_by_workspace = project_rows_by_workspace(snapshot);
+    let empty = ProjectRows::default();
+    let mut items = Vec::with_capacity(entries.len());
+    let mut heights = Vec::with_capacity(entries.len());
+    for entry in &entries {
+        let Some(workspace) = snapshot.workspaces.get(entry.index) else {
+            continue;
+        };
+        let project = rows_by_workspace
+            .get(workspace.workspace_id.as_str())
+            .unwrap_or(&empty);
+        let expanded = ui.project_expanded(&workspace.workspace_id, workspace.focused);
+        heights.push(if !expanded {
+            1
+        } else {
+            // No blank rows: the indent shows where a project ends.
+            let branch = shown_branch(workspace, focused_git).is_some();
+            1u16.saturating_add(u16::from(branch))
+                .saturating_add(u16::try_from(project.rows.len()).unwrap_or(u16::MAX))
+        });
+        items.push((workspace, expanded));
+    }
+    let gaps: [u16; 0] = [];
+    let body = Rect::new(x, label_y + 1, width, process_y.saturating_sub(label_y + 1));
+    if !body.is_empty() && std::mem::take(reveal) {
+        if let Some(target) = items.iter().position(|(workspace, _)| workspace.focused) {
+            *scroll = super::scroll::list_scroll_start_to_reveal(
+                &heights,
+                &gaps,
+                body.height,
+                *scroll,
+                target,
+            );
+        }
+    }
+    let metrics = super::scroll::list_scroll_metrics(&heights, &gaps, body.height, *scroll);
+    *scroll = metrics
+        .max_offset_from_bottom
+        .saturating_sub(metrics.offset_from_bottom);
+    SidebarTree {
+        process,
+        list: Some(ProjectList {
+            x,
+            width,
+            label_y,
+            body,
+            focused_git,
+            rows_by_workspace,
+            items,
+            heights,
+            scroll: *scroll,
+            metrics,
+            low_fuel: accounts.low_fuel_agents(snapshot, orcha),
+        }),
+    }
+}
+
+/// Draws the sidebar `layout_sidebar_tree` laid out.
 pub(crate) fn render_sidebar_tree(
     buffer: &mut Buffer,
     area: Rect,
+    tree: &SidebarTree<'_>,
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
-    state: &mut ShellRenderState<'_>,
-    process_here: bool,
+    state: &ShellRenderState<'_>,
     hits: &mut ShellHitMap,
 ) {
     let t = Brutal::new(&config.palette);
@@ -597,42 +721,28 @@ pub(crate) fn render_sidebar_tree(
     };
     hits.sidebar_section_divider = Rect::default();
     hits.agent_body = Rect::default();
-    if area.width < 12 || area.height < 6 {
+    let Some(list) = &tree.list else {
         return;
-    }
-    // a column of paper on the window's edge: the terminal stretches edge
-    // cells' colors into its padding
-    let x = area.x + 1;
-    let width = area.width.saturating_sub(1);
+    };
+    let (x, width) = (list.x, list.width);
 
     render_buttons(buffer, x, area.y, width, snapshot, config, &t, hits);
 
-    // PROCESS at the foot (unless it lives in the right panel or is off)
-    let process = if process_here {
-        let view = process_view(snapshot, state.orcha_ui.process_folded);
-        let height = process_height(
-            &view,
-            state.orcha_ui.process_folded,
-            area.height.saturating_sub(10),
-        );
-        let rect = Rect::new(x, area.bottom().saturating_sub(height), width, height);
+    if let Some((view, rect)) = &tree.process {
         draw_process_area(
             buffer,
-            rect,
-            &view,
+            *rect,
+            view,
             state.orcha_ui.process_frame,
             config,
             &t,
             hits,
         );
-        rect
-    } else {
-        Rect::new(x, area.bottom(), width, 0)
-    };
+    }
 
     // One continuous project list: the label on the left, the count on the
     // right, both lined up with the rows below.
-    let label_y = area.y + 2;
+    let label_y = list.label_y;
     let row_width = width.saturating_sub(1);
     let label_style = Style::default()
         .fg(t.muted)
@@ -655,74 +765,30 @@ pub(crate) fn render_sidebar_tree(
     );
     // orcha keeps its sidebar open: no fold button
 
-    let focused_git = focused_pane_git(snapshot, state.focused_git);
-    let entries = super::sidebar::workspace_entries(snapshot, state.collapsed_groups);
-    let rows_by_workspace = project_rows_by_workspace(snapshot);
-    let empty = ProjectRows::default();
-    let mut items = Vec::new();
-    for entry in &entries {
-        let Some(workspace) = snapshot.workspaces.get(entry.index) else {
-            continue;
-        };
-        let project = rows_by_workspace
-            .get(workspace.workspace_id.as_str())
-            .unwrap_or(&empty);
-        let expanded = state
-            .orcha_ui
-            .project_expanded(&workspace.workspace_id, workspace.focused);
-        items.push((workspace, project, expanded));
-    }
-    let heights: Vec<u16> = items
-        .iter()
-        .map(|(workspace, project, expanded)| {
-            if !expanded {
-                1
-            } else {
-                // No blank rows: the indent shows where a project ends.
-                let branch = shown_branch(workspace, focused_git).is_some();
-                1u16.saturating_add(u16::from(branch))
-                    .saturating_add(u16::try_from(project.rows.len()).unwrap_or(u16::MAX))
-            }
-        })
-        .collect();
-    let gaps: [u16; 0] = [];
-    let body = Rect::new(x, label_y + 1, width, process.y.saturating_sub(label_y + 1));
+    let body = list.body;
+    let metrics = list.metrics;
     hits.workspace_body = body;
-    let mut metrics =
-        super::scroll::list_scroll_metrics(&heights, &gaps, body.height, *state.workspace_scroll);
-    if !body.is_empty() && std::mem::take(state.reveal_focused_workspace) {
-        if let Some(target) = items.iter().position(|(workspace, _, _)| workspace.focused) {
-            *state.workspace_scroll = super::scroll::list_scroll_start_to_reveal(
-                &heights,
-                &gaps,
-                body.height,
-                *state.workspace_scroll,
-                target,
-            );
-            metrics = super::scroll::list_scroll_metrics(
-                &heights,
-                &gaps,
-                body.height,
-                *state.workspace_scroll,
-            );
-        }
-    }
     hits.workspace_max_scroll = metrics.max_offset_from_bottom;
     hits.workspace_scroll_metrics = Some(metrics);
-    *state.workspace_scroll = metrics
-        .max_offset_from_bottom
-        .saturating_sub(metrics.offset_from_bottom);
 
+    let empty = ProjectRows::default();
+    let marks = RowMarks {
+        low_fuel: &list.low_fuel,
+        handing_off: state.orcha_ui.handoff_source.as_deref(),
+        continued: &state.orcha_ui.continued,
+    };
     let mut y = body.y;
-    for (index, (workspace, project, expanded)) in
-        items.iter().enumerate().skip(*state.workspace_scroll)
-    {
+    for (index, (workspace, expanded)) in list.items.iter().enumerate().skip(list.scroll) {
         // A project with many panes must still expose its header and first panes.
         // Match list_scroll_metrics' clamping of an oversized first item.
-        let height = heights[index].min(body.height);
+        let height = list.heights[index].min(body.height);
         if y.saturating_add(height) > body.bottom() {
             break;
         }
+        let project = list
+            .rows_by_workspace
+            .get(workspace.workspace_id.as_str())
+            .unwrap_or(&empty);
         let icon = state
             .orcha_ui
             .project_icons
@@ -732,10 +798,11 @@ pub(crate) fn render_sidebar_tree(
             buffer,
             Rect::new(x, y, row_width, height),
             workspace,
-            shown_branch(workspace, focused_git),
+            shown_branch(workspace, list.focused_git),
             icon,
             project,
             *expanded,
+            &marks,
             config.icon_font,
             &t,
             hits,
@@ -808,6 +875,34 @@ fn shown_branch<'a>(
 /// Cells kept for a project's icon, so every name starts in the same column.
 const ICON_WIDTH: u16 = 2;
 
+/// A hand-off on an agent's row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HandoffMark<'a> {
+    /// Its chat is being handed off.
+    Running,
+    /// Its chat goes on in this pane.
+    Continued(&'a str),
+}
+
+/// What agent rows show besides their state: fuel running low on their
+/// account, and hand-offs.
+struct RowMarks<'a> {
+    low_fuel: &'a HashMap<&'a str, super::accounts::FuelMark>,
+    handing_off: Option<&'a str>,
+    continued: &'a HashMap<String, super::ContinuedPane>,
+}
+
+impl<'a> RowMarks<'a> {
+    fn handoff(&self, pane: &str) -> Option<HandoffMark<'a>> {
+        if self.handing_off == Some(pane) {
+            return Some(HandoffMark::Running);
+        }
+        self.continued
+            .get(pane)
+            .map(|next| HandoffMark::Continued(next.pane.as_str()))
+    }
+}
+
 /// One project: its name row, then (when open) its branch and panes,
 /// indented under the name. Idle says nothing; busy projects show their
 /// agents' logos and one word on the right.
@@ -820,6 +915,7 @@ fn render_project(
     icon: Option<&str>,
     project: &ProjectRows<'_>,
     expanded: bool,
+    marks: &RowMarks<'_>,
     icon_font: bool,
     t: &Brutal,
     hits: &mut ShellHitMap,
@@ -1053,18 +1149,63 @@ fn render_project(
         );
         let text_x = name_x + logo_width + 1;
         // Every agent names its state on the right; shells have none. The
-        // long word unless it would squeeze the name.
+        // long word unless it would squeeze the name. A hand-off under way
+        // or done says so in its place.
         let state = ProjectActivity::from_status(status);
-        let note = if shell {
-            ""
-        } else {
-            let room = right
-                .saturating_sub(text_x)
-                .saturating_sub(display_width(&name).min(8) + 1);
-            state.word(room)
+        let room = right
+            .saturating_sub(text_x)
+            .saturating_sub(display_width(&name).min(8) + 1);
+        let handoff = if shell { None } else { marks.handoff(pane_id) };
+        let (note, note_color, note_bold) = match handoff {
+            Some(HandoffMark::Running) => (
+                if room >= 12 {
+                    "handing off…"
+                } else if room >= 7 {
+                    "handoff"
+                } else {
+                    ""
+                },
+                t.blue,
+                false,
+            ),
+            Some(HandoffMark::Continued(_)) => (
+                if room >= 11 {
+                    "→ continued"
+                } else if room >= 7 {
+                    "→ moved"
+                } else {
+                    ""
+                },
+                t.blue,
+                true,
+            ),
+            None if shell => ("", t.muted, false),
+            None => (
+                state.word(room),
+                state.color(t),
+                state == ProjectActivity::NeedsYou,
+            ),
         };
         let note_width = display_width(note);
-        let text_width = right.saturating_sub(text_x + note_width + u16::from(note_width > 0));
+        // an account low on fuel: its percent left of the note, red when
+        // orcha would offer a switch, yellow when only low
+        let fuel = if shell {
+            None
+        } else {
+            marks.low_fuel.get(pane_id).and_then(|mark| {
+                let long = format!("fuel {}%", mark.left);
+                let text = if note_width + 1 + display_width(&long) <= room {
+                    long
+                } else {
+                    format!("{}%", mark.left)
+                };
+                (display_width(&text) + 1 + note_width <= room)
+                    .then_some((text, if mark.empty { t.red } else { t.yellow }))
+            })
+        };
+        let fuel_width = fuel.as_ref().map_or(0, |(text, _)| display_width(text) + 1);
+        let marks_width = note_width + u16::from(note_width > 0) + fuel_width;
+        let text_width = right.saturating_sub(text_x + marks_width);
         let name_width = display_width(&name).min(text_width);
         // shells step back so agents stand out, unless one is open
         let name_style = Style::default()
@@ -1095,19 +1236,30 @@ fn render_project(
             );
         }
         if note_width > 0 {
-            let style = Style::default()
-                .fg(t.text(state.color(t), row_bg))
-                .bg(row_bg);
+            let style = Style::default().fg(t.text(note_color, row_bg)).bg(row_bg);
             put_right_text(
                 buffer,
-                Rect::new(row.x, y, right.saturating_sub(row.x), 1),
+                Rect::new(text_x, y, right.saturating_sub(text_x), 1),
                 y,
                 note,
-                if state == ProjectActivity::NeedsYou {
+                if note_bold {
                     style.add_modifier(Modifier::BOLD)
                 } else {
                     style
                 },
+            );
+        }
+        if let Some((text, color)) = &fuel {
+            let end = right.saturating_sub(note_width + u16::from(note_width > 0));
+            put_right_text(
+                buffer,
+                Rect::new(text_x, y, end.saturating_sub(text_x), 1),
+                y,
+                text,
+                Style::default()
+                    .fg(t.text(*color, row_bg))
+                    .bg(row_bg)
+                    .add_modifier(Modifier::BOLD),
             );
         }
         // the open pane: an ink bar on its left edge, like the open tab
@@ -1120,6 +1272,14 @@ fn render_project(
                 "▌",
                 Style::default().fg(t.ink).bg(row_bg),
             );
+        }
+        // "→ continued" goes to the new pane; listed first, so it wins
+        // over the row's own click
+        if let Some(HandoffMark::Continued(next)) = handoff.filter(|_| note_width > 0) {
+            hits.agents.push((
+                Rect::new(right.saturating_sub(note_width), y, note_width, 1),
+                next.to_owned(),
+            ));
         }
         hits.agents.push((
             Rect::new(icon_x, y, right.saturating_sub(icon_x), 1),

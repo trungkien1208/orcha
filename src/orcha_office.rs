@@ -5,6 +5,8 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+use crate::orcha_cli::{succeeded, OrchaCli};
+
 pub(crate) const PLUGIN_ID: &str = "easy-job";
 const USAGE: &str = "usage: orcha office [status|stop|install|update|remove]";
 
@@ -31,21 +33,6 @@ pub(crate) fn run(args: &[String]) -> i32 {
             2
         }
     }
-}
-
-/// This app's executable against the current session.
-fn orcha(args: &[&str]) -> Command {
-    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("orcha"));
-    let mut command = Command::new(exe);
-    command.args(args).env(
-        crate::api::SOCKET_PATH_ENV_VAR,
-        crate::session::active_api_socket_path(),
-    );
-    command
-}
-
-fn status_of(command: &mut Command) -> bool {
-    command.status().is_ok_and(|status| status.success())
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -151,8 +138,7 @@ fn plugin_root() -> Option<PathBuf> {
 
 /// Opens the office in the browser, starting it when it is not running.
 pub(crate) fn open_quietly() -> Result<(), String> {
-    let output = orcha(&["plugin", "action", "invoke", "open", "--plugin", PLUGIN_ID])
-        .stdin(Stdio::null())
+    let output = OrchaCli::new(&["plugin", "action", "invoke", "open", "--plugin", PLUGIN_ID])
         .output()
         .map_err(|err| format!("could not open Easy Job: {err}"))?;
     if output.status.success() {
@@ -226,8 +212,7 @@ pub(crate) fn remove_quietly() -> Result<(), String> {
         // remove it anyway, so a broken install can still be taken out
         tracing::warn!(%err, "Easy Job's server did not stop before its removal");
     }
-    let output = orcha(&["plugin", "uninstall", PLUGIN_ID])
-        .stdin(Stdio::null())
+    let output = OrchaCli::new(&["plugin", "uninstall", PLUGIN_ID])
         .output()
         .map_err(|err| format!("could not remove Easy Job: {err}"))?;
     if output.status.success() {
@@ -251,9 +236,7 @@ fn open() -> i32 {
         return not_added();
     }
     let params = serde_json::json!({"plugin_id": PLUGIN_ID, "action_id": "open"}).to_string();
-    let output = orcha(&["api", "call", "plugin.run_action", &params])
-        .stdin(Stdio::null())
-        .output();
+    let output = OrchaCli::new(&["api", "call", "plugin.run_action", &params]).output();
     match output {
         Ok(output) if output.status.success() => 0,
         Ok(output) => {
@@ -310,7 +293,7 @@ fn install() -> i32 {
         }
         Install::Broken => {
             // its files are gone: drop the record so the GitHub install can take its place
-            if !status_of(orcha(&["plugin", "unlink", PLUGIN_ID]).stdout(Stdio::null())) {
+            if !succeeded(OrchaCli::new(&["plugin", "unlink", PLUGIN_ID]).quiet()) {
                 eprintln!(
                     "Easy Job's old entry could not be removed. Run: orcha plugin unlink easy-job"
                 );
@@ -321,7 +304,7 @@ fn install() -> i32 {
     }
     // asked for by name: the in-app offer has its answer
     crate::orcha_app::answer_plugin_offer(PLUGIN_ID, false);
-    if !status_of(&mut orcha(crate::orcha_app::EASY_JOB_INSTALL)) {
+    if !succeeded(OrchaCli::new(crate::orcha_app::EASY_JOB_INSTALL).in_terminal()) {
         crate::orcha_app::forget_plugin_offer(PLUGIN_ID);
         eprintln!("Easy Job was not added.");
         return 1;
@@ -368,7 +351,7 @@ fn remove() -> i32 {
     if let Err(err) = stop_quietly() {
         eprintln!("{err}. Removing it anyway.");
     }
-    if !status_of(orcha(&["plugin", "uninstall", PLUGIN_ID]).stdin(Stdio::null())) {
+    if !succeeded(OrchaCli::new(&["plugin", "uninstall", PLUGIN_ID]).in_terminal()) {
         eprintln!("Easy Job was not removed.");
         return 1;
     }

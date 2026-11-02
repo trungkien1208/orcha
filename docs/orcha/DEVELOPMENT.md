@@ -22,8 +22,10 @@ identity. Welcome appears once; use **menu → setup** to reopen it.
 
 ## Creating a project workspace
 
-**+ NEW** offers a workspace in the current project, a native folder browser,
-and manual folder path entry. The browser runs in the background and fills a
+**+ NEW** (and the tab strip's `+`) opens NEW AGENT: every account with its
+fuel, a plain shell, and **New project…**. With no project yet it goes straight
+to NEW PROJECT. NEW PROJECT offers another project in the current folder, a
+native folder browser, manual folder path entry and a new worktree. The browser runs in the background and fills a
 confirmation prompt; Enter creates the workspace, Escape cancels. macOS uses its
 system folder chooser, Windows uses its folder browser, and Linux uses Zenity
 when available. If the dialog is unavailable, enter the path manually. Remote

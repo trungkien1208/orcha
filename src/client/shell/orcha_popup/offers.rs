@@ -382,6 +382,7 @@ pub(super) fn render_whats_new(
         t.bg,
         t,
     );
-    hits.actions.push((action, 0));
+    hits.actions
+        .push((action, PopupTarget::Button(PopupButton::Primary)));
     Some(())
 }

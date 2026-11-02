@@ -7,6 +7,9 @@ use crate::layout::PaneId;
 #[derive(Debug, Default)]
 pub(crate) struct RenderRequest {
     pub(crate) generic: bool,
+    /// True only when every generic request in this batch came from the
+    /// audited metadata-only path. Unknown/urgent work always clears it.
+    pub(crate) generic_is_passive: bool,
     pub(crate) pty_sources: HashSet<PaneId>,
     pub(crate) terminal_title_sources: HashSet<PaneId>,
 }
@@ -40,6 +43,19 @@ impl RenderSignal {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.request.generic = true;
+        state.request.generic_is_passive = false;
+        self.pending.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn request_passive_metadata(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !state.request.generic {
+            state.request.generic_is_passive = true;
+        }
+        state.request.generic = true;
         self.pending.store(true, Ordering::Release);
     }
 
@@ -60,6 +76,16 @@ impl RenderSignal {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .immediate_pty_sources = sources;
+    }
+
+    /// Scalar interest for one detector tick; never clones the whole render
+    /// request or scans other panes.
+    pub(crate) fn has_immediate_pty_source(&self, pane_id: PaneId) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .immediate_pty_sources
+            .contains(&pane_id)
     }
 
     pub(crate) fn has_immediate_work(&self) -> bool {
@@ -203,5 +229,29 @@ mod tests {
         let request = signal.take();
         assert!(request.generic);
         assert_eq!(request.pty_sources, HashSet::from([pane_id]));
+    }
+}
+
+#[cfg(test)]
+mod metadata_origin_tests {
+    use super::*;
+    #[test]
+    fn urgent_generic_work_wins_in_both_mixed_batch_orders() {
+        for urgent_first in [false, true] {
+            let signal = RenderSignal::new();
+            if urgent_first {
+                signal.request_generic();
+            }
+            signal.request_passive_metadata();
+            if !urgent_first {
+                signal.request_generic();
+            }
+            let batch = signal.take();
+            assert!(batch.generic);
+            assert!(!batch.generic_is_passive);
+            signal.request_passive_metadata();
+            let only_metadata = signal.take();
+            assert!(only_metadata.generic && only_metadata.generic_is_passive);
+        }
     }
 }

@@ -253,15 +253,73 @@ fn found_accounts_wait_for_a_free_screen_then_offer_a_checked_list() {
     ));
 }
 
+/// + NEW, then NEW AGENT's "New project…" row: NEW PROJECT.
+fn open_new_project(state: &mut ClientShellState, outcome: &mut ClientShellInput) {
+    use crate::client::shell::orcha_popup::PopupTarget;
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    state.compose(140, 40).expect("shell frame");
+    let button = state.hits.new_workspace;
+    assert!(state.handle_orcha_click((button.x, button.y), outcome));
+    assert!(matches!(
+        state.orcha_ui.popup,
+        Some(crate::client::shell::orcha_popup::OrchaPopup::NewAgent { .. })
+    ));
+    let frame = state.compose(140, 40).expect("new agent choices");
+    assert!(frame_rows(&frame).join("\n").contains("New project…"));
+    // the last row: accounts, then Shell, then New project…
+    let last = state.accounts.data().map_or(0, <[_]>::len) + 1;
+    let (choose, _) = *state
+        .hits
+        .orcha
+        .popup
+        .actions
+        .iter()
+        .find(|(_, target)| *target == PopupTarget::Row(last))
+        .expect("the new project row's button");
+    state.handle_orcha_popup_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: choose.x,
+            row: choose.y,
+            modifiers: KeyModifiers::empty(),
+        },
+        outcome,
+    );
+}
+
+#[test]
+fn new_and_the_tab_plus_offer_new_agent_with_a_new_project_row() {
+    let mut state = orcha_state(true, true);
+    state.compose(140, 40).expect("shell frame");
+    let plus = state.hits.new_tab;
+    assert!(!plus.is_empty(), "the tab strip has its +");
+    let mut outcome = ClientShellInput::default();
+    assert!(state.handle_orcha_click((plus.x, plus.y), &mut outcome));
+    assert!(matches!(
+        state.orcha_ui.popup,
+        Some(crate::client::shell::orcha_popup::OrchaPopup::NewAgent { .. })
+    ));
+    // no project at all: NEW goes straight to NEW PROJECT
+    let mut empty = orcha_state(true, true);
+    if let Some(snapshot) = empty.snapshot.as_deref_mut() {
+        for workspace in &mut snapshot.workspaces {
+            workspace.focused = false;
+        }
+    }
+    empty.open_new_agent_popup();
+    assert!(matches!(
+        empty.orcha_ui.popup,
+        Some(crate::client::shell::orcha_popup::OrchaPopup::NewWorkspace { .. })
+    ));
+}
+
 #[test]
 fn new_button_offers_current_project_or_another_folder() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
     let mut current = orcha_state(true, true);
-    current.compose(140, 40).expect("shell frame");
-    let button = current.hits.new_workspace;
     let mut outcome = ClientShellInput::default();
-    assert!(current.handle_orcha_click((button.x, button.y), &mut outcome));
+    open_new_project(&mut current, &mut outcome);
     assert!(matches!(
         current.orcha_ui.popup.as_ref(),
         Some(crate::client::shell::orcha_popup::OrchaPopup::NewWorkspace {
@@ -288,9 +346,7 @@ fn new_button_offers_current_project_or_another_folder() {
     )));
 
     let mut folder = orcha_state(true, true);
-    folder.compose(140, 40).expect("shell frame");
-    let button = folder.hits.new_workspace;
-    folder.handle_orcha_click((button.x, button.y), &mut outcome);
+    open_new_project(&mut folder, &mut outcome);
     folder.compose(140, 40).expect("new workspace choices");
     let choose = folder.hits.orcha.popup.actions[2].0;
     folder.handle_orcha_popup_mouse(
@@ -428,7 +484,7 @@ fn accounts_popup_lists_fuel() {
     for row in frame_rows(&frame) {
         eprintln!("|{row}|");
     }
-    assert!(all.contains("CONTINUE ON") && all.contains("IN USE") && all.contains("BEST"));
+    assert!(all.contains("ACCOUNTS") && all.contains("IN USE") && all.contains("BEST"));
     assert!(
         all.contains("5H resets in 1h 12m") && all.contains("WEEK resets in 3d 5h"),
         "each account says when its windows reset:\n{all}"
@@ -448,13 +504,15 @@ fn accounts_popup_lists_fuel() {
     );
     assert!(state.update_low_fuel_hint(), "8% left offers a switch");
 
-    // NEW: the accounts plus a plain shell, the one with most fuel picked
+    // NEW: the accounts plus a plain shell and a new project, the one with
+    // most fuel picked
     state.orcha_ui.popup = None;
     state.open_new_agent_popup();
     let frame = state.compose(140, 40).expect("frame");
     let all = frame_rows(&frame).join("\n");
     assert!(all.contains("NEW AGENT") && all.contains("Shell") && all.contains("START"));
-    assert_eq!(state.hits.orcha.popup.rows.len(), 3);
+    assert!(all.contains("New project…"), "{all}");
+    assert_eq!(state.hits.orcha.popup.rows.len(), 4);
     assert!(matches!(
         state.orcha_ui.popup,
         Some(crate::client::shell::orcha_popup::OrchaPopup::NewAgent { selected: 1, .. })
@@ -1196,7 +1254,7 @@ fn open_with_popup_suggests_an_app_and_the_check_flips_remember() {
     // three OPEN buttons and the remember check
     assert_eq!(state.hits.orcha.popup.actions.len(), 4);
     let (check, index) = state.hits.orcha.popup.actions[3];
-    assert_eq!(index, 3);
+    assert_eq!(index, crate::client::shell::orcha_popup::PopupTarget::Check);
     let mut outcome = ClientShellInput::default();
     state.handle_orcha_popup_mouse(
         MouseEvent {
@@ -1548,4 +1606,180 @@ fn the_first_choice_row_keeps_the_heavy_rule_under_the_header() {
         .position(|row| row.contains("Choose in the browser"))
         .expect("second row");
     assert!(rows[second - 1].contains('─'));
+}
+
+/// IMPORT end to end through typed targets: each row's check acts on its
+/// row, the button under the list is the primary action (no index past
+/// the rows), and clicking it imports the checked source's projects.
+#[test]
+fn import_popup_targets_are_typed_and_the_primary_button_imports() {
+    use crate::client::shell::orcha_popup::{OrchaPopup, PopupButton, PopupTarget};
+    let mut state = orcha_state(true, true);
+    state.orcha_ui.import_sources = vec![
+        crate::orcha_import::ImportSource {
+            name: "Orca".into(),
+            projects: vec![("alpha".into(), "/projects/alpha".into())],
+        },
+        crate::orcha_import::ImportSource {
+            name: "VS Code".into(),
+            projects: vec![("beta".into(), "/projects/beta".into())],
+        },
+    ];
+    state.orcha_ui.popup = Some(OrchaPopup::Import {
+        selected: 0,
+        chosen: vec![false, true],
+    });
+    state.compose(140, 40).expect("import popup");
+    let targets: Vec<PopupTarget> = state
+        .hits
+        .orcha
+        .popup
+        .actions
+        .iter()
+        .map(|(_, target)| *target)
+        .collect();
+    assert_eq!(
+        targets,
+        [
+            PopupTarget::Row(0),
+            PopupTarget::Row(1),
+            PopupTarget::Button(PopupButton::Primary)
+        ]
+    );
+    let (import, _) = state.hits.orcha.popup.actions[2];
+    let mut outcome = ClientShellInput::default();
+    state.handle_orcha_popup_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: import.x,
+            row: import.y,
+            modifiers: KeyModifiers::empty(),
+        },
+        &mut outcome,
+    );
+    assert!(state.orcha_ui.popup.is_none(), "importing closes it");
+    let created: Vec<_> = outcome
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            ClientShellAction::Endpoint { request, .. } => match &request.method {
+                crate::api::schema::Method::WorkspaceCreate(params) => params.label.clone(),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(created, ["beta"], "only the checked source comes in");
+}
+
+#[test]
+fn a_sidebar_width_from_the_settings_wins_over_a_dragged_one() {
+    let mut state = orcha_state(true, true);
+    // dragged by hand once
+    state.sidebar_width = 50;
+    state.sidebar_width_manual = true;
+    let before = state.config.sidebar_width;
+    // a reload with the same configured width keeps the dragged one
+    state.apply_configured_sidebar_width(before);
+    assert_eq!(
+        (state.sidebar_width, state.sidebar_width_manual),
+        (50, true)
+    );
+    // the settings set a new width: it applies and the drag is forgotten
+    state.config.sidebar_width = before + 4;
+    state.apply_configured_sidebar_width(before);
+    assert_eq!(state.sidebar_width, before + 4);
+    assert!(!state.sidebar_width_manual);
+}
+
+#[test]
+fn a_check_click_flips_it_and_keeps_the_list_open() {
+    use crate::client::shell::orcha_popup::{OrchaPopup, PopupTarget};
+    let mut state = orcha_state(true, true);
+    state.orcha_ui.import_sources = vec![crate::orcha_import::ImportSource {
+        name: "Orca".into(),
+        projects: vec![("alpha".into(), "/projects/alpha".into())],
+    }];
+    state.orcha_ui.popup = Some(OrchaPopup::Import {
+        selected: 0,
+        chosen: vec![false],
+    });
+    state.compose(140, 40).expect("import popup");
+    let (check, _) = *state
+        .hits
+        .orcha
+        .popup
+        .actions
+        .iter()
+        .find(|(_, target)| *target == PopupTarget::Row(0))
+        .expect("the row's check");
+    let mut outcome = ClientShellInput::default();
+    state.handle_orcha_popup_mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: check.x,
+            row: check.y,
+            modifiers: KeyModifiers::empty(),
+        },
+        &mut outcome,
+    );
+    assert!(matches!(
+        &state.orcha_ui.popup,
+        Some(OrchaPopup::Import { chosen, .. }) if chosen == &[true]
+    ));
+}
+
+#[test]
+fn orchas_fixed_prefix_keys_show_in_commands_and_keybinds() {
+    let mut state = orcha_state(true, true);
+    state.config.keybinds.keybinds.open_notification_target = Default::default();
+    let prefix = state.config.keybinds.primary_prefix_label();
+    state.open_palette();
+    let frame = state.compose(140, 40).expect("commands");
+    let rows = frame_rows(&frame);
+    let accounts = rows
+        .iter()
+        .find(|row| row.contains("Accounts") && row.contains("switch account"))
+        .expect("the accounts row");
+    assert!(accounts.contains(&format!("{prefix} u")), "{accounts}");
+    state.orcha_ui.popup = None;
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::Help),
+        &mut ClientShellInput::default(),
+    );
+    // the list is long: filter it down to the fixed keys' group
+    if let Some(ClientShellOverlay::Help(help)) = state.overlay.as_mut() {
+        help.query.insert("hand off");
+    }
+    let frame = state.compose(140, 40).expect("keybinds");
+    let text = frame_rows(&frame).join("\n");
+    assert!(text.contains("orcha (fixed keys)"), "{text}");
+    assert!(text.contains(&format!("{prefix} o")), "{text}");
+}
+
+#[test]
+fn configured_prefix_binding_hides_the_overridden_orcha_shortcut() {
+    let mut state = orcha_state(true, true);
+    state.config.keybinds.keybinds.help = crate::config::ActionKeybinds::prefix("u");
+    let group = crate::client::shell::orcha_palette::prefix_key_help(&state.config.keybinds);
+    let prefix = state.config.keybinds.primary_prefix_label();
+    assert!(!group.1.iter().any(|(key, _)| key == &format!("{prefix} u")));
+    assert!(group.1.iter().any(|(key, _)| key == &format!("{prefix} :")));
+    assert!(
+        !group.1.iter().any(|(key, _)| key == &format!("{prefix} o")),
+        "the default notification binding also takes precedence"
+    );
+    state.open_palette();
+    let frame = state.compose(140, 40).expect("commands");
+    let rows = frame_rows(&frame);
+    let accounts = rows
+        .iter()
+        .find(|row| row.contains("Accounts") && row.contains("switch account"))
+        .expect("account command");
+    assert!(!accounts.contains(&format!("{prefix} u")), "{accounts}");
+    state.orcha_ui.popup = None;
+    state.mode = crate::client::shell::ClientShellMode::Prefix;
+    state.handle_input_bytes(b"u");
+    assert!(matches!(state.overlay, Some(ClientShellOverlay::Help(_))));
+    assert!(state.orcha_ui.popup.is_none());
 }

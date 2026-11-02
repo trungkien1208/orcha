@@ -171,44 +171,26 @@ pub(super) fn render_header(
     }
 }
 
-/// The main frame (heavy, frame fill, hard shadow) and the focused
-/// project's tabs over it: each tab a box sitting on the frame's top edge,
-/// the open one heavy and joined to the frame.
-#[allow(clippy::too_many_arguments)] // one render call, all inputs are distinct facts
-pub(super) fn render_frame_and_tabs(
-    buffer: &mut Buffer,
-    frame: Rect,
+/// The focused project's tabs laid out before they are drawn: each tab's
+/// name and box width, and the first tab shown (already moved to reveal the
+/// open tab and clamped). Drawing only reads it.
+pub(super) struct TabStrip<'a> {
+    tabs: Vec<&'a ClientShellTab>,
+    boxes: Vec<(String, u16)>,
+    scroll: usize,
+}
+
+/// Lays the tab strip out for `tab_area`. The only state it changes is the
+/// client's tab scroll: `tab_scroll` comes back clamped, and moved to show
+/// the open tab when `reveal_focused_tab` asks for it (which it clears).
+pub(super) fn layout_tabs<'a>(
     tab_area: Rect,
-    snapshot: &ClientShellSnapshot,
+    snapshot: &'a ClientShellSnapshot,
     config: &ClientShellConfig,
     tab_scroll: &mut usize,
     reveal_focused_tab: &mut bool,
-    tab_drag_insert_index: Option<usize>,
-    hits: &mut ShellHitMap,
-) {
+) -> TabStrip<'a> {
     let t = Brutal::new(&config.palette);
-    let top = tab_area.y;
-    let paper = Rect::new(
-        frame.x.saturating_sub(2),
-        top,
-        frame.width.saturating_add(4),
-        frame.bottom().saturating_sub(top) + 1,
-    )
-    .intersection(buffer.area);
-    buffer.set_style(paper, Style::default().bg(t.bg));
-    // the frame's shadow, outside the panes
-    brutal::draw_shadow(
-        buffer,
-        Rect::new(
-            frame.x,
-            frame.y,
-            frame.width.saturating_sub(1),
-            frame.height.saturating_sub(1),
-        ),
-        t.shadow,
-        t.bg,
-    );
-
     let tabs: Vec<&ClientShellTab> = snapshot
         .tabs
         .iter()
@@ -223,16 +205,12 @@ pub(super) fn render_frame_and_tabs(
         }
         let task = brutal::agent_task(agent);
         let trimmed = task.trim();
-        if !trimmed.is_empty()
-            && !["claude", "claude code", "codex", "cursor", "cursor agent"]
-                .iter()
-                .any(|program| trimmed.eq_ignore_ascii_case(program))
-        {
+        if !trimmed.is_empty() && !brutal::names_only_a_program(trimmed) {
             tasks.insert(agent.tab_id.as_str(), task);
         }
     }
     // each tab's name and box width, worked out once: the scroll and the
-    // drawing below both need them
+    // drawing both need them
     let boxes: Vec<(String, u16)> = tabs
         .iter()
         .map(|tab| {
@@ -267,14 +245,58 @@ pub(super) fn render_frame_and_tabs(
         }
     }
     *tab_scroll = (*tab_scroll).min(tabs.len().saturating_sub(1));
+    TabStrip {
+        tabs,
+        boxes,
+        scroll: *tab_scroll,
+    }
+}
+
+/// The main frame (heavy, frame fill, hard shadow) and the focused
+/// project's tabs over it (laid out by `layout_tabs`): each tab a box
+/// sitting on the frame's top edge, the open one heavy and joined to the
+/// frame.
+#[allow(clippy::too_many_arguments)] // one render call, all inputs are distinct facts
+pub(super) fn render_frame_and_tabs(
+    buffer: &mut Buffer,
+    frame: Rect,
+    tab_area: Rect,
+    strip: &TabStrip<'_>,
+    config: &ClientShellConfig,
+    tab_drag_insert_index: Option<usize>,
+    hits: &mut ShellHitMap,
+) {
+    let t = Brutal::new(&config.palette);
+    let top = tab_area.y;
+    let paper = Rect::new(
+        frame.x.saturating_sub(2),
+        top,
+        frame.width.saturating_add(4),
+        frame.bottom().saturating_sub(top) + 1,
+    )
+    .intersection(buffer.area);
+    buffer.set_style(paper, Style::default().bg(t.bg));
+    // the frame's shadow, outside the panes
+    brutal::draw_shadow(
+        buffer,
+        Rect::new(
+            frame.x,
+            frame.y,
+            frame.width.saturating_sub(1),
+            frame.height.saturating_sub(1),
+        ),
+        t.shadow,
+        t.bg,
+    );
+    let (tabs, boxes, scroll) = (&strip.tabs, &strip.boxes, strip.scroll);
 
     let y = tab_area.y;
     let right = tab_area.right();
     let reserve = 12;
     // the first tab starts on the frame's edge; a column between tabs
     let mut x = frame.x;
-    if *tab_scroll > 0 {
-        let more = format!("‹{}", *tab_scroll);
+    if scroll > 0 {
+        let more = format!("‹{scroll}");
         let w = display_width(&more);
         put_text(
             buffer,
@@ -287,8 +309,8 @@ pub(super) fn render_frame_and_tabs(
         hits.tab_scroll_left = Rect::new(x, y, w, 1);
         x += w + 1;
     }
-    let mut shown_until = *tab_scroll;
-    for (index, (tab, (name, w))) in tabs.iter().zip(&boxes).enumerate().skip(*tab_scroll) {
+    let mut shown_until = scroll;
+    for (index, (tab, (name, w))) in tabs.iter().zip(boxes).enumerate().skip(scroll) {
         let w = *w;
         let last = index + 1 == tabs.len();
         let limit = if last {
@@ -577,9 +599,7 @@ pub(super) fn dress_panes(
             continue;
         };
         let focused = snapshot.focused_pane_id.as_deref() == Some(pane.pane_id.as_str());
-        let brand = agent
-            .map(|agent| t.agent(agent.agent.as_deref()))
-            .filter(|color| *color != t.card);
+        let brand = agent.and_then(|agent| t.brand(agent.agent.as_deref()));
         // the focused pane's bar is bright (its agent's color; a shell's in
         // ink), the others are quiet
         let (bar, text) = match (focused, brand) {

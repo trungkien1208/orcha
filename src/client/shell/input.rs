@@ -719,12 +719,13 @@ impl ClientShellState {
                 outcome.repaint = true;
                 // orcha keys after the prefix, where no binding claimed them
                 if self.config.sidebar_tree {
-                    match key.code {
-                        KeyCode::Char('u') => self.open_accounts_overlay(),
-                        KeyCode::Char('o') => self.open_handoff_popup(),
-                        KeyCode::Char('!') => self.jump_to_needs_you(outcome),
-                        KeyCode::Char(':') => self.open_palette(),
-                        _ => {}
+                    let fixed = super::orcha_palette::PREFIX_KEYS
+                        .iter()
+                        .find(|(fixed, _, _)| key.code == KeyCode::Char(*fixed));
+                    match fixed {
+                        Some((_, Some(command), _)) => self.run_palette_command(*command, outcome),
+                        Some((_, None, _)) => self.open_palette(),
+                        None => {}
                     }
                 }
                 None

@@ -29,10 +29,31 @@ impl FoundAccount {
 /// Folders where Claude sign-ins usually live: orcha's own, `~/.claude-*`
 /// and `CLAUDE_CONFIG_DIR`.
 pub(super) fn claude_folder_candidates() -> Vec<PathBuf> {
+    home()
+        .map(|home| claude_folder_candidates_in(&home))
+        .unwrap_or_default()
+}
+
+/// Every Claude config folder orcha knows under `home`: the default
+/// `~/.claude`, the listed accounts' folders and the usual extra-account
+/// folders, each once. Hand-off looks for conversations in them.
+pub(crate) fn claude_config_folders(home: &Path) -> Vec<PathBuf> {
+    let mut folders = vec![home.join(".claude")];
+    if let Some(config) = config_path().and_then(|path| read_json(&path)) {
+        folders.extend(
+            parse_accounts(&config)
+                .into_iter()
+                .filter_map(|account| account.dir.map(PathBuf::from)),
+        );
+    }
+    folders.extend(claude_folder_candidates_in(home));
+    let mut seen = std::collections::HashSet::new();
+    folders.retain(|folder| seen.insert(folder.clone()));
+    folders
+}
+
+fn claude_folder_candidates_in(home: &Path) -> Vec<PathBuf> {
     let mut folders = Vec::new();
-    let Some(home) = home() else {
-        return folders;
-    };
     let mut push_children = |parent: &Path, prefix: &str| {
         let Ok(read) = std::fs::read_dir(parent) else {
             return;
@@ -47,11 +68,11 @@ pub(super) fn claude_folder_candidates() -> Vec<PathBuf> {
         folders.extend(found);
     };
     push_children(&home.join(".ai-accounts").join("claude"), "");
-    push_children(&home, ".claude-");
-    push_children(&home, ".claude_");
+    push_children(home, ".claude-");
+    push_children(home, ".claude_");
     if let Ok(dir) = std::env::var("CLAUDE_CONFIG_DIR") {
         if !dir.trim().is_empty() {
-            folders.push(PathBuf::from(expand(dir.trim())));
+            folders.push(expand_home(dir.trim(), home));
         }
     }
     folders

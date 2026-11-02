@@ -54,7 +54,7 @@ pub(super) fn render_agent_panel(
     area: Rect,
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
-    agent_scroll: &mut usize,
+    agent_scroll: usize,
     hits: &mut ShellHitMap,
 ) {
     if !render_agent_panel_header(
@@ -157,7 +157,7 @@ pub(super) fn render_agent_list<T>(
     rows: &[T],
     empty_message: Option<&str>,
     config: &ClientShellConfig,
-    agent_scroll: &mut usize,
+    agent_scroll: usize,
     hits: &mut ShellHitMap,
     row_lines: impl Fn(&T) -> usize,
     mut render_row: impl FnMut(&mut Buffer, Rect, &T, &mut ShellHitMap),
@@ -170,7 +170,7 @@ pub(super) fn render_agent_list<T>(
     );
     hits.agent_body = body;
     if body.is_empty() || rows.is_empty() {
-        *agent_scroll = 0;
+        hits.agent_list_start = Some(0);
         if let Some(message) = empty_message.filter(|_| !body.is_empty()) {
             put_text(
                 buffer,
@@ -202,16 +202,17 @@ pub(super) fn render_agent_list<T>(
         })
         .collect::<Vec<_>>();
     let metrics =
-        super::scroll::list_scroll_metrics(&row_heights, &gaps, body.height, *agent_scroll);
+        super::scroll::list_scroll_metrics(&row_heights, &gaps, body.height, agent_scroll);
     hits.agent_max_scroll = metrics.max_offset_from_bottom;
     hits.agent_scroll_metrics = Some(metrics);
-    *agent_scroll = metrics
+    let agent_scroll = metrics
         .max_offset_from_bottom
         .saturating_sub(metrics.offset_from_bottom);
+    hits.agent_list_start = Some(agent_scroll);
     let show_scrollbar = metrics.max_offset_from_bottom > 0 && body.width > 1;
     let content_width = body.width.saturating_sub(u16::from(show_scrollbar));
     let mut y = body.y;
-    for (index, row) in rows.iter().enumerate().skip(*agent_scroll) {
+    for (index, row) in rows.iter().enumerate().skip(agent_scroll) {
         let height = row_heights[index].min(body.height);
         if y.saturating_add(height) > body.bottom() {
             break;

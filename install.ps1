@@ -11,37 +11,40 @@ $headers = @{
     "User-Agent" = "orcha-installer"
     "Accept"     = "application/vnd.github+json"
 }
-# A release can be "latest" before its Windows zip is uploaded. Install the
-# newest published release that already has the package.
-$release = $null
-$asset = $null
-for ($page = 1; $page -le 5 -and $null -eq $asset; $page++) {
-    $pageUri = "https://api.github.com/repos/$repository/releases?per_page=30&page=$page"
-    # Windows PowerShell 5.1 emits a JSON array as one object, so wrapping the
-    # call in @() would give a one-item list holding every release. Assign it
-    # first: @() on a variable that already holds an array keeps it as is.
-    $response = Invoke-RestMethod -Uri $pageUri -Headers $headers
-    $candidates = @($response)
-    if ($candidates.Count -eq 0) { break }
-    foreach ($candidate in $candidates) {
-        if ($candidate.draft -eq $true) { continue }
-        $match = @($candidate.assets) | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
-        if ($null -ne $match) {
-            $release = $candidate
-            $asset = $match
-            break
+# `orcha update` names the release to install. A plain run installs the
+# newest one that has the Windows package.
+$tag = [string][Environment]::GetEnvironmentVariable("ORCHA_INSTALL_TAG")
+if ([string]::IsNullOrWhiteSpace($tag)) {
+    # A release can be "latest" before its Windows zip is uploaded. Install the
+    # newest published release that already has the package.
+    $release = $null
+    for ($page = 1; $page -le 5 -and $null -eq $release; $page++) {
+        $pageUri = "https://api.github.com/repos/$repository/releases?per_page=30&page=$page"
+        # Windows PowerShell 5.1 emits a JSON array as one object, so wrapping the
+        # call in @() would give a one-item list holding every release. Assign it
+        # first: @() on a variable that already holds an array keeps it as is.
+        $response = Invoke-RestMethod -Uri $pageUri -Headers $headers
+        $candidates = @($response)
+        if ($candidates.Count -eq 0) { break }
+        foreach ($candidate in $candidates) {
+            if ($candidate.draft -eq $true) { continue }
+            $match = @($candidate.assets) | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
+            if ($null -ne $match) {
+                $release = $candidate
+                break
+            }
         }
+        if ($candidates.Count -lt 30) { break }
     }
-    if ($candidates.Count -lt 30) { break }
+    if ($null -eq $release) {
+        throw "No published ORCHA release contains $assetName."
+    }
+    $tag = [string]$release.tag_name
 }
-if ($null -eq $asset) {
-    throw "No published ORCHA release contains $assetName."
-}
-
-$tag = [string]$release.tag_name
 if ([string]::IsNullOrWhiteSpace($tag) -or $tag -notmatch '^orcha-[A-Za-z0-9._-]+$') {
-    throw "The latest ORCHA release has an invalid tag '$tag'."
+    throw "The ORCHA release has an invalid tag '$tag'."
 }
+$downloadBase = "https://github.com/$repository/releases/download/$tag"
 
 $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
 $installRoot = Join-Path $localAppData "Programs\Orcha"
@@ -60,7 +63,23 @@ if (-not (Test-Path -LiteralPath (Join-Path $releaseDirectory "herdr.exe") -Path
     New-Item -ItemType Directory -Path $workDirectory, $extractDirectory, $stagingDirectory -Force | Out-Null
 
     try {
-        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archivePath -Headers @{ "User-Agent" = "orcha-installer" }
+        $download = @{ "User-Agent" = "orcha-installer" }
+        Invoke-WebRequest -Uri "$downloadBase/$assetName" -OutFile $archivePath -Headers $download
+        # The package must match the release's checksum before anything is unpacked.
+        $checksumsPath = Join-Path $workDirectory "SHA256SUMS.txt"
+        Invoke-WebRequest -Uri "$downloadBase/SHA256SUMS.txt" -OutFile $checksumsPath -Headers $download
+        $expected = $null
+        foreach ($line in Get-Content -LiteralPath $checksumsPath) {
+            $fields = @($line.Trim() -split '\s+')
+            if ($fields.Count -ge 2 -and $fields[1].TrimStart('*') -eq $assetName) {
+                $expected = $fields[0].ToLowerInvariant()
+                break
+            }
+        }
+        $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archivePath).Hash.ToLowerInvariant()
+        if ($null -eq $expected -or $actual -ne $expected) {
+            throw "The ORCHA package did not match the release's checksum, so nothing was installed. Try again in a few minutes."
+        }
 
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         $archive = [System.IO.Compression.ZipFile]::OpenRead($archivePath)

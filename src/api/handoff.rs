@@ -43,10 +43,7 @@ fn target(
             "invalid_params",
             "to needs a kind or an account_id".to_string(),
         ))?;
-        if !crate::orcha_handoff::AGENTS
-            .iter()
-            .any(|(known, _, _)| *known == kind)
-        {
+        if !crate::orcha_handoff::can_hand_off_to(kind) {
             return Err(("unsupported_agent", format!("cannot hand off to {kind}")));
         }
         return Ok((kind.to_string(), None));

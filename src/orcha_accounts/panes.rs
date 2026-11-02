@@ -60,6 +60,10 @@ pub(super) fn agent_account(accounts: &[AccountConfig], kind: &str, pane: &str) 
     let Some(dir) = pane_config_dir(pane) else {
         return active_claude(accounts);
     };
+    claude_account_at_dir(accounts, dir)
+}
+
+pub(super) fn claude_account_at_dir(accounts: &[AccountConfig], dir: String) -> Option<String> {
     let service =
         crate::platform::orcha_claude_service(&OrchaSecretSlot::Folder(Some(dir.clone())));
     if let Some(owner) = slot_owner(accounts, &service) {
@@ -111,7 +115,7 @@ pub(crate) fn accounts_with_fuel_of(
             email: email(accounts, account),
             current: current == Some(account.id.as_str()),
             windows: windows(&limits, now),
-            signed_in: Some(signed_in(accounts, account) && !auth_needed(limits.error.as_deref())),
+            signed_in: Some(signed_in(accounts, account) && !limits.needs_sign_in()),
             error: limits.error,
         }
     };

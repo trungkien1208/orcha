@@ -705,3 +705,54 @@ mod tests {
         assert_eq!(seq.load(Ordering::Relaxed), 1);
     }
 }
+
+/// Only settled identified panes without a viewer use the slower cadence.
+/// Acquisition, hook authority, release and idle confirmation keep their
+/// original bounds. This is polling policy, independent of any CLI screen.
+pub(super) fn detection_poll_interval(
+    normal: std::time::Duration,
+    visible: bool,
+    urgent: bool,
+    pending_idle: bool,
+    acquiring_or_authoritative: bool,
+) -> std::time::Duration {
+    if pending_idle && !urgent {
+        AGENT_PENDING_IDLE_RECHECK
+    } else if !visible && !urgent && !acquiring_or_authoritative {
+        normal.max(std::time::Duration::from_millis(600))
+    } else {
+        normal
+    }
+}
+
+#[cfg(test)]
+mod cadence_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn hidden_only_slows_settled_detection_and_preserves_transition_bounds() {
+        let normal = Duration::from_millis(300);
+        assert_eq!(
+            detection_poll_interval(normal, false, false, false, false),
+            Duration::from_millis(600)
+        );
+        assert_eq!(
+            detection_poll_interval(normal, true, false, false, false),
+            normal
+        );
+        assert_eq!(
+            detection_poll_interval(normal, false, false, true, false),
+            AGENT_PENDING_IDLE_RECHECK
+        );
+        assert_eq!(
+            detection_poll_interval(normal, false, false, false, true),
+            normal
+        );
+        let release = Duration::from_millis(50);
+        assert_eq!(
+            detection_poll_interval(release, false, true, true, false),
+            release
+        );
+    }
+}

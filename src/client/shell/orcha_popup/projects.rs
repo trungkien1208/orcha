@@ -26,7 +26,7 @@ pub(super) fn render_new_workspace(
         (
             "Current project",
             project
-                .map(|project| format!("create a workspace in {project}"))
+                .map(|project| format!("another project in {project}'s folder"))
                 .unwrap_or_else(|| "no project is selected".to_owned()),
             if project.is_some() {
                 "CREATE"
@@ -110,9 +110,10 @@ pub(super) fn render_handoff(
         t,
         hits,
     )?;
+    let all = handoff_targets();
     let rows: Vec<_> = targets
         .iter()
-        .filter_map(|target| HANDOFF_TARGETS.get(*target))
+        .filter_map(|target| all.get(*target))
         .collect();
     draw_rows(
         buffer,
@@ -122,23 +123,24 @@ pub(super) fn render_handoff(
         selected,
         t,
         |buffer, rect, index, first| {
-            let Some(&&(kind, mode, label)) = rows.get(index) else {
+            let Some(&&(kind, mode)) = rows.get(index) else {
                 return;
             };
             let cursor = index == selected;
-            let detail = if mode == "summary" {
-                "a short summary opens the new chat"
-            } else {
-                "the whole conversation is replayed"
+            let label = handoff_label(kind, mode);
+            let detail = match mode {
+                HandoffMode::Summary => "a short summary opens the new chat",
+                HandoffMode::Full => "the whole conversation is replayed",
             };
             let action = if cursor { "CONTINUE ↵" } else { "CONTINUE" };
             let row = ChoiceRow {
-                lead: Lead::Logo(
-                    brutal::agent_logo(Some(kind), config.icon_font),
-                    t.agent(Some(kind)),
-                ),
-                tone: if kind == from { Tone::Muted } else { Tone::Ink },
-                ..ChoiceRow::new(label, detail, RowButton::Always(action))
+                lead: Lead::Logo(kind.logo(config.icon_font), t.hue(kind.hue)),
+                tone: if brutal::same_agent(kind.id, &from) {
+                    Tone::Muted
+                } else {
+                    Tone::Ink
+                },
+                ..ChoiceRow::new(&label, detail, RowButton::Always(action))
             };
             choice_row(buffer, rect, index, row.at(first, cursor), t, hits);
         },
@@ -216,7 +218,7 @@ pub(super) fn render_import(
             );
         },
     );
-    primary_under_list(buffer, frame.body, count, sources.len(), t, hits);
+    primary_under_list(buffer, frame.body, count, t, hits);
     Some(())
 }
 
@@ -226,12 +228,11 @@ pub(super) fn list_above_button(body: Rect) -> Rect {
 }
 
 /// IMPORT (n): the primary action under a checked list; plain while
-/// nothing is checked. Its index is `index`, one past the rows.
+/// nothing is checked.
 pub(super) fn primary_under_list(
     buffer: &mut Buffer,
     body: Rect,
     count: usize,
-    index: usize,
     t: &Brutal,
     hits: &mut PopupHits,
 ) {
@@ -253,5 +254,6 @@ pub(super) fn primary_under_list(
         t.bg,
         t,
     );
-    hits.actions.push((action, index));
+    hits.actions
+        .push((action, PopupTarget::Button(PopupButton::Primary)));
 }

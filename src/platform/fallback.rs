@@ -158,6 +158,10 @@ impl StatusCommandGuard {
         Ok(Self)
     }
 
+    pub(crate) fn for_child(_child: &std::process::Child) -> std::io::Result<Self> {
+        Ok(Self)
+    }
+
     pub(crate) fn terminate(&mut self) {}
 }
 
@@ -196,12 +200,13 @@ pub(crate) fn orcha_tool_command_platform(program: &std::path::Path, args: &[Str
     process
 }
 
-pub(crate) fn orcha_installer_command_platform(
-    unix_command: &str,
-    _windows_command: &str,
-) -> Command {
+pub(crate) fn orcha_installer_script_platform() -> &'static str {
+    "install.sh"
+}
+
+pub(crate) fn orcha_installer_command_platform(script: &std::path::Path) -> Command {
     let mut process = Command::new("sh");
-    process.arg("-c").arg(unix_command);
+    process.arg(script);
     process
 }
 

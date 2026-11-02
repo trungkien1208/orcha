@@ -182,6 +182,7 @@ pub(crate) struct ClientConnection {
     pub(crate) shell_agent_view: Option<crate::api::schema::AgentViewSetParams>,
     /// Monotonic shell replacement revision for this connection.
     pub(crate) shell_projection_revision: u64,
+    pub(crate) shell_snapshot_cadence: super::snapshot_cadence::SnapshotCadence,
     /// Whether this shell is waiting for one ordered endpoint command response.
     pub(crate) shell_endpoint_command_in_flight: bool,
     /// Surface projection epoch that owned the in-flight command. Deferred navigation may run
@@ -250,6 +251,7 @@ impl ClientConnection {
             shell_agent_completions: None,
             shell_agent_view: None,
             shell_projection_revision: 0,
+            shell_snapshot_cadence: Default::default(),
             shell_endpoint_command_in_flight: false,
             shell_endpoint_command_surface_revision: None,
             shell_deferred_navigation_request_id: None,

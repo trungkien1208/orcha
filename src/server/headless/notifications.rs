@@ -299,6 +299,18 @@ impl HeadlessServer {
     ///
     /// Returns true if the event changed visual state (requiring a re-render).
     pub(super) fn handle_internal_event_with_forwarding(&mut self, mut ev: AppEvent) -> bool {
+        // Only these display/state reports may wait. Unknown events, identity
+        // acquisition/release, lifecycle exits and topology remain immediate.
+        if !matches!(
+            &ev,
+            AppEvent::StateChanged {
+                process_exited: false,
+                ..
+            } | AppEvent::HookStateReported { .. }
+                | AppEvent::HookMetadataReported { .. }
+        ) {
+            self.invalidate_shell_snapshot_cadence();
+        }
         if self.host_shutdown_requested() {
             return false;
         }

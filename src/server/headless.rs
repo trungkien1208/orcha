@@ -139,6 +139,40 @@ enum LoopEvent {
     RenderRequested,
 }
 
+/// Pure queries preserve passive batching; unknown methods and mutations
+/// flush. History reads which may drive alternate-screen scrolling also flush.
+fn api_requires_immediate_shell_snapshot(method: &api::schema::Method) -> bool {
+    use api::schema::{Method, ReadSource};
+    match method {
+        Method::Ping(_)
+        | Method::SessionSnapshot(_)
+        | Method::WorkspaceList(_)
+        | Method::WorkspaceGet(_)
+        | Method::TabList(_)
+        | Method::TabGet(_)
+        | Method::PaneList(_)
+        | Method::PaneCurrent(_)
+        | Method::PaneGet(_)
+        | Method::PaneProcessInfo(_)
+        | Method::PaneLayout(_)
+        | Method::PaneNeighbor(_)
+        | Method::PaneEdges(_)
+        | Method::AgentList(_)
+        | Method::AgentGet(_)
+        | Method::AgentExplain(_)
+        | Method::ServerCapabilitiesGet(_) => false,
+        Method::PaneRead(params) => matches!(
+            params.source,
+            ReadSource::Recent | ReadSource::RecentUnwrapped
+        ),
+        Method::AgentRead(params) => matches!(
+            params.source,
+            ReadSource::Recent | ReadSource::RecentUnwrapped
+        ),
+        _ => true,
+    }
+}
+
 /// Presentation work caused by a server event.
 ///
 /// Keeping this classification separate from event delivery makes the input
@@ -475,6 +509,7 @@ impl HeadlessServer {
                 continue;
             }
             if self.app.expire_due_metadata(Instant::now()) {
+                self.invalidate_shell_snapshot_cadence();
                 needs_render = true;
                 needs_full_render = true;
                 crate::render_prof::event("full_render_cause.metadata_expiry");
@@ -511,6 +546,7 @@ impl HeadlessServer {
             // 6. Handle scheduled tasks.
             let now = Instant::now();
             if self.handle_scheduled_tasks_headless(now, needs_render) {
+                self.invalidate_shell_snapshot_cadence();
                 needs_render = true;
                 needs_full_render = true;
                 needs_graphics_render = false;
@@ -519,12 +555,14 @@ impl HeadlessServer {
 
             self.poll_pending_alt_screen_reads(now);
             if self.process_deferred_alt_screen_reads() {
+                self.invalidate_shell_snapshot_cadence();
                 needs_render = true;
                 needs_full_render = true;
                 needs_graphics_render = false;
             }
 
             if latest_shell_client(&self.clients).is_some() && self.app.ensure_default_workspace() {
+                self.invalidate_shell_snapshot_cadence();
                 needs_render = true;
                 needs_full_render = true;
                 needs_graphics_render = false;
@@ -532,6 +570,7 @@ impl HeadlessServer {
             }
 
             if self.expire_native_graphics(now) {
+                self.invalidate_shell_snapshot_cadence();
                 needs_render = true;
                 needs_full_render = true;
                 needs_graphics_render = false;
@@ -541,6 +580,13 @@ impl HeadlessServer {
             self.sync_immediate_pty_sources();
             self.stream_host_mouse_capture_mode();
             self.stream_direct_terminal_keyboard_mode();
+
+            // A trailing metadata update must flush even after output stops.
+            // It is full projection work, independent of retained/hidden PTY exits.
+            if self.shell_snapshot_due(now) {
+                needs_render = true;
+                needs_full_render = true;
+            }
 
             // 7. Render virtually and stream frames. Hidden-only PTY work keeps a
             // bounded classification cadence without delaying presentation work
@@ -564,6 +610,9 @@ impl HeadlessServer {
                     );
                 }
                 if render_request.generic {
+                    if !render_request.generic_is_passive {
+                        self.invalidate_shell_snapshot_cadence();
+                    }
                     needs_full_render = true;
                     crate::render_prof::event("full_render_cause.generic_dirty");
                 }
@@ -596,7 +645,12 @@ impl HeadlessServer {
                     crate::render_prof::event("retained_surface.invoke");
                 } else {
                     crate::render_prof::event("full_render.invoke");
-                    self.render_and_stream();
+                    // A retained-surface fallback may mean terminal geometry or
+                    // input policy changed, rather than passive metadata alone.
+                    if !needs_full_render || needs_graphics_render {
+                        self.invalidate_shell_snapshot_cadence();
+                    }
+                    self.render_and_stream_coalesced(now);
                 }
                 self.app.record_render_attempt(now, !hidden_only);
                 if interactive_due {
@@ -625,6 +679,10 @@ impl HeadlessServer {
                 .fold(next_deadline, |deadline, pending| {
                     Some(deadline.map_or(pending, |current| current.min(pending)))
                 });
+            let next_deadline = match (next_deadline, self.shell_snapshot_deadline()) {
+                (Some(current), Some(snapshot)) => Some(current.min(snapshot)),
+                (current, snapshot) => current.or(snapshot),
+            };
             let event = {
                 tokio::select! {
                     maybe_api = self.app.api_rx.recv() => match maybe_api {
@@ -2665,6 +2723,9 @@ impl HeadlessServer {
     }
 
     fn handle_server_event_with_render_impact(&mut self, ev: ServerEvent) -> RenderImpact {
+        if !matches!(&ev, ServerEvent::ClientWriterDrained { .. }) {
+            self.invalidate_shell_snapshot_cadence();
+        }
         if self.handle_server_event(ev) {
             RenderImpact::Full
         } else {
@@ -2914,6 +2975,11 @@ impl HeadlessServer {
         skip_default_workspace_for_request: bool,
         client_local: bool,
     ) -> bool {
+        // API calls can synchronously drain topology work; their ordering is
+        // deliberately outside the passive presentation cadence.
+        if api_requires_immediate_shell_snapshot(&msg.request.method) {
+            self.invalidate_shell_snapshot_cadence();
+        }
         if self.shutting_down || self.host_shutdown_requested() {
             // During shutdown, respond with server_unavailable.
             Self::reject_api_request_for_shutdown(msg);

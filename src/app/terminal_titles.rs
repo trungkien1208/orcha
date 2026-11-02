@@ -27,7 +27,7 @@ impl App {
         let sources = self.render_dirty.pending_terminal_title_sources();
         let changes = self.sync_terminal_titles(&sources);
         if self.terminal_title_sidebar_changed(&changes) {
-            self.render_dirty.request_generic();
+            self.render_dirty.request_passive_metadata();
             self.render_notify.notify_one();
         }
         changes

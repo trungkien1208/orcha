@@ -154,11 +154,8 @@ pub(super) fn switch_claude_pane(
 }
 
 pub(super) fn run_in_pane(pane: &str, line: &str) -> Result<(), String> {
-    let ran = crate::orcha_handoff::herdr(&["pane", "run", pane, line])
-        .stdout(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success());
-    if ran {
+    use crate::orcha_cli::{succeeded, OrchaCli};
+    if succeeded(OrchaCli::new(&["pane", "run", pane, line]).quiet()) {
         Ok(())
     } else {
         Err("could not run it in the pane".to_owned())
@@ -166,9 +163,7 @@ pub(super) fn run_in_pane(pane: &str, line: &str) -> Result<(), String> {
 }
 
 pub(super) fn send_keys(pane: &str, keys: &str) {
-    let _ = crate::orcha_handoff::herdr(&["pane", "send-keys", pane, keys])
-        .stdout(Stdio::null())
-        .status();
+    let _ = crate::orcha_cli::OrchaCli::new(&["pane", "send-keys", pane, keys]).quiet();
 }
 
 /// The Claude config folder holding `id`'s sign-in now (None: the default
@@ -211,20 +206,7 @@ pub(super) fn claude_restart_line(dir: Option<&str>, session: Option<&str>) -> S
         .filter(|session| crate::orcha_handoff::plain_session_id(session))
         .map(|session| format!(" --resume {session}"))
         .unwrap_or_default();
-    match (cfg!(windows), dir) {
-        (false, Some(dir)) => format!(
-            "CLAUDE_CONFIG_DIR='{}' claude{resume}",
-            dir.replace('\'', "'\\''")
-        ),
-        (false, None) => format!("env -u CLAUDE_CONFIG_DIR claude{resume}"),
-        (true, Some(dir)) => format!(
-            "$env:CLAUDE_CONFIG_DIR='{}'; claude{resume}",
-            dir.replace('\'', "''")
-        ),
-        (true, None) => format!(
-            "Remove-Item Env:CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue; claude{resume}"
-        ),
-    }
+    crate::platform::orcha_env_command_line("CLAUDE_CONFIG_DIR", dir, &format!("claude{resume}"))
 }
 
 /// Stops the Claude in `pane` and starts it again on `id`, resuming the same
@@ -388,11 +370,9 @@ pub(super) fn continue_line(kind: &str) -> String {
     let Some(agent) = agent_kind(kind) else {
         return kind.to_owned();
     };
-    // PowerShell 5 has no `||`; there the agent starts fresh if it must
-    match (agent.resume, cfg!(windows)) {
-        (Some(resume), false) => format!("{resume} || {}", agent.command),
-        (Some(resume), true) => resume.to_owned(),
-        (None, _) => agent.command.to_owned(),
+    match agent.resume {
+        Some(resume) => crate::platform::orcha_fallback_command_line(resume, agent.command),
+        None => agent.command.to_owned(),
     }
 }
 

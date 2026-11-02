@@ -201,31 +201,41 @@ FUEL placement option: right panel (default) or status bar, never both.
   - Codex: same through its notify/hook support ⬜.
 - Model name comes from a `model` token the hooks report ⬜, else the agent name.
 
-### 3.2 Accounts and fuel — 🟡 (exists as an fzf picker in orcha-config)
+### 3.2 Accounts and fuel — ✅ (native)
 
 - Accounts: Claude per config folder (company `~/.claude`, personal
   `~/.ai-accounts/claude/personal`), Codex, Cursor.
 - Fuel per account: Claude from the usage endpoint with the account's
   Keychain sign-in (tokens on stdin only, never printed or logged), Codex from
   the rate limits in its newest session log, Cursor monthly usage.
-- **Accounts popup** (canvas board "Popup · accounts"), opened by a click on
-  FUEL or ⌘U:
+- **Accounts popup**, opened by a click on FUEL, COMMANDS → Accounts, or
+  prefix `u` when that key has no configured binding:
   - header: ACCOUNTS and the chat it acts on.
   - one row per account: logo chip, name, email, 5H/WEEK gauges with reset time.
   - the current account: heavy border and yellow edge, `IN USE` badge.
-  - the account with the most fuel: `MOST FUEL` badge, raised green `SWITCH ↵`.
+  - the recommended account: `BEST` badge, raised green `CONTINUE ↵`.
   - not signed in: `SIGN IN`.
-  - footer keys: `↵` switch this chat · `⌥↵` open in new tab · `H` hand off ·
-    `+ add account`.
+  - footer keys: `↵` continue this chat · `⌥↵` open in a new pane for the
+    same agent, or hand off with a summary to another agent · `h` hand off ·
+    `d` remove · `i` find accounts · `r` refresh. ADD ACCOUNT sits below the list.
 
-### 3.3 Switch account, same conversation — 🟡 (works in orcha-config)
+### 3.3 Switch account, same conversation — ✅ (native)
 
 - Hooks report `session_id` per pane.
-- Switch = stop the agent, then `claude --resume <id>` with the other
-  account's config folder (Codex: `codex resume <id>`). The conversation file
-  is shared or copied first.
-- **Low fuel**: under 10% orcha shows a toast "switch to personal (70% left)?";
-  one click switches. When no account has fuel, it offers a hand-off (§3.4).
+- Switching a Claude account asks whether to keep the chat running on the
+  new sign-in or restart it with the same conversation. Settings can choose
+  either behavior in advance or open a new pane instead. A restart shares
+  or copies the conversation file first.
+- **Low fuel**: under the configured switch threshold (10% by default),
+  orcha shows a notice when the agent is between turns. Typing stays in the
+  pane; clicking the notice opens Accounts to choose where to continue.
+  When no account has fuel, it offers a hand-off (§3.4).
+- Every agent on an account that runs low carries a fuel mark on its sidebar
+  row, left of its state: yellow under the low line, red under the switch
+  line. The header's low-fuel offer counts those agents in. The marks use the
+  accounts already read. With several accounts for the same agent, pane
+  ownership is resolved in the background at most once per minute; an
+  unknown owner has no mark until it is known.
 
 ### 3.4 Hand off a conversation to another agent — ✅ (native, `src/orcha_handoff.rs`)
 
@@ -237,6 +247,9 @@ For when every account of one agent is out of fuel (Claude → Codex …).
 - Opens the new agent in the same tab with the pack as its first prompt.
 - Two modes: **full** (the whole history) and **summary** (the new agent
   summarizes first, then continues).
+- While it runs, the old pane's sidebar row says `handing off…`; afterwards
+  `→ continued`, a link to the new pane, until the old pane is focused again
+  or closed.
 
 ### 3.5 Open things — ✅
 
@@ -254,6 +267,11 @@ and account).
 
 ### 3.7 Needs-you jump — ✅ (prefix `!`, header chip, COMMANDS)
 
+orcha's fixed keys after the prefix: `u` accounts, `o` hand off, `!` needs
+you, `:` COMMANDS. COMMANDS shows them on their rows and Keybinds lists them
+(read-only). A configured binding takes precedence and hides that fixed
+key from COMMANDS and Keybinds.
+
 One key jumps to the next agent that needs you, across all projects, in
 order of waiting time.
 
@@ -264,7 +282,8 @@ three actions: view diff, commit, open PR.
 
 ### 3.9 Smart NEW — 🟡 (NEW offers a new worktree; agent picker with fuel)
 
-NEW opens a picker: project, agent, model, account (with fuel). Optional:
+NEW (and the tab strip's `+`) opens NEW AGENT: every account with its fuel,
+a plain shell, then **New project…** (NEW PROJECT). Planned: model. Optional:
 create a worktree and branch from a task id (`#42` → `feature/42-<slug>`).
 
 ### 3.10 Custom — 🟡 (style files, settings → look, COMMANDS palette)

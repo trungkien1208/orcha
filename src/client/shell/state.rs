@@ -228,8 +228,18 @@ pub(crate) struct OrchaUiState {
     pub(super) popup: Option<super::orcha_popup::OrchaPopup>,
     /// An account action (switch, sign in, open, add, new agent) under way.
     pub(super) account_run: Option<BackgroundJob<Result<String, String>>>,
-    /// A hand-off building its notes and opening the new agent.
-    pub(super) handoff_run: Option<BackgroundJob<Result<String, String>>>,
+    /// A switch/restart whose account mark may move after success, for this pane.
+    pub(super) account_change: Option<(String, String, String)>,
+    /// A hand-off building its notes and opening the new agent; Ok is a
+    /// message and the new pane.
+    pub(super) handoff_run: Option<BackgroundJob<Result<(String, String), String>>>,
+    /// The pane whose chat `handoff_run` hands off ("handing off…" on its
+    /// sidebar row).
+    pub(super) handoff_source: Option<String>,
+    /// Chats handed off, by the old pane: its sidebar row says
+    /// "→ continued" and links to the new pane until the old pane is
+    /// focused or closed.
+    pub(super) continued: HashMap<String, ContinuedPane>,
     /// The HAND OFF popup was opened from the accounts popup (esc goes back).
     pub(super) handoff_from_accounts: bool,
     /// Jobs whose outcome is only a notice (open the settings page, write
@@ -242,7 +252,7 @@ pub(crate) struct OrchaUiState {
     pub(super) default_accounts_job: Option<BackgroundJob<Vec<String>>>,
     /// The header's low-fuel offer, when the current account runs low.
     pub(super) low_fuel_hint: Option<String>,
-    /// Accounts the CONTINUE ON popup was already offered for (once each).
+    /// Accounts the ACCOUNTS popup was already offered for (once each).
     pub(super) low_fuel_offered: HashSet<String>,
     /// A project just added by hand: offer it working rules when nothing
     /// else is on screen.
@@ -299,6 +309,17 @@ pub(super) enum NoticeClick {
     OpenAccounts,
 }
 
+/// Where a handed-off chat went on (`OrchaUiState::continued`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ContinuedPane {
+    /// The pane the chat continues in.
+    pub(super) pane: String,
+    /// The old pane was out of focus once since: focusing it now clears
+    /// the mark (a hand-off that ends with the old pane still focused
+    /// does not clear it at once).
+    pub(super) armed: bool,
+}
+
 #[derive(Default)]
 pub(super) struct ShellHitMap {
     pub(super) orcha: OrchaHits,
@@ -318,6 +339,10 @@ pub(super) struct ShellHitMap {
     pub(super) agent_scrollbar: Rect,
     pub(super) agent_scroll_metrics: Option<crate::pane::ScrollMetrics>,
     pub(super) agent_max_scroll: usize,
+    /// The first agent row the list drew (the stored scroll clamped to the
+    /// list); None when no agent list was drawn. The compose step writes it
+    /// back after drawing, so drawing never changes the scroll itself.
+    pub(super) agent_list_start: Option<usize>,
     pub(super) agent_sort_toggle: Rect,
     pub(super) sidebar_divider: Rect,
     pub(super) sidebar_section_divider: Rect,

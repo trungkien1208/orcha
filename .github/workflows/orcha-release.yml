@@ -160,11 +160,15 @@ jobs:
       - name: Checksums
         working-directory: packages
         run: |
+          # `orcha update` runs the tagged release's installer only when it
+          # matches its line here
+          cp ../install.sh ../install.ps1 .
           ls -la
-          for asset in orcha-macos-arm64 orcha-macos-x86_64 orcha-windows-x86_64.zip; do
+          assets="orcha-macos-arm64 orcha-macos-x86_64 orcha-windows-x86_64.zip install.sh install.ps1"
+          for asset in $assets; do
             test -s "$asset" || { echo "error: $asset is missing" >&2; exit 1; }
           done
-          sha256sum orcha-macos-arm64 orcha-macos-x86_64 orcha-windows-x86_64.zip > SHA256SUMS.txt
+          sha256sum $assets > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Draft, attach everything, then publish
@@ -181,5 +185,6 @@ jobs:
           fi
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
             packages/orcha-macos-arm64 packages/orcha-macos-x86_64 \
-            packages/orcha-windows-x86_64.zip packages/SHA256SUMS.txt
+            packages/orcha-windows-x86_64.zip packages/install.sh packages/install.ps1 \
+            packages/SHA256SUMS.txt
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

@@ -2,20 +2,22 @@ use super::*;
 
 #[test]
 fn restart_line_resumes_in_the_account_folder() {
-    if cfg!(windows) {
-        return;
-    }
+    use crate::platform::orcha_env_command_line as line;
     assert_eq!(
         claude_restart_line(Some("/a/work"), Some("0b46-77")),
-        "CLAUDE_CONFIG_DIR='/a/work' claude --resume 0b46-77"
+        line(
+            "CLAUDE_CONFIG_DIR",
+            Some("/a/work"),
+            "claude --resume 0b46-77"
+        )
     );
     assert_eq!(
         claude_restart_line(None, None),
-        "env -u CLAUDE_CONFIG_DIR claude"
+        line("CLAUDE_CONFIG_DIR", None, "claude")
     );
     assert_eq!(
         claude_restart_line(Some("/a/it's"), Some("bad; rm")),
-        "CLAUDE_CONFIG_DIR='/a/it'\\''s' claude",
-        "quotes stay quoted and an odd session id is dropped"
+        line("CLAUDE_CONFIG_DIR", Some("/a/it's"), "claude"),
+        "an odd session id is dropped"
     );
 }

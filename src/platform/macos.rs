@@ -246,12 +246,13 @@ pub(crate) fn orcha_tool_command_platform(
     process
 }
 
-pub(crate) fn orcha_installer_command_platform(
-    unix_command: &str,
-    _windows_command: &str,
-) -> std::process::Command {
+pub(crate) fn orcha_installer_script_platform() -> &'static str {
+    "install.sh"
+}
+
+pub(crate) fn orcha_installer_command_platform(script: &std::path::Path) -> std::process::Command {
     let mut process = std::process::Command::new("sh");
-    process.arg("-c").arg(unix_command);
+    process.arg(script);
     process
 }
 

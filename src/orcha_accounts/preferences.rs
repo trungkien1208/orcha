@@ -101,6 +101,26 @@ pub(crate) fn account_of_agent(
     agent_account(accounts, kind, pane)
 }
 
+/// Ownership for background UI hints without falling back to the machine's
+/// active Claude account when the process environment cannot be observed.
+/// An ambiguous default-folder pane remains unknown until it is focused.
+pub(crate) fn observed_account_of_agent(
+    accounts: &[AccountConfig],
+    kind: &str,
+    pane: &str,
+) -> Option<String> {
+    if kind.eq_ignore_ascii_case("claude") {
+        let dir = pane_config_dir(pane)?;
+        claude_account_at_dir(accounts, dir)
+    } else {
+        let mut matching = accounts
+            .iter()
+            .filter(|account| account.kind.eq_ignore_ascii_case(kind));
+        let account = matching.next()?;
+        matching.next().is_none().then(|| account.id.clone())
+    }
+}
+
 /// `CLAUDE_CONFIG_DIR` of the Claude in a pane; None for the default folder.
 pub(crate) fn claude_folder_of_pane(pane: &str) -> Option<String> {
     pane_config_dir(pane)

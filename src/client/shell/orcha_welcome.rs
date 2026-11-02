@@ -7,17 +7,14 @@
 use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 
 use super::brutal::{self, Brutal};
-use super::orcha_popup::{button, popup_frame, row_box, ButtonKind, OrchaPopup, PopupHits};
+use super::orcha_popup::{
+    button, popup_frame, row_box, ButtonKind, OrchaPopup, PopupButton, PopupHits, PopupTarget,
+};
 use super::render::{display_width, put_right_text, put_text};
 use super::*;
 
 /// Written once the setup was shown (finished or skipped).
 const MARKER: &str = ".welcome-done";
-
-/// Click targets past the rows.
-const NEXT: usize = usize::MAX;
-const BACK: usize = usize::MAX - 1;
-const SKIP: usize = usize::MAX - 2;
 
 const WIDTH: u16 = 80;
 const BODY_HEIGHT: u16 = 18;
@@ -412,10 +409,12 @@ pub(super) fn render(
         t.bg,
         t,
     );
-    hits.actions.push((next, NEXT));
+    hits.actions
+        .push((next, PopupTarget::Button(PopupButton::Next)));
     if step != Step::Intro {
         let back = button(buffer, next.x, y, "BACK", ButtonKind::Plain, t.bg, t);
-        hits.actions.push((back, BACK));
+        hits.actions
+            .push((back, PopupTarget::Button(PopupButton::Back)));
     }
     let skip = "skip setup";
     put_text(
@@ -429,8 +428,10 @@ pub(super) fn render(
             .bg(t.bg)
             .add_modifier(Modifier::UNDERLINED),
     );
-    hits.actions
-        .push((Rect::new(x, y, display_width(skip), 1), SKIP));
+    hits.actions.push((
+        Rect::new(x, y, display_width(skip), 1),
+        PopupTarget::Button(PopupButton::Skip),
+    ));
     Some(())
 }
 
@@ -805,15 +806,15 @@ impl ClientShellState {
             self.skip_welcome();
             return;
         }
-        if let Some((_, index)) = hits
+        if let Some((_, target)) = hits
             .actions
             .iter()
             .find(|(rect, _)| super::contains(*rect, point))
         {
-            match *index {
-                NEXT => self.welcome_next(outcome),
-                BACK => self.welcome_back(),
-                SKIP => self.skip_welcome(),
+            match target {
+                PopupTarget::Button(PopupButton::Next) => self.welcome_next(outcome),
+                PopupTarget::Button(PopupButton::Back) => self.welcome_back(),
+                PopupTarget::Button(PopupButton::Skip) => self.skip_welcome(),
                 _ => {}
             }
             return;

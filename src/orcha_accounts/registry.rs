@@ -128,12 +128,8 @@ pub(crate) const AGENTS: &[AgentKind] = &[
     agent("letta", "letta", "Letta", "letta", None, &[]),
 ];
 
-/// Supported hand-off targets use the same canonical CLI/name metadata.
-pub(crate) const HANDOFF_AGENTS: [(&str, &str, &str); 3] = [
-    (CLAUDE.kind, CLAUDE.command, CLAUDE.name),
-    (CODEX.kind, CODEX.command, CODEX.name),
-    (CURSOR.kind, CURSOR.command, CURSOR.name),
-];
+/// The agents a conversation can be handed off to.
+pub(crate) const HANDOFF_AGENTS: [&AgentKind; 3] = [&CLAUDE, &CODEX, &CURSOR];
 
 pub(crate) fn agent_kind(kind: &str) -> Option<&'static AgentKind> {
     AGENTS.iter().find(|agent| agent.kind == kind)

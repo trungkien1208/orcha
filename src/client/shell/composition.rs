@@ -57,7 +57,6 @@ impl ClientShellState {
         let mut render_state = render::ShellRenderState {
             machine_diagnostics: &self.machine_diagnostics,
             git_panel: self.git_panel.data(),
-            focused_git: self.git_panel.current(),
             file_tree: self.file_tree.rows(),
             orcha_ui: &self.orcha_ui,
             fuel: self.accounts.current(),
@@ -67,7 +66,7 @@ impl ClientShellState {
             collapsed_groups: &self.collapsed_groups,
             remote_collapsed_groups: &self.remote_collapsed_groups,
             workspace_scroll: &mut self.workspace_scroll,
-            agent_scroll: &mut self.agent_scroll,
+            agent_scroll: self.agent_scroll,
             tab_scroll: &mut self.tab_scroll,
             reveal_focused_workspace: &mut self.reveal_focused_workspace,
             reveal_focused_tab: &mut self.reveal_focused_tab,
@@ -82,6 +81,8 @@ impl ClientShellState {
             reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
             dragged_workspace_id: None,
             workspace_drop_indicator_row: None,
+            sidebar_tree: None,
+            tab_strip: None,
         };
         if let Some(snapshot) = local_snapshot {
             render::render_sidebar(
@@ -101,6 +102,9 @@ impl ClientShellState {
                 &mut render_state,
                 &mut self.hits,
             );
+        }
+        if let Some(start) = self.hits.agent_list_start {
+            self.agent_scroll = start;
         }
         if !self.config.mouse_capture {
             self.hits = ShellHitMap::default();
@@ -209,6 +213,33 @@ impl ClientShellState {
             ),
             _ => (None, None),
         };
+        // Lay out what scrolls before drawing: drawing only reads it.
+        let sidebar_tree =
+            render::sidebar_tree_placement(&layout, &self.config, self.endpoints.len()).map(
+                |process_here| {
+                    super::sidebar_tree::layout_sidebar_tree(
+                        layout.sidebar,
+                        snapshot,
+                        &self.orcha_ui,
+                        &self.collapsed_groups,
+                        self.git_panel.current(),
+                        &self.accounts,
+                        &self.config.orcha,
+                        process_here,
+                        &mut self.workspace_scroll,
+                        &mut self.reveal_focused_workspace,
+                    )
+                },
+            );
+        let tab_strip = (layout.main_frame.width > 0).then(|| {
+            super::orcha_chrome::layout_tabs(
+                layout.tab_bar,
+                snapshot,
+                &self.config,
+                &mut self.tab_scroll,
+                &mut self.reveal_focused_tab,
+            )
+        });
         let mut buffer = Buffer::empty(Rect::new(0, 0, cols, rows));
         self.hits = render::render_shell(
             &mut buffer,
@@ -218,7 +249,6 @@ impl ClientShellState {
             render::ShellRenderState {
                 machine_diagnostics: &self.machine_diagnostics,
                 git_panel: self.git_panel.data(),
-                focused_git: self.git_panel.current(),
                 file_tree: self.file_tree.rows(),
                 orcha_ui: &self.orcha_ui,
                 fuel: self.accounts.current(),
@@ -228,7 +258,7 @@ impl ClientShellState {
                 collapsed_groups: &self.collapsed_groups,
                 remote_collapsed_groups: &self.remote_collapsed_groups,
                 workspace_scroll: &mut self.workspace_scroll,
-                agent_scroll: &mut self.agent_scroll,
+                agent_scroll: self.agent_scroll,
                 tab_scroll: &mut self.tab_scroll,
                 reveal_focused_workspace: &mut self.reveal_focused_workspace,
                 reveal_focused_tab: &mut self.reveal_focused_tab,
@@ -243,8 +273,13 @@ impl ClientShellState {
                 reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
                 dragged_workspace_id,
                 workspace_drop_indicator_row,
+                sidebar_tree: sidebar_tree.as_ref(),
+                tab_strip: tab_strip.as_ref(),
             },
         );
+        if let Some(start) = self.hits.agent_list_start {
+            self.agent_scroll = start;
+        }
         self.hits.panes = surface
             .panes
             .iter()
@@ -692,6 +727,7 @@ impl ClientShellState {
                     &self.endpoints,
                     &self.active_endpoint_id,
                     &self.config.keybinds,
+                    self.config.sidebar_tree,
                     &self.config.palette,
                 )?;
                 occlusion.cover(rendered.area);

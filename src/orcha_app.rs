@@ -12,10 +12,11 @@ pub(crate) const ORCHA_APP_ENV_VAR: &str = "ORCHA_APP";
 /// orcha's own version; its GitHub releases are tagged `orcha-<version>`.
 pub(crate) const ORCHA_VERSION: &str = "0.12.0";
 const RELEASES_API: &str = "https://api.github.com/repos/trungkien1208/orcha/releases/latest";
-/// Installs or updates the app and its extras on Unix (see install.sh).
+/// The first-install line on Unix (see install.sh), shown when an update
+/// fails. `orcha update` itself runs the release's own checked installer.
 const INSTALL_COMMAND_UNIX: &str =
     "curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.sh | sh";
-/// Installs or updates the Windows package (see install.ps1).
+/// The first-install line on Windows (see install.ps1).
 const INSTALL_COMMAND_WINDOWS: &str = "Invoke-Expression ((Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.ps1').Content)";
 /// The newest release seen and its notes, checked at most once a day.
 const RELEASE_CACHE: &str = ".latest-release.json";
@@ -376,36 +377,36 @@ fn strip_markdown(text: &str) -> String {
     out.replace("**", "").replace('`', "")
 }
 
-fn now_secs() -> Option<u64> {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .map(|elapsed| elapsed.as_secs())
+/// The newest release seen, and when (`RELEASE_CACHE`).
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct CachedRelease {
+    at: u64,
+    version: String,
+    #[serde(default)]
+    notes: Vec<String>,
+}
+
+impl CachedRelease {
+    fn release(&self) -> Release {
+        Release {
+            version: self.version.clone(),
+            notes: self.notes.clone(),
+        }
+    }
+}
+
+fn cached_release() -> Option<CachedRelease> {
+    crate::orcha_state::load_or_default(&crate::config::config_dir().join(RELEASE_CACHE))
 }
 
 /// The newest release (from the daily cache, else GitHub). Blocking.
 fn latest_release() -> Option<Release> {
     let cache = crate::config::config_dir().join(RELEASE_CACHE);
-    let now = now_secs()?;
-    let parse = |value: &serde_json::Value| {
-        Some(Release {
-            version: value["version"].as_str()?.to_owned(),
-            notes: value["notes"]
-                .as_array()?
-                .iter()
-                .filter_map(|note| note.as_str().map(str::to_owned))
-                .collect(),
-        })
-    };
-    let cached = std::fs::read(&cache)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    let now = crate::orcha_state::now_secs();
+    let cached = cached_release();
     if let Some(cached) = cached.as_ref() {
-        let fresh = cached["at"]
-            .as_u64()
-            .is_some_and(|at| now.saturating_sub(at) < 24 * 60 * 60);
-        if fresh {
-            return parse(cached);
+        if now.saturating_sub(cached.at) < 24 * 60 * 60 {
+            return Some(cached.release());
         }
     }
     let output = crate::noninteractive_process::curl_command()
@@ -422,19 +423,19 @@ fn latest_release() -> Option<Release> {
         .filter(|output| output.status.success());
     let Some(output) = output else {
         // offline: the last answer still holds
-        return cached.as_ref().and_then(parse);
+        return cached.as_ref().map(CachedRelease::release);
     };
     let release: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
     let tag = release["tag_name"].as_str()?;
-    let found = Release {
+    let found = CachedRelease {
+        at: now,
         version: tag.trim_start_matches("orcha-").to_owned(),
         notes: release_highlights(release["body"].as_str().unwrap_or_default()),
     };
-    let _ = std::fs::write(
-        &cache,
-        serde_json::json!({"at": now, "version": found.version, "notes": found.notes}).to_string(),
-    );
-    Some(found)
+    if let Err(err) = crate::orcha_state::save(&cache, &found) {
+        tracing::warn!(%err, "could not remember the newest release");
+    }
+    Some(found.release())
 }
 
 /// A release newer than this build that the user has not skipped. Asks
@@ -493,37 +494,31 @@ const PLUGIN_OFFER_PLATFORM: bool = cfg!(any(target_os = "macos", target_os = "l
 
 const PLUGIN_OFFERS: &str = ".plugin-offers.json";
 
-fn plugin_offers() -> std::collections::HashMap<String, String> {
-    std::fs::read_to_string(crate::config::config_dir().join(PLUGIN_OFFERS))
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+type PluginOffers = std::collections::HashMap<String, String>;
+
+fn plugin_offers() -> PluginOffers {
+    crate::orcha_state::load_or_default(&crate::config::config_dir().join(PLUGIN_OFFERS))
 }
 
 /// Forgets the answer, so the offer asks again next time (the install failed).
 pub(crate) fn forget_plugin_offer(id: &str) {
-    let mut offers = plugin_offers();
-    if offers.remove(id).is_some() {
-        if let Ok(text) = serde_json::to_string_pretty(&offers) {
-            let _ = std::fs::write(crate::config::config_dir().join(PLUGIN_OFFERS), text);
-        }
+    let path = crate::config::config_dir().join(PLUGIN_OFFERS);
+    if let Err(err) = crate::orcha_state::update(&path, |offers: &mut PluginOffers| {
+        offers.remove(id);
+    }) {
+        tracing::warn!(%err, "could not forget the plugin offer's answer");
     }
 }
 
 /// Remembers the answer: `never`, or the Orcha version a "not now" was given
 /// in (the next update asks again).
 pub(crate) fn answer_plugin_offer(id: &str, never: bool) {
-    let mut offers = plugin_offers();
-    offers.insert(
-        id.to_owned(),
-        if never {
-            "never".to_owned()
-        } else {
-            ORCHA_VERSION.to_owned()
-        },
-    );
-    if let Ok(text) = serde_json::to_string_pretty(&offers) {
-        let _ = std::fs::write(crate::config::config_dir().join(PLUGIN_OFFERS), text);
+    let answer = if never { "never" } else { ORCHA_VERSION };
+    let path = crate::config::config_dir().join(PLUGIN_OFFERS);
+    if let Err(err) = crate::orcha_state::update(&path, |offers: &mut PluginOffers| {
+        offers.insert(id.to_owned(), answer.to_owned());
+    }) {
+        tracing::warn!(%err, "could not remember the plugin offer's answer");
     }
 }
 
@@ -562,14 +557,7 @@ fn should_offer(id: &str, installed: &[&str], answered: Option<&str>) -> bool {
 /// Runs Orcha's own executable with `args` and no terminal. On failure,
 /// returns the last line it printed (the plugin log line), else a summary.
 pub(crate) fn run_self_quietly(args: &[&str]) -> Result<(), String> {
-    let me = std::env::current_exe().map_err(|err| format!("could not find orcha: {err}"))?;
-    let output = crate::noninteractive_process::command(&me)
-        .args(args)
-        .env(
-            crate::api::SOCKET_PATH_ENV_VAR,
-            crate::session::active_api_socket_path(),
-        )
-        .stdin(std::process::Stdio::null())
+    let output = crate::orcha_cli::OrchaCli::new(args)
         .output()
         .map_err(|err| format!("could not run orcha: {err}"))?;
     if output.status.success() {
@@ -603,12 +591,9 @@ fn installer_offer(answer: Option<&str>) -> i32 {
         }
         Some("yes") => {
             answer_plugin_offer(id, false);
-            let me = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("orcha"));
-            let ok = std::process::Command::new(me)
-                .args(EASY_JOB_INSTALL)
-                .stdin(std::process::Stdio::null())
-                .status()
-                .is_ok_and(|status| status.success());
+            let ok = crate::orcha_cli::succeeded(
+                crate::orcha_cli::OrchaCli::new(EASY_JOB_INSTALL).in_terminal(),
+            );
             if !ok {
                 // the in-app offer asks again
                 forget_plugin_offer(id);
@@ -675,23 +660,9 @@ pub(crate) fn whats_new() -> Option<Release> {
     if seen.as_deref().map(str::trim) == Some(ORCHA_VERSION) {
         return None;
     }
-    let notes_of = |value: &serde_json::Value| -> Vec<String> {
-        value["notes"]
-            .as_array()
-            .map(|notes| {
-                notes
-                    .iter()
-                    .filter_map(|note| note.as_str().map(str::to_owned))
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
-    let cache = crate::config::config_dir().join(RELEASE_CACHE);
-    let cached = std::fs::read(cache)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-        .filter(|cached| cached["version"].as_str() == Some(ORCHA_VERSION))
-        .map(|cached| notes_of(&cached));
+    let cached = cached_release()
+        .filter(|cached| cached.version == ORCHA_VERSION)
+        .map(|cached| cached.notes);
     let notes = match cached {
         Some(notes) => notes,
         None => {
@@ -714,33 +685,30 @@ pub(crate) fn whats_new() -> Option<Release> {
     })
 }
 
-/// Runs the installer: the latest app and extras. `quiet` keeps its output
-/// off the screen (the app runs it behind its own UI).
+/// Runs the newest release's installer (the app and extras), checked
+/// against the release's checksums first. `quiet` keeps its output off the
+/// screen (the app runs it behind its own UI).
+fn install_latest(quiet: bool) -> Result<(), String> {
+    crate::orcha_installer::install_latest(quiet)?;
+    // the next check asks GitHub again
+    let _ = std::fs::remove_file(crate::config::config_dir().join(RELEASE_CACHE));
+    Ok(())
+}
+
+/// `install_latest` for the app's update button.
 pub(crate) fn run_installer(quiet: bool) -> bool {
-    let mut command =
-        crate::platform::orcha_installer_command(INSTALL_COMMAND_UNIX, INSTALL_COMMAND_WINDOWS);
-    if quiet {
-        crate::platform::configure_background_command(&mut command);
-        command
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-    }
-    let ok = command.status().is_ok_and(|status| status.success());
-    if ok {
-        // the next check asks GitHub again
-        let _ = std::fs::remove_file(crate::config::config_dir().join(RELEASE_CACHE));
-    }
-    ok
+    install_latest(quiet)
+        .inspect_err(|err| tracing::warn!(%err, "orcha update failed"))
+        .is_ok()
 }
 
 fn update_from_cli() -> i32 {
-    if !run_installer(false) {
+    if let Err(err) = install_latest(false) {
         let instruction = crate::platform::orcha_installer_instruction(
             INSTALL_COMMAND_UNIX,
             INSTALL_COMMAND_WINDOWS,
         );
-        eprintln!("orcha update failed. Try again, or run:\n  {instruction}");
+        eprintln!("orcha update failed: {err}\nTry again, or run:\n  {instruction}");
         return 1;
     }
     crate::orcha_plugin_updates::follow_self_update();
@@ -776,14 +744,8 @@ fn uninstall() -> i32 {
         Err(err) => left.push(format!("{} ({err})", path.display())),
     };
     let me = std::env::current_exe().ok();
-    if let Some(me) = &me {
-        // fails when no server runs, which is fine
-        let _ = std::process::Command::new(me)
-            .args(["server", "stop"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-    }
+    // fails when no server runs, which is fine
+    let _ = crate::orcha_cli::OrchaCli::new(&["server", "stop"]).quiet();
     if let Some(tool) = config_tool() {
         let args = ["uninstall".to_owned(), "--all".to_owned()];
         match crate::platform::orcha_tool_command(&tool, &args).status() {

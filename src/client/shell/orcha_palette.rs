@@ -4,8 +4,10 @@
 //! `prefix` + `:`.
 
 use super::brutal::Brutal;
-use super::orcha_popup::{button, popup_frame, row_box, ButtonKind, PopupHits};
-use super::render::put_text;
+use super::orcha_popup::{
+    button, popup_frame, row_box, ButtonKind, PopupButton, PopupHits, PopupTarget,
+};
+use super::render::{display_width, put_text};
 use super::*;
 
 /// What a palette row does.
@@ -40,6 +42,55 @@ pub(super) enum PaletteCommand {
     Quit,
 }
 
+/// orcha's own keys after the prefix, where no keybind claims them:
+/// (key, the command it runs or None for COMMANDS itself, what it does).
+/// They are fixed; COMMANDS and the keybind list show them.
+pub(super) const PREFIX_KEYS: [(char, Option<PaletteCommand>, &str); 4] = [
+    ('u', Some(PaletteCommand::Accounts), "accounts"),
+    ('o', Some(PaletteCommand::HandOff), "hand off this chat"),
+    (
+        '!',
+        Some(PaletteCommand::NeedsYou),
+        "go to the agent that needs you",
+    ),
+    (':', None, "commands"),
+];
+
+/// The fixed key after the prefix that runs `command`, when it has one.
+fn prefix_key(command: PaletteCommand, keys: &crate::config::LiveKeybindConfig) -> Option<char> {
+    PREFIX_KEYS
+        .iter()
+        .find(|(_, runs, _)| *runs == Some(command))
+        .map(|(key, _, _)| *key)
+        .filter(|key| fixed_key_available(*key, keys))
+}
+
+/// Configured bindings take precedence over Orcha's fallback keys.
+fn fixed_key_available(key: char, keys: &crate::config::LiveKeybindConfig) -> bool {
+    let key =
+        crate::input::TerminalKey::new(KeyCode::Char(key), crossterm::event::KeyModifiers::NONE);
+    crate::input::resolve_prefix_binding(&keys.keybinds, &key).is_none()
+}
+
+/// The keybind list's group for `PREFIX_KEYS`, with `prefix` spelled out.
+pub(super) fn prefix_key_help(
+    keys: &crate::config::LiveKeybindConfig,
+) -> (&'static str, Vec<(String, std::borrow::Cow<'static, str>)>) {
+    (
+        "orcha (fixed keys)",
+        PREFIX_KEYS
+            .iter()
+            .filter(|(key, _, _)| fixed_key_available(*key, keys))
+            .map(|(key, _, what)| {
+                (
+                    format!("{} {key}", keys.primary_prefix_label()),
+                    std::borrow::Cow::Borrowed(*what),
+                )
+            })
+            .collect(),
+    )
+}
+
 /// (command, title, what it does)
 const COMMANDS: [(PaletteCommand, &str, &str); 27] = [
     (
@@ -50,7 +101,7 @@ const COMMANDS: [(PaletteCommand, &str, &str); 27] = [
     (
         PaletteCommand::NewWorkspace,
         "New project",
-        "a workspace for a folder",
+        "start a project from a folder",
     ),
     (
         PaletteCommand::NewWorktree,
@@ -80,8 +131,8 @@ const COMMANDS: [(PaletteCommand, &str, &str); 27] = [
     ),
     (
         PaletteCommand::Accounts,
-        "Accounts and fuel",
-        "switch account, sign in, see what is left",
+        "Accounts",
+        "switch account, sign in, see the fuel left",
     ),
     (
         PaletteCommand::RefreshFuel,
@@ -91,7 +142,7 @@ const COMMANDS: [(PaletteCommand, &str, &str); 27] = [
     (
         PaletteCommand::FindAccounts,
         "Find accounts",
-        "agents and accounts on this machine, to add to FUEL",
+        "agents and accounts on this machine, to add to Accounts",
     ),
     (
         PaletteCommand::NeedsYou,
@@ -452,10 +503,13 @@ fn plugin_action(index: usize) -> Option<PluginPaletteAction> {
 /// Rows shown at once; the list scrolls past them.
 const VISIBLE: usize = 10;
 
+/// COMMANDS; `prefix` is the prefix key's name, for the rows that have a
+/// fixed key (`PREFIX_KEYS`).
 pub(super) fn render(
     buffer: &mut Buffer,
     selected: usize,
     query: &str,
+    keys: &crate::config::LiveKeybindConfig,
     t: &Brutal,
     hits: &mut PopupHits,
 ) -> Option<()> {
@@ -529,15 +583,21 @@ pub(super) fn render(
                 .bg(fill)
                 .add_modifier(Modifier::BOLD),
         );
+        // a fixed key, right-aligned: left of RUN on the cursor's row
+        let key = command(*index)
+            .and_then(|command| prefix_key(command, keys))
+            .map(|key| format!("{} {key}", keys.primary_prefix_label()));
+        let key_width = key.as_deref().map_or(0, |key| display_width(key) + 1);
         let detail_x = rect.x + 2 + title_width + 1;
         put_text(
             buffer,
             detail_x,
             y,
-            rect.right().saturating_sub(detail_x + 9),
+            rect.right().saturating_sub(detail_x + 9 + key_width),
             detail,
             Style::default().fg(t.muted).bg(fill),
         );
+        let mut key_right = rect.right().saturating_sub(2);
         if cursor {
             let action = button(
                 buffer,
@@ -548,7 +608,22 @@ pub(super) fn render(
                 fill,
                 t,
             );
-            hits.actions.push((action, position));
+            hits.actions.push((action, PopupTarget::Row(position)));
+            key_right = action.x.saturating_sub(1);
+        }
+        if let Some(key) = &key {
+            let width = display_width(key);
+            put_text(
+                buffer,
+                key_right.saturating_sub(width),
+                y,
+                width,
+                key,
+                Style::default()
+                    .fg(t.muted)
+                    .bg(fill)
+                    .add_modifier(Modifier::BOLD),
+            );
         }
         hits.rows.push((rect, position));
         y += 2;
@@ -622,7 +697,8 @@ pub(super) fn render_broadcast(
             fill,
             t,
         );
-        hits.actions.push((send, 0));
+        hits.actions
+            .push((send, PopupTarget::Button(PopupButton::Primary)));
     }
     let mut y = body.y + 2;
     for pane in panes.iter().take(shown) {
@@ -881,7 +957,11 @@ impl ClientShellState {
         self.run_palette_command(command, outcome);
     }
 
-    fn run_palette_command(&mut self, command: PaletteCommand, outcome: &mut ClientShellInput) {
+    pub(super) fn run_palette_command(
+        &mut self,
+        command: PaletteCommand,
+        outcome: &mut ClientShellInput,
+    ) {
         use crate::input::{KeybindAction, KeybindMatch};
         let binding = |action| KeybindMatch::Action(action);
         match command {

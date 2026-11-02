@@ -8,6 +8,9 @@
 # One question, asked once: add Easy Job, a pixel-art office for your
 # agents? Default no. `sh -s -- --office` answers yes, `--no-office` no; a
 # run without a terminal answers no.
+#
+# The app is checked against the release's SHA256SUMS.txt before it is
+# put in place. `orcha update` names the release in ORCHA_INSTALL_TAG.
 set -e
 
 OFFICE=ask
@@ -33,26 +36,61 @@ command -v git >/dev/null 2>&1 || { echo "orcha needs git first: xcode-select --
 
 BIN="$HOME/.local/bin"
 EXTRAS="${ORCHA_DIR:-$HOME/.orcha}"
-# Ask GitHub which release is newest: the "latest/download" link can point
-# at the previous release for a few minutes after a new one is published.
-TAG=$(curl -fsSL --connect-timeout 5 --max-time 15 \
-  https://api.github.com/repos/trungkien1208/orcha/releases/latest 2>/dev/null \
-  | sed -n 's/.*"tag_name": *"\(orcha-[A-Za-z0-9._-]*\)".*/\1/p' | head -n 1)
-if [ -n "$TAG" ]; then
-  URL="https://github.com/trungkien1208/orcha/releases/download/$TAG/$ASSET"
-else
-  URL="https://github.com/trungkien1208/orcha/releases/latest/download/$ASSET"
+TAG="${ORCHA_INSTALL_TAG:-}"
+case "$TAG" in
+  "") ;;
+  orcha-*[!A-Za-z0-9._-]* | orcha-) echo "unknown release: $TAG"; exit 2 ;;
+  orcha-*) ;;
+  *) echo "unknown release: $TAG"; exit 2 ;;
+esac
+if [ -z "$TAG" ]; then
+  # Ask GitHub which release is newest: the "latest/download" link can point
+  # at the previous release for a few minutes after a new one is published.
+  TAG=$(curl -fsSL --connect-timeout 5 --max-time 15 \
+    https://api.github.com/repos/trungkien1208/orcha/releases/latest 2>/dev/null \
+    | sed -n 's/.*"tag_name": *"\(orcha-[A-Za-z0-9._-]*\)".*/\1/p' | head -n 1)
 fi
+if [ -n "$TAG" ]; then
+  BASE="https://github.com/trungkien1208/orcha/releases/download/$TAG"
+else
+  BASE="https://github.com/trungkien1208/orcha/releases/latest/download"
+fi
+
+sha256_of() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1"
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1"
+  else
+    openssl dgst -sha256 -r "$1"
+  fi | cut -d' ' -f1
+}
 
 echo "🐋🍵 orcha"
 echo "→ downloading the app"
 mkdir -p "$BIN"
-tmp=$(mktemp)
-curl -fL --progress-bar -o "$tmp" "$URL"
+# Stage beside the destination so the final rename is atomic, even when
+# the system temporary directory is on another filesystem.
+tmp=$(mktemp "$BIN/.orcha-install.XXXXXX")
+sums=
+cleanup() {
+  rm -f "$tmp"
+  [ -z "$sums" ] || rm -f "$sums"
+}
+trap cleanup EXIT
+sums=$(mktemp)
+curl -fL --progress-bar -o "$tmp" "$BASE/$ASSET"
+curl -fsSL -o "$sums" "$BASE/SHA256SUMS.txt"
+expected=$(awk -v f="$ASSET" '$2 == f || $2 == "*" f { print $1; exit }' "$sums")
+if [ -z "$expected" ] || [ "$(sha256_of "$tmp")" != "$expected" ]; then
+  echo "The download did not match the release's checksum, so nothing was installed."
+  echo "Try again in a few minutes."
+  exit 1
+fi
 chmod +x "$tmp"
-# remove first: copying over a running binary gets it killed by macOS
-rm -f "$BIN/orcha"
-mv "$tmp" "$BIN/orcha"
+# Rename the new inode over the old one: running processes keep theirs,
+# and a failed rename leaves the current app in place.
+mv -f "$tmp" "$BIN/orcha"
 xattr -d com.apple.quarantine "$BIN/orcha" 2>/dev/null || true
 
 echo "→ setting up the extras"

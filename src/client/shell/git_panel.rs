@@ -296,6 +296,7 @@ impl ClientShellState {
     pub(crate) fn tick_orcha(&mut self, now: Instant) -> bool {
         let folder_changed = self.poll_project_folder_picker();
         if !self.config.sidebar_tree || self.active_endpoint_id != ClientEndpointId::Local {
+            self.accounts.forget_pane_owners();
             self.orcha_ui.next_process_tick = None;
             return folder_changed;
         }
@@ -307,9 +308,16 @@ impl ClientShellState {
             | self
                 .accounts
                 .tick(&self.config.orcha.accounts_command, pane.as_deref(), now);
-        if repaint {
-            self.update_low_fuel_hint();
+        if self.config.orcha.accounts_command.trim().is_empty() {
+            if let Some(snapshot) = self.snapshot.as_deref() {
+                repaint |= self.accounts.tick_pane_owners(snapshot, now);
+            }
+        } else {
+            self.accounts.forget_pane_owners();
         }
+        // agents come and go between reads too: the hint follows them
+        repaint |= self.update_low_fuel_hint();
+        repaint |= self.reconcile_continued();
         repaint |= self.poll_import_scan();
         if !self.orcha_ui.account_scan_started {
             self.start_account_scan(false);

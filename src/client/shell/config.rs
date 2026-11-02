@@ -75,10 +75,25 @@ impl ClientShellState {
         }
     }
 
+    /// The config was reloaded; `previous` is the sidebar width it set
+    /// before. A new width there (the settings changed it) wins over one
+    /// dragged by hand earlier, and the dragged one is forgotten; an
+    /// unchanged width keeps a dragged one.
+    pub(super) fn apply_configured_sidebar_width(&mut self, previous: u16) {
+        if self.sidebar_width_manual && self.config.sidebar_width != previous {
+            self.sidebar_width_manual = false;
+            self.persist_chrome_preferences(&mut ClientShellInput::default());
+        }
+        if !self.sidebar_width_manual {
+            self.sidebar_width = self.config.sidebar_width;
+        }
+    }
+
     pub(crate) fn reload_client_config(&mut self) {
         match crate::config::load_live_config() {
             Ok(loaded) => {
                 let agent_panel_sort = self.config.agent_panel_sort;
+                let sidebar_width = self.config.sidebar_width;
                 let diagnostics = self.config.apply_live_config(
                     &loaded.config,
                     &loaded.diagnostics,
@@ -90,9 +105,7 @@ impl ClientShellState {
                         appearance,
                     );
                 }
-                if !self.sidebar_width_manual {
-                    self.sidebar_width = self.config.sidebar_width;
-                }
+                self.apply_configured_sidebar_width(sidebar_width);
                 if self.agent_panel_sort_manual {
                     self.config.agent_panel_sort = agent_panel_sort;
                 }

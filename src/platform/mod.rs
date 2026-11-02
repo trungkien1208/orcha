@@ -324,12 +324,14 @@ pub(crate) fn orcha_tool_command(
     orcha_tool_command_platform(program, args)
 }
 
-/// Builds the host shell command that fetches and runs ORCHA's installer.
-pub(crate) fn orcha_installer_command(
-    unix_command: &str,
-    windows_command: &str,
-) -> std::process::Command {
-    orcha_installer_command_platform(unix_command, windows_command)
+/// The release asset that installs or updates ORCHA on this host.
+pub(crate) fn orcha_installer_script() -> &'static str {
+    orcha_installer_script_platform()
+}
+
+/// Runs a downloaded (and already checked) copy of ORCHA's installer.
+pub(crate) fn orcha_installer_command(script: &std::path::Path) -> std::process::Command {
+    orcha_installer_command_platform(script)
 }
 
 pub(crate) fn orcha_installer_instruction(
@@ -796,9 +798,16 @@ pub(crate) use unix_common::{
     local_stream_peer_description, spawn_server_signal_monitor, ChildPipe, RemoteBridgeWake,
 };
 
+#[cfg(unix)]
+pub(crate) use unix_common::{
+    orcha_agent_install_dirs, orcha_command_file_names, orcha_env_command_line,
+    orcha_fallback_command_line,
+};
+
 mod client_state;
 pub(crate) use client_state::{
-    create_private_state_file, random_secret, replace_file, sync_parent_directory,
+    create_private_state_file, random_secret, replace_file, restrict_private_state_path,
+    sync_parent_directory,
 };
 
 #[cfg(not(unix))]
@@ -817,8 +826,8 @@ use linux::{
     orcha_application_support_dir_platform, orcha_config_base_dir_platform,
     orcha_config_tool_candidates_platform, orcha_installed_apps_platform,
     orcha_installer_command_platform, orcha_installer_instruction_platform,
-    orcha_shell_command_platform, orcha_tool_command_platform, orcha_uninstall_intro_platform,
-    remove_orcha_installation_platform, user_home_dir_platform,
+    orcha_installer_script_platform, orcha_shell_command_platform, orcha_tool_command_platform,
+    orcha_uninstall_intro_platform, remove_orcha_installation_platform, user_home_dir_platform,
 };
 
 #[cfg(target_os = "macos")]
@@ -831,8 +840,8 @@ use macos::{
     orcha_application_support_dir_platform, orcha_config_base_dir_platform,
     orcha_config_tool_candidates_platform, orcha_installed_apps_platform,
     orcha_installer_command_platform, orcha_installer_instruction_platform,
-    orcha_shell_command_platform, orcha_tool_command_platform, orcha_uninstall_intro_platform,
-    remove_orcha_installation_platform, user_home_dir_platform,
+    orcha_installer_script_platform, orcha_shell_command_platform, orcha_tool_command_platform,
+    orcha_uninstall_intro_platform, remove_orcha_installation_platform, user_home_dir_platform,
 };
 
 #[cfg(target_os = "windows")]
@@ -845,8 +854,8 @@ use windows::{
     orcha_application_support_dir_platform, orcha_config_base_dir_platform,
     orcha_config_tool_candidates_platform, orcha_installed_apps_platform,
     orcha_installer_command_platform, orcha_installer_instruction_platform,
-    orcha_shell_command_platform, orcha_tool_command_platform, orcha_uninstall_intro_platform,
-    remove_orcha_installation_platform, user_home_dir_platform,
+    orcha_installer_script_platform, orcha_shell_command_platform, orcha_tool_command_platform,
+    orcha_uninstall_intro_platform, remove_orcha_installation_platform, user_home_dir_platform,
 };
 
 #[cfg(not(windows))]
@@ -862,8 +871,8 @@ use fallback::{
     orcha_application_support_dir_platform, orcha_config_base_dir_platform,
     orcha_config_tool_candidates_platform, orcha_installed_apps_platform,
     orcha_installer_command_platform, orcha_installer_instruction_platform,
-    orcha_shell_command_platform, orcha_tool_command_platform, orcha_uninstall_intro_platform,
-    remove_orcha_installation_platform, user_home_dir_platform,
+    orcha_installer_script_platform, orcha_shell_command_platform, orcha_tool_command_platform,
+    orcha_uninstall_intro_platform, remove_orcha_installation_platform, user_home_dir_platform,
 };
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]

@@ -246,11 +246,28 @@ fn the_newer_sign_in_is_the_one_expiring_later() {
 }
 
 #[test]
-fn sign_in_errors_need_a_sign_in() {
-    assert!(auth_needed(Some("no sign-in found: sign in")));
-    assert!(auth_needed(Some("Cursor sign-in expired: sign in again")));
-    assert!(!auth_needed(Some("request failed (timeout)")));
-    assert!(!auth_needed(None));
+fn sign_in_is_needed_by_kind_not_by_wording() {
+    let refused = Fetched::needs_sign_in("whatever the words");
+    assert!(refused.limits.needs_sign_in());
+    // a message that mentions signing in is not enough
+    let offline = Fetched::transient("request failed (sign in page down)".into(), false);
+    assert!(!offline.limits.needs_sign_in());
+    assert_eq!(offline.error_kind(), Some(FuelError::Transient));
+    assert!(!Limits::default().needs_sign_in());
+}
+
+#[test]
+fn the_error_kind_survives_the_cache_and_old_caches_still_read() {
+    let refused = Fetched::needs_sign_in("no sign-in found: sign in").limits;
+    let text = serde_json::to_string(&refused).expect("json");
+    assert!(text.contains("\"error_kind\":\"needs_sign_in\""));
+    let back: Limits = serde_json::from_str(&text).expect("read back");
+    assert!(back.needs_sign_in());
+    // limits.py and older orcha write no kind
+    let old: Limits =
+        serde_json::from_str(r#"{"error":"no sign-in found: sign in"}"#).expect("old cache");
+    assert_eq!(old.error_kind, None);
+    assert!(!old.needs_sign_in());
 }
 
 #[test]
@@ -321,8 +338,11 @@ fn only_a_refused_cursor_sign_in_asks_to_sign_in_again() {
         let refused = cursor_failed(&CurlError::from_stderr(&format!(
             "curl: (22) The requested URL returned error: {status}"
         )));
-        assert!(!refused.transient, "{status}");
-        assert!(auth_needed(refused.limits.error.as_deref()), "{status}");
+        assert_eq!(
+            refused.error_kind(),
+            Some(FuelError::NeedsSignIn),
+            "{status}"
+        );
     }
     for stderr in [
         "curl: (6) Could not resolve host: cursor.com",
@@ -330,13 +350,14 @@ fn only_a_refused_cursor_sign_in_asks_to_sign_in_again() {
         "curl: (22) The requested URL returned error: 500",
     ] {
         let failed = cursor_failed(&CurlError::from_stderr(stderr));
-        assert!(failed.transient, "{stderr}");
-        assert!(!auth_needed(failed.limits.error.as_deref()), "{stderr}");
+        assert_eq!(failed.error_kind(), Some(FuelError::Transient), "{stderr}");
+        assert!(!failed.limits.needs_sign_in(), "{stderr}");
     }
     let limited = cursor_failed(&CurlError::from_stderr(
         "curl: (22) The requested URL returned error: 429",
     ));
-    assert!(limited.transient && limited.rate_limited);
+    assert_eq!(limited.error_kind(), Some(FuelError::Transient));
+    assert!(limited.rate_limited);
 }
 
 #[test]

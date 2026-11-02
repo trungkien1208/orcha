@@ -15,13 +15,37 @@ pub(super) struct Limits {
     pub(super) note: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) error: Option<String>,
+    /// What kind of failure `error` is. Missing from caches written by
+    /// older versions and by limits.py: read as `Other` until refreshed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) error_kind: Option<FuelError>,
 }
 
-/// Why a fetch failed: worth retrying later, and rate limited.
+impl Limits {
+    /// The account needs a new sign-in before its fuel can be read.
+    pub(super) fn needs_sign_in(&self) -> bool {
+        self.error_kind == Some(FuelError::NeedsSignIn)
+    }
+}
+
+/// Why reading an account's fuel failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum FuelError {
+    /// No sign-in, or one the service refused: sign in again.
+    NeedsSignIn,
+    /// Offline, a timeout, a server hiccup: asked again later, and the last
+    /// numbers keep showing meanwhile.
+    Transient,
+    /// Anything else, such as no usage data yet.
+    Other,
+}
+
+/// What a fetch found, or why it failed (`limits.error_kind`).
 #[derive(Debug, Default)]
 pub(super) struct Fetched {
     pub(super) limits: Limits,
-    pub(super) transient: bool,
+    /// Refused for asking too often: wait longer before asking again.
     pub(super) rate_limited: bool,
     /// Nothing could be asked (the agent sits idle): the last numbers
     /// still hold, so keep showing them.
@@ -29,32 +53,36 @@ pub(super) struct Fetched {
 }
 
 impl Fetched {
-    fn error(message: &str) -> Self {
+    fn failed(kind: FuelError, message: impl Into<String>) -> Self {
         Self {
             limits: Limits {
-                error: Some(message.to_owned()),
+                error: Some(message.into()),
+                error_kind: Some(kind),
                 ..Limits::default()
             },
             ..Self::default()
         }
     }
 
+    pub(super) fn error_kind(&self) -> Option<FuelError> {
+        self.limits.error_kind
+    }
+
+    pub(super) fn needs_sign_in(message: &str) -> Self {
+        Self::failed(FuelError::NeedsSignIn, message)
+    }
+
     fn idle(message: &str) -> Self {
         Self {
             idle: true,
-            ..Self::error(message)
+            ..Self::failed(FuelError::Other, message)
         }
     }
 
-    fn transient(message: String, rate_limited: bool) -> Self {
+    pub(super) fn transient(message: String, rate_limited: bool) -> Self {
         Self {
-            limits: Limits {
-                error: Some(message),
-                ..Limits::default()
-            },
-            transient: true,
             rate_limited,
-            idle: false,
+            ..Self::failed(FuelError::Transient, message)
         }
     }
 }
@@ -117,44 +145,17 @@ pub(super) fn curl(url: &str, config: &str) -> Result<String, CurlError> {
     )))
 }
 
-/// Days since 1970-01-01 of a civil date (Howard Hinnant's algorithm).
-pub(super) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let yoe = year - era * 400;
-    let mp = (month + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
-}
-
 /// Seconds since the epoch of an ISO 8601 time ("2026-10-23T12:00:00Z",
-/// fractions and "+07:00" offsets too).
+/// fractions and "+07:00" offsets too; no offset means UTC).
 pub(super) fn iso_secs(text: &str) -> Option<f64> {
+    use time::format_description::well_known::{Iso8601, Rfc3339};
     let text = text.trim();
-    let (date, rest) = text.split_once(['T', ' '])?;
-    let mut date = date.split('-');
-    let year: i64 = date.next()?.parse().ok()?;
-    let month: i64 = date.next()?.parse().ok()?;
-    let day: i64 = date.next()?.parse().ok()?;
-    let (clock, offset) = if let Some(clock) = rest.strip_suffix('Z') {
-        (clock, 0)
-    } else if let Some(at) = rest.rfind(['+', '-']).filter(|at| *at >= 8) {
-        let (clock, zone) = rest.split_at(at);
-        let sign = if zone.starts_with('-') { -1 } else { 1 };
-        let mut zone = zone[1..].split(':');
-        let hours: i64 = zone.next()?.parse().ok()?;
-        let minutes: i64 = zone.next().unwrap_or("0").parse().ok()?;
-        (clock, sign * (hours * 3600 + minutes * 60))
-    } else {
-        (rest, 0)
-    };
-    let mut clock = clock.split(':');
-    let hour: i64 = clock.next()?.parse().ok()?;
-    let minute: i64 = clock.next()?.parse().ok()?;
-    let second: f64 = clock.next().unwrap_or("0").parse().ok()?;
-    let days = days_from_civil(year, month, day);
-    Some((days * 86_400 + hour * 3600 + minute * 60 - offset) as f64 + second)
+    let at = time::OffsetDateTime::parse(text, &Rfc3339)
+        .or_else(|_| {
+            time::PrimitiveDateTime::parse(text, &Iso8601::DEFAULT).map(|at| at.assume_utc())
+        })
+        .ok()?;
+    Some(at.unix_timestamp() as f64 + f64::from(at.nanosecond()) / 1e9)
 }
 
 /// The JSON payload of a JWT.
@@ -173,7 +174,7 @@ pub(super) fn claude_limits(accounts: &[AccountConfig], id: &str) -> Fetched {
         .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
         .and_then(|value| value.get("claudeAiOauth").cloned());
     let Some(oauth) = oauth else {
-        return Fetched::error("no sign-in found: sign in");
+        return Fetched::needs_sign_in("no sign-in found: sign in");
     };
     let expires = oauth
         .get("expiresAt")
@@ -186,11 +187,11 @@ pub(super) fn claude_limits(accounts: &[AccountConfig], id: &str) -> Fetched {
         return if oauth.get("refreshToken").and_then(Value::as_str).is_some() {
             Fetched::idle("idle: fuel shows after Claude next runs on it")
         } else {
-            Fetched::error("sign-in expired: sign in again")
+            Fetched::needs_sign_in("sign-in expired: sign in again")
         };
     }
     let Some(token) = oauth.get("accessToken").and_then(Value::as_str) else {
-        return Fetched::error("no sign-in found: sign in");
+        return Fetched::needs_sign_in("no sign-in found: sign in");
     };
     let config = format!(
         "header = \"Authorization: Bearer {token}\"\n\
@@ -224,7 +225,7 @@ pub(super) fn claude_limits(accounts: &[AccountConfig], id: &str) -> Fetched {
         ..Limits::default()
     };
     if limits.session.is_none() && limits.weekly.is_none() {
-        return Fetched::error("no usage data yet");
+        return Fetched::failed(FuelError::Other, "no usage data yet");
     }
     Fetched {
         limits,
@@ -301,7 +302,7 @@ pub(super) fn codex_window(limits: &Value, key: &str, now: f64) -> Option<(f64, 
 
 pub(super) fn codex_limits() -> Fetched {
     let Some(home) = home() else {
-        return Fetched::error("no Codex runs found yet");
+        return Fetched::failed(FuelError::Other, "no Codex runs found yet");
     };
     // sessions/YYYY/MM/DD/*.jsonl, the newest ten
     let mut files = Vec::new();
@@ -324,7 +325,7 @@ pub(super) fn codex_limits() -> Fetched {
         }
     }
     if files.is_empty() {
-        return Fetched::error("no Codex runs found yet");
+        return Fetched::failed(FuelError::Other, "no Codex runs found yet");
     }
     files.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
     let now = now_secs();
@@ -361,7 +362,7 @@ pub(super) fn codex_limits() -> Fetched {
     // Runs exist but none says how much is left: keep the last numbers.
     Fetched {
         idle: true,
-        ..Fetched::error("no recent Codex usage found yet")
+        ..Fetched::failed(FuelError::Other, "no recent Codex usage found yet")
     }
 }
 
@@ -376,7 +377,7 @@ pub(super) fn cursor_limits() -> Fetched {
         .and_then(|payload| payload.get("sub")?.as_str().map(str::to_owned))
         .and_then(|sub| sub.rsplit('|').next().map(str::to_owned));
     let (Some(token), Some(user)) = (token, user) else {
-        return Fetched::error("not signed in to the Cursor CLI: sign in");
+        return Fetched::needs_sign_in("not signed in to the Cursor CLI: sign in");
     };
     // the same session cookie the Cursor dashboard uses
     let config = format!("header = \"Cookie: WorkosCursorSessionToken={user}%3A%3A{token}\"\n");
@@ -419,7 +420,7 @@ pub(super) fn cursor_limits() -> Fetched {
 /// one. Offline, a timeout or a server error is asked again later.
 pub(super) fn cursor_failed(err: &CurlError) -> Fetched {
     match err.status {
-        Some(401 | 403) => Fetched::error("Cursor sign-in expired: sign in again"),
+        Some(401 | 403) => Fetched::needs_sign_in("Cursor sign-in expired: sign in again"),
         _ => Fetched::transient(
             format!("request failed ({})", err.message),
             err.rate_limited,
@@ -522,7 +523,7 @@ pub(super) fn limits(accounts: &[AccountConfig], account: &AccountConfig, fresh:
         }
         return fetched.limits;
     }
-    if fetched.transient {
+    if fetched.error_kind() == Some(FuelError::Transient) {
         let wait = if fetched.rate_limited {
             RATE_LIMIT_RETRY_AFTER_SECS
         } else {
@@ -655,15 +656,6 @@ pub(super) fn signed_in(accounts: &[AccountConfig], account: &AccountConfig) -> 
         "cursor" => email(accounts, account).is_some(),
         kind => home().is_some_and(|home| agent_signed_in(&home, kind)),
     }
-}
-
-pub(super) fn auth_needed(error: Option<&str>) -> bool {
-    error.is_some_and(|error| {
-        let error = error.to_lowercase();
-        ["sign-in", "sign in", "signed in"]
-            .iter()
-            .any(|word| error.contains(word))
-    })
 }
 
 #[cfg(test)]

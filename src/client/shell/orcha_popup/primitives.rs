@@ -429,7 +429,8 @@ pub(super) fn choice_row(
                 t.chip_text,
                 if on { t.green } else { t.frame },
             );
-            hits.actions.push((Rect::new(x, y, width, 1), index));
+            hits.actions
+                .push((Rect::new(x, y, width, 1), PopupTarget::Row(index)));
             x += width + 1;
         }
         Lead::Logo(logo, color) => {
@@ -485,7 +486,7 @@ pub(super) fn choice_row(
             ButtonKind::Plain
         };
         let action = button(buffer, rect.right() - 1, y, label, kind, fill, t);
-        hits.actions.push((action, index));
+        hits.actions.push((action, PopupTarget::Row(index)));
     }
     hits.rows.push((rect, index));
 }

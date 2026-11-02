@@ -36,7 +36,7 @@ mod xtgettcap;
 
 use self::agent_detection::{
     codex_prompt_ready, decide_detection_screen_read, decide_screen_detection_publish,
-    detection_update_for_publish_with_osc, mark_detection_content_changed,
+    detection_poll_interval, detection_update_for_publish_with_osc, mark_detection_content_changed,
     observe_detection_content_change, DetectionPublishDecision, DetectionScreenReadDecision,
     DetectionScreenReadInput, DetectionTextCache, PendingIdleConfirmation,
     ScreenDetectionPublishInput, AGENT_PENDING_IDLE_RECHECK, AGENT_STARTUP_GRACE_WINDOW,
@@ -433,6 +433,22 @@ fn absolute_process_cwd(pid: u32) -> Option<std::path::PathBuf> {
 #[cfg(unix)]
 fn usable_process_cwd(pid: u32) -> Option<std::path::PathBuf> {
     absolute_process_cwd(pid).filter(|cwd| cwd.is_dir())
+}
+
+/// The PTY's foreground process group, read through the pane's own child
+/// first. A direct platform lookup avoids the PTY actor round trip: session
+/// snapshots ask once per pane, and the actor stays the fallback when the
+/// child's foreground group cannot be read.
+#[cfg(unix)]
+fn pane_foreground_process_group(
+    child_pid: u32,
+    by_child: impl FnOnce(u32) -> Option<u32>,
+    by_pty: impl FnOnce() -> Option<u32>,
+) -> Option<u32> {
+    (child_pid > 0)
+        .then(|| by_child(child_pid))
+        .flatten()
+        .or_else(by_pty)
 }
 
 #[cfg(unix)]
@@ -935,6 +951,7 @@ fn spawn_basic_detection_task(
     full_lifecycle_authority_active: Arc<AtomicBool>,
     self_reported_agent_active: Arc<AtomicBool>,
     state_events: mpsc::Sender<AppEvent>,
+    render_dirty: Arc<RenderSignal>,
 ) -> (
     tokio::task::AbortHandle,
     Arc<Notify>,
@@ -969,11 +986,17 @@ fn spawn_basic_detection_task(
         let mut agent_job = AgentJobTracker::default();
 
         loop {
-            let sleep_duration = if pending_idle.active() {
-                AGENT_PENDING_IDLE_RECHECK
-            } else {
-                std::time::Duration::from_millis(300)
-            };
+            let sleep_duration = detection_poll_interval(
+                std::time::Duration::from_millis(300),
+                render_dirty.has_immediate_pty_source(pane_id),
+                release_was_active,
+                pending_idle.active(),
+                agent_presence.current_agent().is_none()
+                    || acquisition_started_at.is_some()
+                    || full_lifecycle_authority_active.load(Ordering::Acquire)
+                    || agent_startup_grace_until
+                        .is_some_and(|until| std::time::Instant::now() < until),
+            );
             tokio::select! {
                 _ = tokio::time::sleep(sleep_duration) => {}
                 _ = detect_reset.notified() => {
@@ -2656,6 +2679,7 @@ impl PaneRuntime {
             full_lifecycle_authority_active.clone(),
             self_reported_agent_active.clone(),
             events,
+            render_dirty,
         );
 
         Ok(Self {
@@ -2897,10 +2921,10 @@ impl PaneRuntime {
 
                 loop {
                     let now_for_tick = Instant::now();
-                    let tick = if active_pending_release(&pending_release_for_task, now_for_tick)
+                    let urgent = active_pending_release(&pending_release_for_task, now_for_tick)
                         .is_some()
-                        || terminal.has_transient_default_color_override()
-                    {
+                        || terminal.has_transient_default_color_override();
+                    let normal_tick = if urgent {
                         TICK_PENDING_RELEASE
                     } else if pending_idle.active() {
                         AGENT_PENDING_IDLE_RECHECK
@@ -2909,6 +2933,17 @@ impl PaneRuntime {
                     } else {
                         TICK_IDENTIFIED
                     };
+                    let tick = detection_poll_interval(
+                        normal_tick,
+                        render_dirty.has_immediate_pty_source(pane_id),
+                        urgent,
+                        pending_idle.active(),
+                        agent_presence.current_agent().is_none()
+                            || acquisition_started_at.is_some()
+                            || pending_restore_probe
+                            || full_lifecycle_authority_active_for_task.load(Ordering::Acquire)
+                            || agent_startup_grace_until.is_some_and(|until| now_for_tick < until),
+                    );
                     tokio::select! {
                         _ = tokio::time::sleep(tick) => {}
                         _ = detect_reset.notified() => {
@@ -3844,13 +3879,19 @@ impl PaneRuntime {
         (pid > 0).then_some(pid)
     }
 
+    #[cfg(unix)]
+    fn foreground_process_group(&self) -> Option<u32> {
+        pane_foreground_process_group(
+            self.child_pid.load(Ordering::Acquire),
+            crate::platform::foreground_process_group_id,
+            || self.io.foreground_process_group_id(),
+        )
+    }
+
     pub fn follow_cwd(&self) -> Option<std::path::PathBuf> {
         #[cfg(unix)]
         {
-            let leader_cwd = self
-                .io
-                .foreground_process_group_id()
-                .and_then(usable_process_cwd);
+            let leader_cwd = self.foreground_process_group().and_then(usable_process_cwd);
             leader_cwd.or_else(|| self.cwd())
         }
 
@@ -3865,19 +3906,17 @@ impl PaneRuntime {
         #[cfg(unix)]
         {
             let pid = self.child_pid.load(Ordering::Acquire);
-            let shell_cwd = absolute_process_cwd(pid);
-            let foreground_pgid = self
-                .io
-                .foreground_process_group_id()
-                .or_else(|| crate::platform::foreground_process_group_id(pid));
-            let leader_cwd = foreground_pgid.and_then(absolute_process_cwd);
+            let leader_cwd = self
+                .foreground_process_group()
+                .and_then(absolute_process_cwd);
 
             // The group leader's cwd is authoritative (issue #3270): a helper
             // process that chdirs elsewhere inside the same foreground group
             // must not override it. Scan other members only when the leader's
             // cwd cannot be read at all.
-            leader_cwd
-                .or_else(|| foreground_member_cwd_different_from_shell(pid, shell_cwd.as_ref()))
+            leader_cwd.or_else(|| {
+                foreground_member_cwd_different_from_shell(pid, absolute_process_cwd(pid).as_ref())
+            })
         }
 
         #[cfg(not(unix))]
@@ -3934,6 +3973,7 @@ impl PaneRuntime {
             self.full_lifecycle_authority_active.clone(),
             self.self_reported_agent_active.clone(),
             events,
+            Arc::new(RenderSignal::default()),
         );
         self.detect_handle = Some(handle);
         self.detect_reset_notify = reset;
@@ -4537,6 +4577,38 @@ mod tests {
             return;
         }
         assert_eq!(observed, Some(expected_cwd));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn foreground_group_reads_the_child_before_asking_the_pty_actor() {
+        let asked_pty = std::cell::Cell::new(false);
+        let by_pty = || {
+            asked_pty.set(true);
+            Some(9)
+        };
+        assert_eq!(
+            pane_foreground_process_group(42, |pid| Some(pid + 1), by_pty),
+            Some(43)
+        );
+        assert!(!asked_pty.get(), "a readable child must not wake the actor");
+
+        assert_eq!(pane_foreground_process_group(42, |_| None, by_pty), Some(9));
+        assert!(asked_pty.replace(false));
+
+        let mut read_child = false;
+        assert_eq!(
+            pane_foreground_process_group(
+                0,
+                |_| {
+                    read_child = true;
+                    Some(1)
+                },
+                by_pty
+            ),
+            Some(9)
+        );
+        assert!(!read_child, "an unknown child pid is never probed");
     }
 
     #[cfg(unix)]

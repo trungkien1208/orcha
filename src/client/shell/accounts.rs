@@ -8,9 +8,12 @@
 //! moves, orcha's own data only asks which account the new pane runs on (no
 //! fuel, no keychain) and moves the mark; a command runs again.
 
+use std::collections::HashMap;
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant};
+
+use crate::protocol::ClientShellSnapshot;
 
 const REFRESH: Duration = Duration::from_secs(60);
 /// Clicking through panes looks the account up once they settle, not on
@@ -73,6 +76,18 @@ pub(super) struct AccountsPoller {
     /// start that (once the focus settles).
     resolving: Option<Receiver<Option<String>>>,
     resolve_at: Option<Instant>,
+    /// Last observed owner of an ambiguous local pane, keyed by stable pane
+    /// id and provider. Never infer an owner from how much fuel is left.
+    pane_owners: HashMap<String, (String, String)>,
+    pane_owners_pending: Option<Receiver<PaneOwnersRead>>,
+    pane_owners_refresh: Option<Instant>,
+    pane_owners_revision: Option<u64>,
+}
+
+type PaneOwnersRead = Vec<(String, String, Option<String>)>;
+
+fn provider_id(kind: &str) -> &str {
+    super::brutal::AgentKind::of(Some(kind)).map_or(kind, |provider| provider.id)
 }
 
 /// A read's result: the accounts (None when it failed), the pane it was
@@ -158,7 +173,7 @@ fn mark(accounts: &mut [Account], id: Option<&str>) -> bool {
 
 impl AccountsPoller {
     pub(super) fn has_pending(&self) -> bool {
-        self.pending.is_some() || self.resolving.is_some()
+        self.pending.is_some() || self.resolving.is_some() || self.pane_owners_pending.is_some()
     }
 
     pub(super) fn data(&self) -> Option<&[Account]> {
@@ -176,6 +191,12 @@ impl AccountsPoller {
     #[cfg(test)]
     pub(super) fn set_for_test(&mut self, data: Option<Vec<Account>>) {
         self.data = data;
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_pane_owner_for_test(&mut self, pane: &str, provider: &str, owner: &str) {
+        self.pane_owners
+            .insert(pane.into(), (provider.into(), owner.into()));
     }
 
     /// Ask for fresh data on the next tick (after a switch or sign-in).
@@ -302,6 +323,186 @@ impl AccountsPoller {
             self.next_refresh = Some(now + REFRESH);
         }
         changed
+    }
+}
+
+/// An agent whose account runs low on fuel, for its sidebar row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct FuelMark {
+    /// Percent left of the window that runs out first.
+    pub left: u8,
+    /// Under `low_fuel_percent`, where orcha offers a switch (red); else
+    /// only low (yellow).
+    pub empty: bool,
+}
+
+impl AccountsPoller {
+    pub(super) fn forget_pane_owners(&mut self) {
+        self.pane_owners.clear();
+        self.pane_owners_pending = None;
+        self.pane_owners_refresh = None;
+        self.pane_owners_revision = None;
+    }
+
+    /// Resolves ambiguous pane owners off the UI thread, at most once per
+    /// minute. The caller only uses this for the local endpoint and native
+    /// accounts. Provider changes and closed panes invalidate old results.
+    pub(super) fn tick_pane_owners(
+        &mut self,
+        snapshot: &ClientShellSnapshot,
+        now: Instant,
+    ) -> bool {
+        let owners = self
+            .pane_owners_pending
+            .as_ref()
+            .and_then(|rx| match rx.try_recv() {
+                Ok(owners) => Some(Ok(owners)),
+                Err(TryRecvError::Disconnected) => Some(Err(())),
+                Err(TryRecvError::Empty) => None,
+            });
+        if owners.is_some() {
+            self.pane_owners_pending = None;
+        }
+        if owners.is_none()
+            && self.pane_owners_revision == Some(snapshot.revision)
+            && (self.pane_owners_pending.is_some()
+                || self.pane_owners_refresh.is_some_and(|at| now < at))
+        {
+            return false;
+        }
+        self.pane_owners_revision = Some(snapshot.revision);
+        let providers: HashMap<_, _> = snapshot
+            .agents
+            .iter()
+            .filter_map(|agent| {
+                Some((agent.pane_id.as_str(), provider_id(agent.agent.as_deref()?)))
+            })
+            .collect();
+        let known = |pane: &str, kind: &str| {
+            providers
+                .get(pane)
+                .is_some_and(|actual| super::brutal::same_agent(actual, kind))
+        };
+        let mut changed = false;
+        self.pane_owners.retain(|pane, (kind, _)| {
+            let keep = known(pane, kind);
+            changed |= !keep;
+            keep
+        });
+        if let Some(Ok(owners)) = owners {
+            for (pane, kind, owner) in owners {
+                if known(&pane, &kind) {
+                    let next = owner.map(|owner| (kind, owner));
+                    if self.pane_owners.get(&pane) != next.as_ref() {
+                        changed = true;
+                        match next {
+                            Some(next) => {
+                                self.pane_owners.insert(pane, next);
+                            }
+                            None => {
+                                self.pane_owners.remove(&pane);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if self.pane_owners_pending.is_some() || self.pane_owners_refresh.is_some_and(|at| now < at)
+        {
+            return changed;
+        }
+        let Some(accounts) = self.data.as_deref() else {
+            return changed;
+        };
+        let panes: Vec<_> = snapshot
+            .agents
+            .iter()
+            .filter_map(|agent| {
+                let kind = agent.agent.as_deref()?;
+                let ambiguous = accounts
+                    .iter()
+                    .filter(|account| super::brutal::same_agent(&account.kind, kind))
+                    .take(2)
+                    .count()
+                    > 1;
+                ambiguous.then(|| (agent.pane_id.clone(), kind.to_ascii_lowercase()))
+            })
+            .collect();
+        self.pane_owners_refresh = Some(now + REFRESH);
+        if panes.is_empty() {
+            return changed;
+        }
+        let (tx, rx) = mpsc::channel();
+        if crate::thread_spawn::spawn_named("orcha-pane-accounts", move || {
+            let configs = crate::orcha_accounts::accounts();
+            let owners = panes
+                .into_iter()
+                .map(|(pane, kind)| {
+                    let owner =
+                        crate::orcha_accounts::observed_account_of_agent(&configs, &kind, &pane);
+                    (pane, kind, owner)
+                })
+                .collect();
+            let _ = tx.send(owners);
+        })
+        .is_ok()
+        {
+            self.pane_owners_pending = Some(rx);
+        }
+        changed
+    }
+
+    /// Low fuel only for an observed owner, the focused account, or an
+    /// agent kind with one account. Ambiguous unknown panes have no mark.
+    pub(super) fn low_fuel_agents<'a>(
+        &self,
+        snapshot: &'a ClientShellSnapshot,
+        orcha: &crate::config::OrchaConfig,
+    ) -> HashMap<&'a str, FuelMark> {
+        let mut marks = HashMap::new();
+        let Some(accounts) = self.data.as_deref() else {
+            return marks;
+        };
+        let mut by_provider: HashMap<&str, Vec<&Account>> = HashMap::new();
+        let mut by_id = HashMap::new();
+        for account in accounts {
+            by_provider
+                .entry(provider_id(&account.kind))
+                .or_default()
+                .push(account);
+            by_id.insert(account.id.as_str(), account);
+        }
+        for agent in &snapshot.agents {
+            let Some(kind) = agent.agent.as_deref().map(provider_id) else {
+                continue;
+            };
+            let owner = self
+                .pane_owners
+                .get(&agent.pane_id)
+                .filter(|(provider, _)| super::brutal::same_agent(provider, kind))
+                .and_then(|(_, owner)| by_id.get(owner.as_str()).copied())
+                .filter(|account| super::brutal::same_agent(&account.kind, kind));
+            let same_kind = by_provider.get(kind).map_or(&[][..], Vec::as_slice);
+            let focused = snapshot.focused_pane_id.as_deref() == Some(agent.pane_id.as_str());
+            let account = focused
+                .then(|| same_kind.iter().copied().find(|account| account.current))
+                .flatten()
+                .or(owner)
+                .or_else(|| (same_kind.len() == 1).then(|| same_kind[0]));
+            let Some(left) = account.and_then(Account::lowest) else {
+                continue;
+            };
+            if super::orcha_popup::fuel_is_low(left, orcha) {
+                marks.insert(
+                    agent.pane_id.as_str(),
+                    FuelMark {
+                        left,
+                        empty: left < orcha.low_fuel_percent,
+                    },
+                );
+            }
+        }
+        marks
     }
 }
 

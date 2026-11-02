@@ -93,7 +93,7 @@ pub(crate) use registry::{agent_kind, AgentKind, AGENTS, HANDOFF_AGENTS};
 
 mod configuration;
 use configuration::*;
-pub(crate) use configuration::{accounts, remove};
+pub(crate) use configuration::{accounts, expand_home, remove};
 
 mod claude;
 use claude::*;
@@ -104,8 +104,8 @@ use fuel::*;
 mod preferences;
 use preferences::*;
 pub(crate) use preferences::{
-    account_of_agent, account_of_pane, claude_folder_of_pane, default_account, find_account, plan,
-    prepare_folder, rename, set_default,
+    account_of_agent, account_of_pane, claude_folder_of_pane, default_account, find_account,
+    observed_account_of_agent, plan, prepare_folder, rename, set_default,
 };
 
 mod panes;
@@ -118,7 +118,9 @@ pub(crate) use actions::{activate, add, login, open, restart_blocker, restart_on
 
 mod discovery;
 use discovery::*;
-pub(crate) use discovery::{find_unlisted, import_found, new_agent, FoundAccount};
+pub(crate) use discovery::{
+    claude_config_folders, find_unlisted, import_found, new_agent, FoundAccount,
+};
 
 #[cfg(test)]
 mod live;

@@ -592,6 +592,15 @@ impl StatusCommandGuard {
         let process_id = child
             .id()
             .ok_or_else(|| std::io::Error::other("status command has no process id"))?;
+        Self::for_process_group(process_id)
+    }
+
+    /// Guards a blocking child started with `configure_status_command`.
+    pub(crate) fn for_child(child: &std::process::Child) -> std::io::Result<Self> {
+        Self::for_process_group(child.id())
+    }
+
+    fn for_process_group(process_id: u32) -> std::io::Result<Self> {
         let process_group_id = i32::try_from(process_id)
             .map_err(|_| std::io::Error::other("status command process id exceeds i32"))?;
         Ok(Self {
@@ -641,9 +650,66 @@ pub(crate) fn set_default_plugin_pane_pwd(env: &mut Vec<(String, String)>, cwd: 
     }
 }
 
+/// The pane shell line that runs `command` with `name` set to `value`, or
+/// with `name` unset when there is no value.
+pub(crate) fn orcha_env_command_line(name: &str, value: Option<&str>, command: &str) -> String {
+    match value {
+        Some(value) => format!("{name}='{}' {command}", value.replace('\'', "'\\''")),
+        None => format!("env -u {name} {command}"),
+    }
+}
+
+/// The pane shell line that runs `first` and, when it fails, `fallback`.
+pub(crate) fn orcha_fallback_command_line(first: &str, fallback: &str) -> String {
+    format!("{first} || {fallback}")
+}
+
+/// The file names a command can have.
+pub(crate) fn orcha_command_file_names(command: &str) -> Vec<String> {
+    vec![command.to_owned()]
+}
+
+/// Where agent installers put their commands before PATH knows them.
+pub(crate) fn orcha_agent_install_dirs(home: &Path) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = [
+        ".local/bin",
+        ".claude/local",
+        ".npm-global/bin",
+        ".bun/bin",
+        ".volta/bin",
+        ".cargo/bin",
+    ]
+    .iter()
+    .map(|dir| home.join(dir))
+    .collect();
+    dirs.push(PathBuf::from("/opt/homebrew/bin"));
+    dirs.push(PathBuf::from("/usr/local/bin"));
+    dirs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn orcha_pane_lines_use_posix_shell_syntax() {
+        assert_eq!(
+            orcha_env_command_line("CLAUDE_CONFIG_DIR", Some("/a/it's"), "claude"),
+            "CLAUDE_CONFIG_DIR='/a/it'\\''s' claude"
+        );
+        assert_eq!(
+            orcha_env_command_line("CLAUDE_CONFIG_DIR", None, "claude --resume x"),
+            "env -u CLAUDE_CONFIG_DIR claude --resume x"
+        );
+        assert_eq!(
+            orcha_fallback_command_line("codex resume --last", "codex"),
+            "codex resume --last || codex"
+        );
+        assert_eq!(orcha_command_file_names("claude"), ["claude"]);
+        let dirs = orcha_agent_install_dirs(Path::new("/home/me"));
+        assert!(dirs.contains(&PathBuf::from("/home/me/.local/bin")));
+        assert!(dirs.contains(&PathBuf::from("/opt/homebrew/bin")));
+    }
 
     #[test]
     fn server_hangup_evidence_expires() {

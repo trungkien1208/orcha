@@ -10,9 +10,23 @@ impl ClientShellState {
             self.show_notice("accounts: one change is on its way already".to_owned());
             return;
         }
+        let change = match &action {
+            AccountAction::Switch { id, pane } | AccountAction::Restart { id, pane } => {
+                self.snapshot.as_deref().and_then(|snapshot| {
+                    snapshot
+                        .agents
+                        .iter()
+                        .find(|agent| agent.pane_id == *pane)
+                        .and_then(|agent| agent.agent.as_ref())
+                        .map(|provider| (id.clone(), pane.clone(), provider.clone()))
+                })
+            }
+            _ => None,
+        };
         let working = action.working();
         self.orcha_ui.account_run = BackgroundJob::spawn("orcha-account", move || action.run());
         if self.orcha_ui.account_run.is_some() {
+            self.orcha_ui.account_change = change;
             self.start_working_notice("orcha-account", working);
         } else {
             self.show_failure("Could not start the account change, try again".to_owned());
@@ -27,8 +41,27 @@ impl ClientShellState {
         };
         self.end_working_notice("orcha-account");
         self.accounts.refresh_soon();
+        let change = self.orcha_ui.account_change.take();
         match result.unwrap_or_else(|lost| Err(lost.to_string())) {
-            Ok(message) => self.show_notice(message),
+            Ok(message) => {
+                if let Some((id, pane, provider)) = change {
+                    self.accounts.forget_pane_owners();
+                    if self.active_endpoint_id == ClientEndpointId::Local
+                        && self.snapshot.as_deref().is_some_and(|snapshot| {
+                            snapshot.focused_pane_id.as_deref() == Some(pane.as_str())
+                                && snapshot.agents.iter().any(|agent| {
+                                    agent.pane_id == pane
+                                        && agent.agent.as_deref().is_some_and(|actual| {
+                                            super::super::brutal::same_agent(actual, &provider)
+                                        })
+                                })
+                        })
+                    {
+                        self.accounts.mark_current(&id, std::time::Instant::now());
+                    }
+                }
+                self.show_notice(message);
+            }
             Err(error) => self.show_failure(format!("accounts: {error}")),
         }
         true
@@ -103,10 +136,14 @@ impl ClientShellState {
         };
         // only the other agents that are installed
         let installed = crate::orcha_handoff::targets(from.as_deref());
-        let targets: Vec<usize> = super::super::orcha_popup::HANDOFF_TARGETS
+        let targets: Vec<usize> = super::super::orcha_popup::handoff_targets()
             .iter()
             .enumerate()
-            .filter(|(_, (kind, _, _))| installed.contains(kind))
+            .filter(|(_, (kind, _))| {
+                installed
+                    .iter()
+                    .any(|installed| super::super::brutal::same_agent(installed, kind.id))
+            })
             .map(|(index, _)| index)
             .collect();
         if targets.is_empty() {
@@ -155,6 +192,7 @@ impl ClientShellState {
             return;
         }
         let mode = crate::orcha_handoff::Mode::parse(mode);
+        let source = pane.clone();
         self.orcha_ui.handoff_run = BackgroundJob::spawn("orcha-handoff", move || {
             let accounts = account
                 .as_deref()
@@ -169,42 +207,95 @@ impl ClientShellState {
                 crate::orcha_accounts::prepare_folder(account)?;
             }
             let folder = chosen.and_then(|account| account.dir.clone());
-            match folder {
-                Some(folder) => {
-                    crate::orcha_handoff::hand_off_to(&pane, &agent, mode, Some(&folder))
-                        .map(|(message, _)| message)
-                }
-                None => crate::orcha_handoff::hand_off(&pane, &agent, mode),
-            }
+            crate::orcha_handoff::hand_off_to(&pane, &agent, mode, folder.as_deref())
         });
         if self.orcha_ui.handoff_run.is_some() {
+            self.orcha_ui.handoff_source = Some(source);
             self.start_working_notice("orcha-handoff", "hand off: writing the notes…".to_owned());
         }
     }
 
-    /// The hand-off finished: say how it went. True when the screen changed.
+    /// The hand-off finished: say how it went, and mark the old pane's row
+    /// "→ continued". True when the screen changed.
     pub(in crate::client::shell) fn poll_handoff(&mut self) -> bool {
         let Some(result) = BackgroundJob::take_finished(&mut self.orcha_ui.handoff_run) else {
             return false;
         };
         self.end_working_notice("orcha-handoff");
+        let source = self.orcha_ui.handoff_source.take();
         match result.unwrap_or_else(|lost| Err(lost.to_string())) {
-            Ok(message) => self.show_notice(format!("hand off: {message}")),
+            Ok((message, pane)) => {
+                self.show_notice(format!("hand off: {message}"));
+                if let (Some(source), false) = (source, pane.is_empty()) {
+                    self.mark_continued(source, pane);
+                }
+            }
             Err(error) => self.show_failure(format!("hand off failed: {error}")),
         }
         true
     }
 
-    /// NEW: pick the agent and account for a new tab of the selected project.
-    pub(in crate::client::shell) fn open_new_agent_popup(&mut self) {
+    /// `old`'s chat goes on in `pane`: its row says so until it is focused
+    /// (after the focus left it once) or closed.
+    pub(in crate::client::shell) fn mark_continued(&mut self, old: String, pane: String) {
+        let focused = self
+            .snapshot
+            .as_deref()
+            .and_then(|snapshot| snapshot.focused_pane_id.as_deref())
+            == Some(old.as_str());
+        self.orcha_ui.continued.insert(
+            old,
+            super::super::ContinuedPane {
+                pane,
+                armed: !focused,
+            },
+        );
+    }
+
+    /// Drops "→ continued" marks whose old pane was focused (after the focus
+    /// left it once) or closed, or whose new pane is gone. True when one
+    /// went.
+    pub(in crate::client::shell) fn reconcile_continued(&mut self) -> bool {
+        if self.orcha_ui.continued.is_empty() {
+            return false;
+        }
         let Some(snapshot) = self.snapshot.as_deref() else {
+            return false;
+        };
+        let open: std::collections::HashSet<_> = snapshot
+            .panes
+            .iter()
+            .map(|pane| pane.pane_id.as_str())
+            .chain(snapshot.agents.iter().map(|agent| agent.pane_id.as_str()))
+            .collect();
+        let focused = snapshot.focused_pane_id.as_deref();
+        let before = self.orcha_ui.continued.len();
+        self.orcha_ui.continued.retain(|old, next| {
+            if !open.contains(old.as_str()) || !open.contains(next.pane.as_str()) {
+                return false;
+            }
+            if focused == Some(old.as_str()) {
+                return !next.armed;
+            }
+            next.armed = true;
+            true
+        });
+        before != self.orcha_ui.continued.len()
+    }
+
+    /// NEW: pick the agent and account for a new tab of the selected
+    /// project, or start a new project. With no project yet, NEW PROJECT.
+    pub(in crate::client::shell) fn open_new_agent_popup(&mut self) {
+        let Some(workspace) = self.snapshot.as_deref().and_then(|snapshot| {
+            snapshot
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.focused)
+        }) else {
+            self.open_new_workspace_popup();
             return;
         };
-        let Some(workspace) = snapshot
-            .workspaces
-            .iter()
-            .find(|workspace| workspace.focused)
-        else {
+        let Some(snapshot) = self.snapshot.as_deref() else {
             return;
         };
         let cwd = snapshot
@@ -306,24 +397,46 @@ impl ClientShellState {
 
     /// Low fuel: when the focused agent's account drops under
     /// `low_fuel_percent`, the header offers a switch to the account with
-    /// the most fuel. Returns true when the hint changed.
+    /// the most fuel; other agents whose account is that low are counted
+    /// in, so none runs dry unseen. Returns true when the hint changed.
     pub(in crate::client::shell) fn update_low_fuel_hint(&mut self) -> bool {
+        let orcha = &self.config.orcha;
         let hint = self.accounts.data().and_then(|accounts| {
-            let current = accounts.iter().find(|account| account.current)?;
-            let left = current.lowest()?;
-            if left >= self.config.orcha.low_fuel_percent {
-                return None;
-            }
+            // agents other than the focused one, on an account under the line
+            let others = self.snapshot.as_deref().map_or(0, |snapshot| {
+                let focused = snapshot.focused_pane_id.as_deref();
+                self.accounts
+                    .low_fuel_agents(snapshot, orcha)
+                    .into_iter()
+                    .filter(|(pane, mark)| mark.empty && Some(*pane) != focused)
+                    .count()
+            });
+            let more = match others {
+                0 => String::new(),
+                1 => " · 1 more agent low".to_owned(),
+                n => format!(" · {n} more agents low"),
+            };
+            let current = accounts.iter().find(|account| account.current);
+            let left = current
+                .and_then(|current| current.lowest())
+                .filter(|left| *left < orcha.low_fuel_percent);
+            let Some(left) = left else {
+                return match others {
+                    0 => None,
+                    1 => Some("1 agent low on fuel".to_owned()),
+                    n => Some(format!("{n} agents low on fuel")),
+                };
+            };
             let best = super::super::orcha_popup::best_account(accounts)
                 .and_then(|index| accounts.get(index))
                 .filter(|best| best.lowest().unwrap_or(0) > left);
             Some(match best {
                 Some(best) => format!(
-                    "FUEL {left}% · switch to {} ({}% left)",
+                    "FUEL {left}% · switch to {} ({}% left){more}",
                     best.label,
                     best.lowest().unwrap_or(0)
                 ),
-                None => format!("FUEL {left}% · hand off to another agent"),
+                None => format!("FUEL {left}% · hand off to another agent{more}"),
             })
         });
         let changed = hint != self.orcha_ui.low_fuel_hint;
@@ -334,7 +447,7 @@ impl ClientShellState {
     /// Running low: once per account, when the focused agent is between
     /// turns, offer where to continue. A notice, not a popup: the keys stay
     /// with the pane, so a prompt being typed cannot switch the account. A
-    /// click on it opens CONTINUE ON.
+    /// click on it opens ACCOUNTS.
     pub(in crate::client::shell) fn offer_continue_on_low_fuel(&mut self) -> bool {
         if self.orcha_ui.popup.is_some() || self.overlay.is_some() {
             return false;
@@ -476,7 +589,7 @@ impl ClientShellState {
             return true;
         };
         tracing::info!(left, to = %target.id, mode = orcha.switch_mode.as_str(), "orcha: moving the chat on by itself");
-        if target.kind != current_kind {
+        if !super::super::brutal::same_agent(&target.kind, &current_kind) {
             self.start_handoff(
                 pane,
                 target.kind.clone(),
@@ -496,7 +609,7 @@ impl ClientShellState {
                 pane: Some(pane),
             },
             crate::config::SwitchMode::Restart
-                if target.kind == "claude"
+                if super::super::brutal::same_agent(&target.kind, "claude")
                     && crate::orcha_accounts::restart_blocker(&target.id).is_none() =>
             {
                 AccountAction::Restart {

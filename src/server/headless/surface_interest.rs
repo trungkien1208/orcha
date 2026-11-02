@@ -19,6 +19,7 @@ impl HeadlessServer {
                 return None;
             }
             let changed = client.shell_surface_active != active;
+            client.shell_snapshot_cadence.invalidate();
             if active {
                 client.shell_projection_revision =
                     client.shell_projection_revision.saturating_add(1);

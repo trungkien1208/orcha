@@ -948,6 +948,27 @@ fn extended_length_path(path: &std::path::Path) -> std::io::Result<Vec<u16>> {
     Ok(extended)
 }
 
+/// Replaces a legacy state path's inherited access with owner-only access.
+pub(crate) fn restrict_private_state_permissions(path: &std::path::Path) -> std::io::Result<()> {
+    use windows_sys::Win32::Security::{
+        SetFileSecurityW, DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+    };
+    let mut descriptor = user_security_descriptor("GA", "")?;
+    let path = extended_length_path(path)?;
+    // SAFETY: the path and descriptor stay alive for the entire call.
+    if unsafe {
+        SetFileSecurityW(
+            path.as_ptr(),
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            descriptor.as_mut_ptr().cast(),
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 pub(crate) fn remote_private_temp_base() -> PathBuf {
     crate::config::state_dir().join("remote")
 }
@@ -1345,10 +1366,49 @@ pub(crate) fn orcha_tool_command_platform(
     )
 }
 
-pub(crate) fn orcha_installer_command_platform(
-    _unix_command: &str,
-    windows_command: &str,
-) -> std::process::Command {
+pub(crate) fn orcha_installer_script_platform() -> &'static str {
+    "install.ps1"
+}
+
+/// The pane shell line (PowerShell) that runs `command` with `name` set to
+/// `value`, or with `name` unset when there is no value.
+pub(crate) fn orcha_env_command_line(name: &str, value: Option<&str>, command: &str) -> String {
+    match value {
+        Some(value) => format!("$env:{name}='{}'; {command}", value.replace('\'', "''")),
+        None => format!("Remove-Item Env:{name} -ErrorAction SilentlyContinue; {command}"),
+    }
+}
+
+/// The pane shell line that runs `first`. Windows PowerShell 5 has no
+/// `||`, so the fallback is left out.
+pub(crate) fn orcha_fallback_command_line(first: &str, _fallback: &str) -> String {
+    first.to_owned()
+}
+
+/// The file names a command can have.
+pub(crate) fn orcha_command_file_names(command: &str) -> Vec<String> {
+    ["", ".exe", ".cmd", ".bat", ".ps1"]
+        .iter()
+        .map(|extension| format!("{command}{extension}"))
+        .collect()
+}
+
+/// Where agent installers put their commands before PATH knows them.
+pub(crate) fn orcha_agent_install_dirs(home: &std::path::Path) -> Vec<std::path::PathBuf> {
+    [
+        ".local/bin",
+        ".claude/local",
+        ".npm-global/bin",
+        ".bun/bin",
+        ".volta/bin",
+        ".cargo/bin",
+    ]
+    .iter()
+    .map(|dir| home.join(dir))
+    .collect()
+}
+
+pub(crate) fn orcha_installer_command_platform(script: &std::path::Path) -> std::process::Command {
     let mut process = std::process::Command::new("powershell.exe");
     process
         .args([
@@ -1356,9 +1416,9 @@ pub(crate) fn orcha_installer_command_platform(
             "-NoProfile",
             "-ExecutionPolicy",
             "Bypass",
-            "-Command",
+            "-File",
         ])
-        .arg(windows_command);
+        .arg(script);
     process
 }
 
@@ -1621,6 +1681,20 @@ pub(crate) struct StatusCommandGuard {
 
 impl StatusCommandGuard {
     pub(crate) fn new(child: &tokio::process::Child) -> std::io::Result<Self> {
+        Self::attach(child.id(), child.raw_handle())
+    }
+
+    /// Guards a blocking child started with `configure_status_command`.
+    pub(crate) fn for_child(child: &std::process::Child) -> std::io::Result<Self> {
+        use std::os::windows::io::AsRawHandle;
+
+        Self::attach(Some(child.id()), Some(child.as_raw_handle()))
+    }
+
+    fn attach(
+        process_id: Option<u32>,
+        process: Option<std::os::windows::io::RawHandle>,
+    ) -> std::io::Result<Self> {
         let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         if job.is_null() {
             return Err(std::io::Error::last_os_error());
@@ -1653,7 +1727,7 @@ impl StatusCommandGuard {
             return Err(error);
         }
 
-        let Some(process) = child.raw_handle() else {
+        let Some(process) = process else {
             unsafe {
                 CloseHandle(job);
             }
@@ -1668,7 +1742,7 @@ impl StatusCommandGuard {
             }
             return Err(error);
         }
-        if let Err(error) = resume_suspended_process(child.id()) {
+        if let Err(error) = resume_suspended_process(process_id) {
             unsafe {
                 CloseHandle(job);
             }

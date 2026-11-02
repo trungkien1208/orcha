@@ -13,19 +13,23 @@ pub(super) fn cache_dir() -> Option<PathBuf> {
     Some(home()?.join(".cache").join("orcha").join("limits"))
 }
 
+/// `orcha_state::now_secs` for the fuel math, which works in seconds as f64.
 pub(super) fn now_secs() -> f64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0.0, |since| since.as_secs_f64())
+    crate::orcha_state::now_secs() as f64
+}
+
+/// `~/x` (or `~\x`, or `~` alone) under `home`; any other path as it is.
+pub(crate) fn expand_home(path: &str, home: &Path) -> PathBuf {
+    match path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+        Some(rest) => home.join(rest),
+        None if path == "~" => home.to_path_buf(),
+        None => PathBuf::from(path),
+    }
 }
 
 pub(super) fn expand(path: &str) -> String {
-    let Some(home) = home() else {
-        return path.to_owned();
-    };
-    match path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
-        Some(rest) => home.join(rest).to_string_lossy().into_owned(),
-        None if path == "~" => home.to_string_lossy().into_owned(),
+    match home() {
+        Some(home) => expand_home(path, &home).to_string_lossy().into_owned(),
         None => path.to_owned(),
     }
 }

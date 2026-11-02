@@ -1,5 +1,6 @@
 //! Popup selection and keyboard/mouse navigation.
 
+use super::super::orcha_popup::{OrchaPopup, PopupTarget};
 use super::*;
 
 impl ClientShellState {
@@ -38,7 +39,8 @@ impl ClientShellState {
             }
             Some(super::super::orcha_popup::OrchaPopup::Broadcast { .. }) => 1,
             Some(super::super::orcha_popup::OrchaPopup::NewAgent { .. }) => {
-                self.accounts.data().map_or(0, <[_]>::len) + 1
+                self.accounts.data().map_or(0, <[_]>::len)
+                    + super::super::orcha_popup::NEW_AGENT_EXTRA_ROWS
             }
             Some(super::super::orcha_popup::OrchaPopup::Import { .. }) => {
                 self.orcha_ui.import_sources.len()
@@ -73,69 +75,21 @@ impl ClientShellState {
     }
 
     pub(super) fn popup_select(&mut self, index: usize) {
-        match &mut self.orcha_ui.popup {
-            Some(
-                super::super::orcha_popup::OrchaPopup::Accounts { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::AddAccount { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::RemoveAccount { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::ProjectIcon { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::Handoff { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::NewAgent { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::NewWorkspace { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::OpenWith { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::FoundAccounts { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::Update { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::PluginUpdate { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::PluginRemove { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::Checklist { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::RulesOffer { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::PluginOffer { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::SwitchAccount { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::Palette { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::Import { selected, .. },
-            ) => *selected = index,
-            Some(
-                super::super::orcha_popup::OrchaPopup::WhatsNew { .. }
-                | super::super::orcha_popup::OrchaPopup::Broadcast { .. }
-                | super::super::orcha_popup::OrchaPopup::FileView { .. },
-            ) => {}
-            Some(super::super::orcha_popup::OrchaPopup::Welcome(welcome)) => {
-                welcome.selected = index
-            }
-            None => {}
+        if let Some(selected) = self
+            .orcha_ui
+            .popup
+            .as_mut()
+            .and_then(super::super::orcha_popup::OrchaPopup::selected_mut)
+        {
+            *selected = index;
         }
     }
 
     pub(super) fn popup_selected(&self) -> usize {
-        match &self.orcha_ui.popup {
-            Some(
-                super::super::orcha_popup::OrchaPopup::Accounts { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::AddAccount { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::RemoveAccount { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::ProjectIcon { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::Handoff { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::NewAgent { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::NewWorkspace { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::OpenWith { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::FoundAccounts { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::Update { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::PluginUpdate { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::PluginRemove { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::Checklist { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::RulesOffer { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::PluginOffer { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::SwitchAccount { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::Palette { selected, .. }
-                | super::super::orcha_popup::OrchaPopup::Import { selected, .. },
-            ) => *selected,
-            Some(
-                super::super::orcha_popup::OrchaPopup::WhatsNew { .. }
-                | super::super::orcha_popup::OrchaPopup::Broadcast { .. }
-                | super::super::orcha_popup::OrchaPopup::FileView { .. },
-            ) => 0,
-            Some(super::super::orcha_popup::OrchaPopup::Welcome(welcome)) => welcome.selected,
-            None => 0,
-        }
+        self.orcha_ui
+            .popup
+            .as_ref()
+            .map_or(0, super::super::orcha_popup::OrchaPopup::selected)
     }
 
     /// ADD ACCOUNT: arrows move, letters fill the name row, esc goes back.
@@ -179,7 +133,7 @@ impl ClientShellState {
                     pane,
                 });
             }
-            KeyCode::Enter => self.popup_activate(selected, false, outcome),
+            KeyCode::Enter => self.popup_activate(PopupTarget::Row(selected), false, outcome),
             KeyCode::Char(ch) if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' => {
                 let mut typed = typed;
                 typed.push(ch.to_ascii_lowercase());
@@ -208,47 +162,17 @@ impl ClientShellState {
         {
             return;
         }
-        if matches!(
-            self.orcha_ui.popup,
-            Some(super::super::orcha_popup::OrchaPopup::Welcome(_))
-        ) {
-            self.route_welcome_key(key, outcome);
-            return;
-        }
-        if matches!(
-            self.orcha_ui.popup,
-            Some(super::super::orcha_popup::OrchaPopup::AddAccount { .. })
-        ) {
-            self.route_add_account_key(key, outcome);
-            return;
-        }
-        if matches!(
-            self.orcha_ui.popup,
-            Some(super::super::orcha_popup::OrchaPopup::Palette { .. })
-        ) {
-            self.route_palette_key(key, outcome);
-            return;
-        }
-        if matches!(
-            self.orcha_ui.popup,
-            Some(super::super::orcha_popup::OrchaPopup::Broadcast { .. })
-        ) {
-            self.route_broadcast_key(key, outcome);
-            return;
-        }
-        if matches!(
-            self.orcha_ui.popup,
-            Some(super::super::orcha_popup::OrchaPopup::ProjectIcon { .. })
-        ) {
-            self.route_project_icon_key(key, outcome);
-            return;
-        }
-        if matches!(
-            self.orcha_ui.popup,
-            Some(super::super::orcha_popup::OrchaPopup::FileView { .. })
-        ) {
-            self.route_file_view_key(key, outcome);
-            return;
+        // popups that handle their own keys
+        match self.orcha_ui.popup {
+            Some(OrchaPopup::Welcome(_)) => return self.route_welcome_key(key, outcome),
+            Some(OrchaPopup::AddAccount { .. }) => return self.route_add_account_key(key, outcome),
+            Some(OrchaPopup::Palette { .. }) => return self.route_palette_key(key, outcome),
+            Some(OrchaPopup::Broadcast { .. }) => return self.route_broadcast_key(key, outcome),
+            Some(OrchaPopup::ProjectIcon { .. }) => {
+                return self.route_project_icon_key(key, outcome)
+            }
+            Some(OrchaPopup::FileView { .. }) => return self.route_file_view_key(key, outcome),
+            _ => {}
         }
         outcome.repaint = true;
         let len = self.popup_len();
@@ -307,7 +231,7 @@ impl ClientShellState {
             }
             KeyCode::Enter => {
                 let alternate = key.modifiers.contains(KeyModifiers::ALT);
-                self.popup_activate(selected, alternate, outcome);
+                self.popup_activate(PopupTarget::Row(selected), alternate, outcome);
             }
             KeyCode::Char('p') | KeyCode::Char('P')
                 if matches!(
@@ -315,11 +239,7 @@ impl ClientShellState {
                     Some(super::super::orcha_popup::OrchaPopup::NewAgent { .. })
                 ) =>
             {
-                self.orcha_ui.popup = None;
-                self.record_binding(
-                    crate::input::KeybindMatch::Action(crate::input::KeybindAction::NewWorkspace),
-                    outcome,
-                );
+                self.open_new_workspace_popup();
             }
             KeyCode::Char('h') | KeyCode::Char('H')
                 if matches!(
@@ -445,12 +365,12 @@ impl ClientShellState {
             self.refresh_fuel();
             return;
         }
-        if let Some((_, index)) = hits
+        if let Some((_, target)) = hits
             .actions
             .iter()
             .find(|(rect, _)| super::super::contains(*rect, point))
         {
-            self.popup_activate(*index, false, outcome);
+            self.popup_activate(*target, false, outcome);
             return;
         }
         if let Some((_, index)) = hits

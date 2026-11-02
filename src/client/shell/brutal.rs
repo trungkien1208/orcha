@@ -40,6 +40,120 @@ pub(super) fn popup_panel(buffer: &mut Buffer, rect: Rect, fill: Color) {
     draw_box_shadow(buffer, rect, line, page);
 }
 
+/// A bright hue of the look, for things that keep their color.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Hue {
+    Yellow,
+    Green,
+    Blue,
+    Pink,
+}
+
+/// What the shell knows about an agent CLI: its color, its logo, its name,
+/// the titles that only name the program, and whether a chat can be handed
+/// to it. One row per agent in `AGENT_KINDS`; every lookup goes through
+/// `AgentKind::of`, which ignores case.
+#[derive(Debug)]
+pub(super) struct AgentKind {
+    /// herdr's agent id ("claude").
+    pub id: &'static str,
+    /// The name people know it by.
+    pub name: &'static str,
+    pub hue: Hue,
+    /// Its glyph in the Agent Icons font, when the font has one.
+    pub font_glyph: Option<&'static str>,
+    /// The symbol drawn without the font.
+    pub symbol: &'static str,
+    /// Terminal titles that only name the program (lowercase): they say
+    /// nothing about the task.
+    pub programs: &'static [&'static str],
+    /// A chat can be handed off to it.
+    pub handoff: bool,
+}
+
+pub(super) const AGENT_KINDS: [AgentKind; 4] = [
+    AgentKind {
+        id: "claude",
+        name: "Claude",
+        hue: Hue::Yellow,
+        font_glyph: Some("\u{100000}"),
+        symbol: "✳",
+        programs: &["claude", "claude code"],
+        handoff: true,
+    },
+    AgentKind {
+        id: "codex",
+        name: "Codex",
+        hue: Hue::Green,
+        font_glyph: Some("\u{100001}"),
+        symbol: "◎",
+        programs: &["codex"],
+        handoff: true,
+    },
+    AgentKind {
+        id: "cursor",
+        name: "Cursor",
+        hue: Hue::Blue,
+        font_glyph: Some("\u{100002}"),
+        symbol: "▲",
+        programs: &["cursor", "cursor agent"],
+        handoff: true,
+    },
+    AgentKind {
+        id: "gemini",
+        name: "Gemini",
+        hue: Hue::Pink,
+        font_glyph: None,
+        symbol: "✦",
+        programs: &["gemini"],
+        handoff: false,
+    },
+];
+
+/// The logo of an agent orcha does not know.
+pub(super) const UNKNOWN_AGENT_LOGO: &str = "▶";
+
+/// The orcha icon in the Agent Icons font, and its symbol without it.
+const ORCHA_GLYPH: &str = "\u{100003}";
+const ORCHA_SYMBOL: &str = "◉";
+
+/// Marks a tab name may start with besides the agents' logos: symbols
+/// earlier builds stored, the orcha icon and the unknown agent's logo.
+const OTHER_MARKS: [char; 9] = ['◇', '⚡', '◆', '◈', '◉', '◐', '✧', '▶', '●'];
+
+impl AgentKind {
+    /// The row for herdr's agent id or a display name, any case.
+    pub(super) fn of(agent: Option<&str>) -> Option<&'static AgentKind> {
+        let agent = agent?.trim();
+        AGENT_KINDS.iter().find(|kind| {
+            kind.id.eq_ignore_ascii_case(agent) || kind.name.eq_ignore_ascii_case(agent)
+        })
+    }
+
+    /// The logo: the font glyph when the font is installed, else the symbol.
+    pub(super) fn logo(&self, icon_font: bool) -> &'static str {
+        match self.font_glyph {
+            Some(glyph) if icon_font => glyph,
+            _ => self.symbol,
+        }
+    }
+}
+
+/// `title` only names an agent's program ("Claude Code", "codex").
+pub(super) fn names_only_a_program(title: &str) -> bool {
+    let title = title.trim();
+    AGENT_KINDS.iter().any(|kind| {
+        kind.programs
+            .iter()
+            .any(|program| title.eq_ignore_ascii_case(program))
+    })
+}
+
+/// Two agent ids name the same agent, whatever their case.
+pub(super) fn same_agent(a: &str, b: &str) -> bool {
+    a.trim().eq_ignore_ascii_case(b.trim())
+}
+
 /// The look's colors, resolved from a palette.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Brutal {
@@ -164,20 +278,26 @@ impl Brutal {
         }
     }
 
-    /// An agent's color: Claude yellow, Codex green, Cursor blue.
-    pub(super) fn agent(&self, agent: Option<&str>) -> Color {
-        let agent = agent.unwrap_or("");
-        if agent.eq_ignore_ascii_case("claude") {
-            self.yellow
-        } else if agent.eq_ignore_ascii_case("codex") {
-            self.green
-        } else if agent.eq_ignore_ascii_case("cursor") {
-            self.blue
-        } else if agent.eq_ignore_ascii_case("gemini") {
-            self.pink
-        } else {
-            self.card
+    /// A hue of the look.
+    pub(super) fn hue(&self, hue: Hue) -> Color {
+        match hue {
+            Hue::Yellow => self.yellow,
+            Hue::Green => self.green,
+            Hue::Blue => self.blue,
+            Hue::Pink => self.pink,
         }
+    }
+
+    /// An agent's own color (`AgentKind::hue`); None for an agent orcha
+    /// does not know.
+    pub(super) fn brand(&self, agent: Option<&str>) -> Option<Color> {
+        AgentKind::of(agent).map(|kind| self.hue(kind.hue))
+    }
+
+    /// An agent's color: Claude yellow, Codex green, Cursor blue, Gemini
+    /// pink; an unknown agent sits on card.
+    pub(super) fn agent(&self, agent: Option<&str>) -> Color {
+        self.brand(agent).unwrap_or(self.card)
     }
 
     /// `color` as text on `on`: on a light fill the bright state and
@@ -431,22 +551,12 @@ fn strip_leading_agent_mark(label: &str) -> String {
     let Some(mark) = trimmed.chars().next() else {
         return String::new();
     };
-    let owned = ('\u{100000}'..='\u{100003}').contains(&mark)
-        || matches!(
-            mark,
-            '✳' | '◎'
-                | '▲'
-                | '✦'
-                | '◇'
-                | '⚡'
-                | '◆'
-                | '◈'
-                | '◉'
-                | '◐'
-                | '✧'
-                | '▶'
-                | '●'
-        );
+    let is_mark = |text: &str| text.chars().eq(std::iter::once(mark));
+    let owned = is_mark(ORCHA_GLYPH)
+        || AGENT_KINDS
+            .iter()
+            .any(|kind| is_mark(kind.symbol) || kind.font_glyph.is_some_and(is_mark))
+        || OTHER_MARKS.contains(&mark);
     if owned {
         trimmed[mark.len_utf8()..].trim_start().to_owned()
     } else {
@@ -525,43 +635,45 @@ fn icon_font_file() -> bool {
 /// The orcha icon (a whale in a matcha bowl) from the icon font, else a symbol.
 pub(super) fn orcha_icon(icon_font: bool) -> &'static str {
     if icon_font {
-        "\u{100003}"
+        ORCHA_GLYPH
     } else {
-        "◉"
+        ORCHA_SYMBOL
     }
 }
 
 /// The agent's logo: the Agent Icons font glyph when installed, else a symbol.
 pub(super) fn agent_logo(agent: Option<&str>, icon_font: bool) -> &'static str {
-    let agent = agent.unwrap_or("");
-    if agent.eq_ignore_ascii_case("claude") {
-        if icon_font {
-            "\u{100000}"
-        } else {
-            "✳"
-        }
-    } else if agent.eq_ignore_ascii_case("codex") {
-        if icon_font {
-            "\u{100001}"
-        } else {
-            "◎"
-        }
-    } else if agent.eq_ignore_ascii_case("cursor") {
-        if icon_font {
-            "\u{100002}"
-        } else {
-            "▲"
-        }
-    } else if agent.eq_ignore_ascii_case("gemini") {
-        "✦"
-    } else {
-        "▶"
-    }
+    AgentKind::of(agent).map_or(UNKNOWN_AGENT_LOGO, |kind| kind.logo(icon_font))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_table_answers_for_every_agent_in_any_case() {
+        let t = Brutal::new(&Palette::brutal());
+        assert_eq!(t.agent(Some("CLAUDE")), t.yellow);
+        assert_eq!(t.agent(Some("Codex")), t.green);
+        assert_eq!(t.agent(Some("cursor")), t.blue);
+        assert_eq!(t.agent(Some("gemini")), t.pink);
+        assert_eq!(t.agent(Some("aider")), t.card);
+        assert_eq!(t.brand(Some("aider")), None);
+        assert_eq!(agent_logo(Some("Claude"), true), "\u{100000}");
+        assert_eq!(agent_logo(Some("claude"), false), "✳");
+        assert_eq!(agent_logo(Some("gemini"), true), "✦");
+        assert_eq!(agent_logo(None, false), UNKNOWN_AGENT_LOGO);
+        assert!(names_only_a_program("Claude Code"));
+        assert!(names_only_a_program(" cursor agent "));
+        assert!(!names_only_a_program("fix the login page"));
+        assert!(same_agent("Claude", "claude"));
+        let handoff: Vec<&str> = AGENT_KINDS
+            .iter()
+            .filter(|kind| kind.handoff)
+            .map(|kind| kind.id)
+            .collect();
+        assert_eq!(handoff, ["claude", "codex", "cursor"]);
+    }
 
     #[test]
     fn a_stored_logo_is_not_part_of_the_name() {

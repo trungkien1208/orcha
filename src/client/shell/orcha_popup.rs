@@ -55,7 +55,7 @@ pub(crate) enum OrchaPopup {
         pane: Option<String>,
     },
     /// Continue `pane`'s conversation with another agent.
-    /// `targets` index `HANDOFF_TARGETS`: the other agents installed.
+    /// `targets` index `handoff_targets()`: the other agents installed.
     Handoff {
         selected: usize,
         pane: String,
@@ -213,6 +213,46 @@ impl OpenChoice {
     }
 }
 
+/// What an action in a popup acts on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PopupTarget {
+    /// A list row's own action: its button or its check (`index` is the
+    /// row's, as in `PopupHits::rows`). ↵ acts on the cursor's row.
+    Row(usize),
+    /// A button outside the list.
+    Button(PopupButton),
+    /// The check under the list (OPEN WITH: always open this way).
+    Check,
+}
+
+/// The buttons a popup can have outside its list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PopupButton {
+    /// The one primary action: IMPORT n under a checked list, GOT IT, SEND.
+    Primary,
+    /// The setup's steps.
+    Next,
+    Back,
+    Skip,
+}
+
+/// A row target is its row's index: `PopupTarget::Row(2) == 2`.
+impl PartialEq<usize> for PopupTarget {
+    fn eq(&self, index: &usize) -> bool {
+        *self == Self::Row(*index)
+    }
+}
+
+impl PopupTarget {
+    /// The row a target acts on, when it is a row's action.
+    pub(super) fn row(self) -> Option<usize> {
+        match self {
+            Self::Row(index) => Some(index),
+            Self::Button(_) | Self::Check => None,
+        }
+    }
+}
+
 /// Click targets of the open popup.
 #[derive(Debug, Default, Clone)]
 pub(super) struct PopupHits {
@@ -220,32 +260,109 @@ pub(super) struct PopupHits {
     pub close: Rect,
     /// (row, index)
     pub rows: Vec<(Rect, usize)>,
-    /// (button, index)
-    pub actions: Vec<(Rect, usize)>,
+    /// (button or check, what it acts on)
+    pub actions: Vec<(Rect, PopupTarget)>,
     /// The footer's extra action on the right (accounts: refresh).
     pub extra: Rect,
+}
+
+impl OrchaPopup {
+    /// The keyboard cursor's row; 0 for popups without a list.
+    pub(super) fn selected(&self) -> usize {
+        match self {
+            Self::Welcome(welcome) => welcome.selected,
+            Self::WhatsNew { .. } | Self::Broadcast { .. } | Self::FileView { .. } => 0,
+            Self::Accounts { selected, .. }
+            | Self::AddAccount { selected, .. }
+            | Self::RemoveAccount { selected, .. }
+            | Self::ProjectIcon { selected, .. }
+            | Self::Handoff { selected, .. }
+            | Self::NewAgent { selected, .. }
+            | Self::NewWorkspace { selected, .. }
+            | Self::OpenWith { selected, .. }
+            | Self::FoundAccounts { selected, .. }
+            | Self::Update { selected, .. }
+            | Self::PluginUpdate { selected, .. }
+            | Self::PluginRemove { selected, .. }
+            | Self::Checklist { selected, .. }
+            | Self::RulesOffer { selected, .. }
+            | Self::PluginOffer { selected, .. }
+            | Self::SwitchAccount { selected, .. }
+            | Self::Palette { selected, .. }
+            | Self::Import { selected, .. } => *selected,
+        }
+    }
+
+    /// The keyboard cursor, for popups with a list.
+    pub(super) fn selected_mut(&mut self) -> Option<&mut usize> {
+        match self {
+            Self::Welcome(welcome) => Some(&mut welcome.selected),
+            Self::WhatsNew { .. } | Self::Broadcast { .. } | Self::FileView { .. } => None,
+            Self::Accounts { selected, .. }
+            | Self::AddAccount { selected, .. }
+            | Self::RemoveAccount { selected, .. }
+            | Self::ProjectIcon { selected, .. }
+            | Self::Handoff { selected, .. }
+            | Self::NewAgent { selected, .. }
+            | Self::NewWorkspace { selected, .. }
+            | Self::OpenWith { selected, .. }
+            | Self::FoundAccounts { selected, .. }
+            | Self::Update { selected, .. }
+            | Self::PluginUpdate { selected, .. }
+            | Self::PluginRemove { selected, .. }
+            | Self::Checklist { selected, .. }
+            | Self::RulesOffer { selected, .. }
+            | Self::PluginOffer { selected, .. }
+            | Self::SwitchAccount { selected, .. }
+            | Self::Palette { selected, .. }
+            | Self::Import { selected, .. } => Some(selected),
+        }
+    }
 }
 
 /// NEW PROJECT: current project, browse, enter a path, new worktree.
 pub(super) const NEW_WORKSPACE_ROWS: usize = 4;
 
-/// (agent kind, mode, label)
-pub(super) const HANDOFF_TARGETS: [(&str, &str, &str); 6] = [
-    ("codex", "full", "Codex · whole conversation"),
-    ("codex", "summary", "Codex · summarize first, then continue"),
-    ("claude", "full", "Claude · whole conversation"),
-    (
-        "claude",
-        "summary",
-        "Claude · summarize first, then continue",
-    ),
-    ("cursor", "full", "Cursor · whole conversation"),
-    (
-        "cursor",
-        "summary",
-        "Cursor · summarize first, then continue",
-    ),
-];
+/// NEW AGENT's rows past the accounts: a plain shell, then a new project.
+pub(super) const NEW_AGENT_EXTRA_ROWS: usize = 2;
+
+/// How a hand-off carries the chat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum HandoffMode {
+    /// The whole conversation is replayed.
+    Full,
+    /// A short summary opens the new chat.
+    Summary,
+}
+
+impl HandoffMode {
+    /// The mode's name for `orcha_handoff` and `[orcha] handoff_command`.
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Summary => "summary",
+        }
+    }
+}
+
+/// Every hand-off HAND OFF can offer: each agent that takes one
+/// (`AgentKind::handoff`), with the whole conversation or a summary first.
+/// `OrchaPopup::Handoff::targets` index this list.
+pub(super) fn handoff_targets() -> Vec<(&'static brutal::AgentKind, HandoffMode)> {
+    brutal::AGENT_KINDS
+        .iter()
+        .filter(|kind| kind.handoff)
+        .flat_map(|kind| [(kind, HandoffMode::Full), (kind, HandoffMode::Summary)])
+        .collect()
+}
+
+/// "Codex · whole conversation".
+pub(super) fn handoff_label(kind: &brutal::AgentKind, mode: HandoffMode) -> String {
+    match mode {
+        HandoffMode::Full => format!("{} · whole conversation", kind.name),
+        HandoffMode::Summary => format!("{} · summarize first, then continue", kind.name),
+    }
+}
 
 /// Draws the open popup over the composed frame.
 pub(super) fn render_popup(
@@ -299,7 +416,14 @@ pub(super) fn render_popup(
             let _ = render_remove_account(buffer, *selected, label, &t, &mut hits);
         }
         OrchaPopup::Palette { selected, query } => {
-            let _ = super::orcha_palette::render(buffer, *selected, query, &t, &mut hits);
+            let _ = super::orcha_palette::render(
+                buffer,
+                *selected,
+                query,
+                &config.keybinds,
+                &t,
+                &mut hits,
+            );
         }
         OrchaPopup::Broadcast { typed, panes } => {
             let _ = super::orcha_palette::render_broadcast(
