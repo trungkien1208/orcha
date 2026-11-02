@@ -950,6 +950,7 @@ fn extended_length_path(path: &std::path::Path) -> std::io::Result<Vec<u16>> {
 
 /// Replaces a legacy state path's inherited access with owner-only access.
 pub(crate) fn restrict_private_state_permissions(path: &std::path::Path) -> std::io::Result<()> {
+    use interprocess::os::windows::security_descriptor::AsSecurityDescriptorMut as _;
     use windows_sys::Win32::Security::{
         SetFileSecurityW, DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
     };
@@ -960,7 +961,7 @@ pub(crate) fn restrict_private_state_permissions(path: &std::path::Path) -> std:
         SetFileSecurityW(
             path.as_ptr(),
             DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            descriptor.as_mut_ptr().cast(),
+            descriptor.as_sd_mut(),
         )
     } == 0
     {
