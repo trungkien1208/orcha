@@ -2132,20 +2132,30 @@ impl App {
             return Err(pane_not_found(id, &target.pane_id));
         };
         let workspace_id = self.public_workspace_id(ws_idx);
-        let layout_update_target = self.layout_update_target_after_pane_removal(ws_idx, pane_id);
         if self.state.close_pane_would_close_workspace(ws_idx, pane_id) {
-            self.require_restored_group_close_ready(
-                &id,
-                &self.state.workspace_close_indices(ws_idx),
-            )?;
-            if self.state.confirm_implicit_worktree_group_close(ws_idx) {
-                return Err(encode_error(
-                    id,
-                    "confirmation_required",
-                    "closing this pane would close a worktree group",
-                ));
+            // orcha: a project outlives its panes. Open a fresh shell in the
+            // project folder first, so closing the last pane keeps the project.
+            let cwd = self
+                .seed_cwd_from_workspace(ws_idx)
+                .map(|path| path.to_string_lossy().into_owned());
+            let split = self.handle_pane_split(
+                id.clone(),
+                PaneSplitParams {
+                    workspace_id: None,
+                    target_pane_id: Some(target.pane_id.clone()),
+                    direction: crate::api::schema::SplitDirection::Right,
+                    ratio: None,
+                    cwd,
+                    focus: true,
+                    right_click: crate::api::schema::PaneRightClickTarget::Herdr,
+                    env: std::collections::HashMap::new(),
+                },
+            );
+            if self.state.close_pane_would_close_workspace(ws_idx, pane_id) {
+                return Err(split);
             }
         }
+        let layout_update_target = self.layout_update_target_after_pane_removal(ws_idx, pane_id);
         let workspace_snapshot = self.workspace_info(ws_idx);
         let terminal_id = self.state.terminal_id_for_pane(ws_idx, pane_id);
         let should_close_workspace = {
@@ -3222,24 +3232,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn api_pane_close_closes_linked_worktree_workspace_only() {
-        let mut app = app_with_linked_worktree();
-        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
-        let public_pane_id = app.public_pane_id(0, pane_id).unwrap();
-
-        let response = app.handle_pane_close(
-            "req".into(),
-            PaneTarget {
-                pane_id: public_pane_id,
-            },
-        );
-
-        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
-        assert_eq!(success.id, "req");
-        assert!(app.state.workspaces.is_empty());
     }
 
     #[test]

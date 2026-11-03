@@ -3142,68 +3142,71 @@ mod tests {
         assert_eq!(app.state.workspaces[0].display_name(), "api-pane-close");
     }
 
-    #[test]
-    fn pane_close_request_closes_workspace_when_it_removes_the_last_pane() {
-        let mut app = test_app();
-        let workspace = Workspace::test_new("api-pane-close-last");
-        app.state.workspaces = vec![workspace];
-        app.state.ensure_test_terminals();
-        app.state.active = Some(0);
-        app.state.selected = 0;
+    #[tokio::test]
+    async fn pane_close_request_keeps_the_project_when_it_removes_the_last_pane() {
+        let _guard = config_env_lock().lock().unwrap();
+        let original_shell = std::env::var_os("SHELL");
+        std::env::set_var("SHELL", exiting_test_command());
 
-        let target_pane = app.state.workspaces[0].tabs[0].root_pane;
-        let target_pane_id = app.pane_info(0, target_pane).unwrap().pane_id;
+        // A plain project, and the parent of a worktree group.
+        for grouped in [false, true] {
+            let mut app = test_app();
+            let mut parent = Workspace::test_new("api-pane-close-last");
+            let mut workspaces = Vec::new();
+            if grouped {
+                parent.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+                    key: "repo-key".into(),
+                    label: "herdr".into(),
+                    repo_root: "/repo/herdr".into(),
+                    checkout_path: "/repo/herdr".into(),
+                    is_linked_worktree: false,
+                });
+                let mut child = Workspace::test_new("api-pane-close-child");
+                child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
+                    key: "repo-key".into(),
+                    label: "herdr".into(),
+                    repo_root: "/repo/herdr".into(),
+                    checkout_path: "/repo/herdr-child".into(),
+                    is_linked_worktree: true,
+                });
+                workspaces.push(parent);
+                workspaces.push(child);
+            } else {
+                workspaces.push(parent);
+            }
+            let workspace_count = workspaces.len();
+            app.state.workspaces = workspaces;
+            app.state.ensure_test_terminals();
+            app.state.active = Some(0);
+            app.state.selected = 0;
 
-        let response = app.handle_api_request(crate::api::schema::Request {
-            id: "req_pane_close_last".into(),
-            method: crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
-                pane_id: target_pane_id,
-            }),
-        });
-        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+            let target_pane = app.state.workspaces[0].tabs[0].root_pane;
+            let target_pane_id = app.pane_info(0, target_pane).unwrap().pane_id;
 
-        assert_eq!(response["result"]["type"], "ok");
-        assert!(app.state.workspaces.is_empty());
-    }
+            let response = app.handle_api_request(crate::api::schema::Request {
+                id: "req_pane_close_last".into(),
+                method: crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
+                    pane_id: target_pane_id,
+                }),
+            });
+            let response: serde_json::Value = serde_json::from_str(&response).unwrap();
 
-    #[test]
-    fn pane_close_request_requires_confirmation_before_closing_parent_worktree_group() {
-        let mut app = test_app();
-        let mut parent = Workspace::test_new("api-pane-close-parent");
-        parent.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
-            key: "repo-key".into(),
-            label: "herdr".into(),
-            repo_root: "/repo/herdr".into(),
-            checkout_path: "/repo/herdr".into(),
-            is_linked_worktree: false,
-        });
-        let mut child = Workspace::test_new("api-pane-close-child");
-        child.worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
-            key: "repo-key".into(),
-            label: "herdr".into(),
-            repo_root: "/repo/herdr".into(),
-            checkout_path: "/repo/herdr-child".into(),
-            is_linked_worktree: true,
-        });
-        app.state.workspaces = vec![parent, child];
-        app.state.ensure_test_terminals();
-        app.state.active = Some(0);
-        app.state.selected = 1;
+            assert_eq!(response["result"]["type"], "ok");
+            assert_eq!(app.state.workspaces.len(), workspace_count);
+            let workspace = &app.state.workspaces[0];
+            assert_eq!(workspace.display_name(), "api-pane-close-last");
+            assert_eq!(workspace.tabs.len(), 1);
+            assert_eq!(workspace.tabs[0].layout.pane_count(), 1);
+            let fresh = workspace.focused_pane_id().unwrap();
+            assert_ne!(fresh, target_pane);
+            assert!(workspace.find_tab_index_for_pane(target_pane).is_none());
+            app.state.assert_invariants_for_test();
+        }
 
-        let target_pane = app.state.workspaces[0].tabs[0].root_pane;
-        let target_pane_id = app.pane_info(0, target_pane).unwrap().pane_id;
-
-        let response = app.handle_api_request(crate::api::schema::Request {
-            id: "req_pane_close_parent_group".into(),
-            method: crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
-                pane_id: target_pane_id,
-            }),
-        });
-        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
-
-        assert_eq!(response["error"]["code"], "confirmation_required");
-        assert_eq!(app.state.selected, 1);
-        assert_eq!(app.state.workspaces.len(), 2);
+        match original_shell {
+            Some(value) => std::env::set_var("SHELL", value),
+            None => std::env::remove_var("SHELL"),
+        }
     }
 
     #[test]

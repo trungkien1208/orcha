@@ -596,7 +596,8 @@ mod tests {
 
     #[test]
     fn restored_group_close_waits_for_every_membership_before_mutating_state() {
-        for method in ["workspace.close", "pane.close", "tab.close", "group"] {
+        // pane.close keeps the project: it opens a fresh shell instead.
+        for method in ["workspace.close", "tab.close", "group"] {
             for pending_index in [0, 2] {
                 for valid in [false, true] {
                     let mut app = app_with_worktree_group();
@@ -615,12 +616,10 @@ mod tests {
                     let pending_id = app.state.workspaces[pending_index].id.clone();
                     app.pending_restored_worktree_spaces
                         .push((pending_id.clone(), expected.clone()));
-                    let parent_pane = app.state.workspaces[0].tabs[0].root_pane;
                     let request = serde_json::json!({
                         "id": "req",
                         "method": if method == "group" { "workspace.close" } else { method },
                         "params": match method {
-                            "pane.close" => serde_json::json!({"pane_id": app.public_pane_id(0, parent_pane).unwrap()}),
                             "tab.close" => serde_json::json!({"tab_id": app.public_tab_id(0, 0).unwrap()}),
                             _ => serde_json::json!({"workspace_id": app.public_workspace_id(0), "close_group": method == "group"}),
                         }
@@ -714,7 +713,8 @@ mod tests {
 
     #[test]
     fn duplicate_repo_parents_close_independently_unless_group_is_explicit() {
-        for method in ["workspace.close", "pane.close", "tab.close", "group"] {
+        // pane.close keeps the project: it opens a fresh shell instead.
+        for method in ["workspace.close", "tab.close", "group"] {
             for target_index in [1, 3] {
                 let mut app = app_with_worktree_group();
                 let parent = app.state.workspaces.remove(0);
@@ -753,7 +753,6 @@ mod tests {
                     "id": "req",
                     "method": if method == "group" { "workspace.close" } else { method },
                     "params": match method {
-                        "pane.close" => serde_json::json!({"pane_id": app.public_pane_id(target_index, target_pane).unwrap()}),
                         "tab.close" => serde_json::json!({"tab_id": app.public_tab_id(target_index, 0).unwrap()}),
                         _ => serde_json::json!({"workspace_id": target_id, "close_group": method == "group"}),
                     }
