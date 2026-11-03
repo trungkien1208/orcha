@@ -60,3 +60,60 @@ automatically. To inspect an existing session without stopping its agents:
 env -u HERDR_SOCKET_PATH -u HERDR_CLIENT_SOCKET_PATH ORCHA_APP=1 \
     target/debug/herdr --session orcha-dev status
 ```
+
+## Trying a build on your own orcha before a release
+
+`scripts/dev-orcha.sh` runs a separate `orcha-dev` session with its own
+config, so it never touches your everyday orcha. To live on a build for a
+while before releasing it, put it in place of the installed one instead:
+
+```sh
+# 1. build from the working tree (one or two cargo builds at a time on 16 GB)
+env -u ORCHA_APP -u HERDR_SOCKET_PATH -u HERDR_CLIENT_SOCKET_PATH \
+    CARGO_BUILD_JOBS=2 cargo build --release --locked
+
+# 2. keep the installed one, then swap in the build (copy, then rename:
+#    a new file, so the running orcha and macOS's signature check are safe)
+cp ~/.local/bin/orcha ~/.local/bin/orcha.before-test
+cp target/release/herdr ~/.local/bin/orcha.new
+mv ~/.local/bin/orcha.new ~/.local/bin/orcha
+
+# 3. move the background server to the new binary without stopping agents,
+#    then open orcha again
+orcha server live-handoff --import-exe ~/.local/bin/orcha
+orcha
+```
+
+The build reports the version in `src/orcha_app.rs` (`ORCHA_VERSION`), so
+`orcha --version` looks unchanged until the release bumps it. Features that
+need new data from the server (for example pane memory) only show up after
+step 3.
+
+To go back:
+
+```sh
+mv ~/.local/bin/orcha.before-test ~/.local/bin/orcha
+orcha server live-handoff --import-exe ~/.local/bin/orcha
+```
+
+If the hand-off fails, `orcha server stop` and `orcha` start a fresh server
+on the binary in place. That stops running agents; they resume from their
+saved sessions where the agent supports it.
+
+## Cutting a release
+
+```sh
+just orcha-release 0.14.0
+```
+
+It needs a clean tree on `orcha`, in sync with origin. It writes
+`docs/orcha/releases/<version>.md` from the commit subjects when missing and
+opens it to tidy, sets `ORCHA_VERSION`, commits, tags `orcha-<version>`,
+pushes and follows the GitHub build (Mac arm64 + x86_64, Windows zip). Flags:
+`--test` also runs the tests, `--no-watch` skips following CI.
+
+The Mac jobs often get cancelled for runner capacity. Re-run only those:
+
+```sh
+gh run rerun <run-id> --failed
+```
