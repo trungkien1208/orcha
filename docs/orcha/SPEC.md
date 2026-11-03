@@ -294,6 +294,32 @@ create a worktree and branch from a task id (`#42` → `feature/42-<slug>`).
 - Keybindings.
 - User commands in MENU ("run tests", "deploy staging"), global or per project.
 
+### 3.12 Pane health — ✅ (native, `src/orcha_usage.rs`)
+
+- Every 4 s, off the input path and only for the local server: one
+  `pane.list` (its `shell_pid`, `foreground_cwd`), one pass over the
+  process table, the new end of each agent's conversation file, and each
+  agent folder's git `HEAD` (files only, no `git` process).
+- Memory: the pane's shell and everything under it (macOS: physical
+  footprint, as Activity Monitor shows it; Linux: resident size; Windows:
+  not yet), plus the heaviest process once the pane is heavy, unless it is
+  the agent itself (named by its folder when the file is a version number,
+  as Claude Code's is). Only the status bar names it. orcha itself
+  is its server plus the window.
+- Context: Claude Code's latest main-chat reply usage (input, cache and
+  output tokens; a compaction resets it), Codex's last `token_count` with
+  its window. Claude Code writes no window, so it shows tokens.
+- Quiet time: since the agent last wrote to its conversation file, shown
+  next to its state when it isn't working (`idle 12m`).
+- Sidebar: panes as a tree under their project (`├`/`└`, the open pane
+  `┣━` in yellow). Under each agent: model and branch (`◇` in a linked
+  worktree; the project's ↑↓± counts only when the agent is on the
+  project's branch), then context and RAM. Numbers bold: green fine, yellow
+  from 60% context (150k tokens without a window) or 1 GB, red from 85% or
+  2 GB.
+- Status bar: a face for the open pane (🙂 / 😐 / 😵), "this pane: <problem>
+  · <number>", and "orcha total X of Y" on the right.
+
 ### 3.11 Standalone app — ✅
 
 - Binary and command `orcha`; config in `~/.config/orcha/`, sessions in

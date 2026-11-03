@@ -132,13 +132,14 @@ impl ClientShellState {
             .find(|(rect, _)| super::contains(*rect, point))
             .map(|(_, id)| id.clone())
         {
-            let focused = self.snapshot.as_deref().is_some_and(|snapshot| {
-                snapshot
-                    .workspaces
-                    .iter()
-                    .any(|workspace| workspace.workspace_id == id && workspace.focused)
+            let by_default = self.snapshot.as_deref().is_some_and(|snapshot| {
+                super::sidebar_tree::project_busy(snapshot, &id)
+                    || snapshot
+                        .workspaces
+                        .iter()
+                        .any(|workspace| workspace.workspace_id == id && workspace.focused)
             });
-            let expanded = self.orcha_ui.project_expanded(&id, focused);
+            let expanded = self.orcha_ui.project_expanded(&id, by_default);
             self.orcha_ui.set_project_expanded(&id, !expanded);
             self.persist_chrome_preferences(outcome);
             outcome.repaint = true;

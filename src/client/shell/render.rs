@@ -436,6 +436,7 @@ pub(super) fn render_shell(
             snapshot,
             config,
             state.fuel,
+            state.orcha_ui.usage.as_ref(),
             &mut hits,
         );
     }

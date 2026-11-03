@@ -312,6 +312,30 @@ impl Brutal {
         readable(color, on, 3.0)
     }
 
+    /// A pane's memory: nothing while it is unremarkable, yellow from
+    /// `HEAVY_MEMORY`, red from twice that.
+    pub(super) fn memory(&self, bytes: u64) -> Option<Color> {
+        let heavy = crate::orcha_usage::HEAVY_MEMORY;
+        if bytes >= heavy.saturating_mul(2) {
+            Some(self.red)
+        } else if bytes >= heavy {
+            Some(self.yellow)
+        } else {
+            None
+        }
+    }
+
+    /// How full a context is: green, yellow from 60%, red from 85%.
+    pub(super) fn context(&self, percent: u64) -> Color {
+        if percent >= crate::orcha_usage::FULL_CONTEXT_PERCENT {
+            self.red
+        } else if percent >= crate::orcha_usage::HEAVY_CONTEXT_PERCENT {
+            self.yellow
+        } else {
+            self.green
+        }
+    }
+
     /// A state's color: yellow working, green done, red needs you.
     pub(super) fn state(&self, status: crate::api::schema::AgentStatus) -> Option<Color> {
         use crate::api::schema::AgentStatus;

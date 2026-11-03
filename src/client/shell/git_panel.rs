@@ -326,6 +326,7 @@ impl ClientShellState {
         repaint |= self.poll_handoff();
         repaint |= self.poll_account_action();
         repaint |= self.poll_update();
+        repaint |= self.poll_usage();
         self.forget_refilled_accounts();
         repaint |= self.act_on_low_fuel();
         repaint |= self.offer_project_rules();

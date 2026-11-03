@@ -240,13 +240,15 @@ pub(crate) fn render_tab_bar(
 /// bottom. What you are working on sits on the left (the task with its `#id`
 /// as a pink chip, its state after `●` in green, changed files muted); the
 /// ambient facts (timers, clock) sit on the right, the clock in bold. FUEL
-/// joins them when it is placed in the status bar.
+/// joins them when it is placed in the status bar. How the open pane is
+/// doing follows the left group; orcha's total RAM leads the right one.
 pub(crate) fn render_status_bar(
     buffer: &mut Buffer,
     outer: Rect,
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     fuel: Option<&super::super::accounts::Account>,
+    pane_usage: Option<&crate::orcha_usage::Usage>,
     hits: &mut ShellHitMap,
 ) {
     let t = super::super::brutal::Brutal::new(&config.palette);
@@ -348,6 +350,13 @@ pub(crate) fn render_status_bar(
         }
     }
 
+    if let Some(pane_usage) = pane_usage {
+        if !left.is_empty() {
+            x = x.saturating_add(3);
+        }
+        x = render_pane_usage(buffer, x, area, snapshot, pane_usage, &t);
+    }
+
     // right group, laid out from the right edge
     let fuel_text = fuel
         .filter(|_| config.orcha.fuel == crate::config::FuelPlacement::StatusBar)
@@ -378,13 +387,28 @@ pub(crate) fn render_status_bar(
                 })
                 .sum::<u16>()
     });
+    // orcha's total RAM leads the right group
+    let total = pane_usage
+        .map(|usage| orcha_total(usage, &t))
+        .unwrap_or_default();
+    let total_width: u16 = total
+        .iter()
+        .map(|(text, _)| display_width(text))
+        .sum::<u16>()
+        + if total.is_empty() { 0 } else { 2 };
     let joined = right.join("  ");
-    let width = display_width(&joined) + fuel_width;
+    let width = display_width(&joined) + fuel_width + total_width;
     let start = area
         .right()
         .saturating_sub(width.saturating_add(2))
         .max(x.saturating_add(2));
     let mut cx = start;
+    if !total.is_empty() {
+        for (text, style) in &total {
+            cx = put_segment(buffer, cx, area.y, area.right(), text, *style);
+        }
+        cx = cx.saturating_add(2);
+    }
     if let Some((who, windows)) = fuel_text {
         // ▴ puts FUEL back in the panel
         let show = Rect::new(cx, area.y, 6, 1);
@@ -445,6 +469,103 @@ pub(crate) fn render_status_bar(
         };
         cx = put_segment(buffer, cx, area.y, area.right(), part, style);
     }
+}
+
+/// The open pane's health in one glance: a face and a sentence that says
+/// it is about this pane. Its numbers live in the sidebar; only the one
+/// that is the problem shows here. Returns the x after it.
+fn render_pane_usage(
+    buffer: &mut Buffer,
+    mut x: u16,
+    area: Rect,
+    snapshot: &ClientShellSnapshot,
+    usage: &crate::orcha_usage::Usage,
+    t: &super::super::brutal::Brutal,
+) -> u16 {
+    for (text, style) in pane_health(snapshot, usage, t) {
+        x = put_segment(buffer, x, area.y, area.right(), &text, style);
+    }
+    x
+}
+
+/// A card in the bar: its color behind dark text, a space either side.
+fn card(
+    text: &str,
+    fill: ratatui::style::Color,
+    t: &super::super::brutal::Brutal,
+) -> (String, Style) {
+    (
+        format!(" {text} "),
+        Style::default()
+            .fg(t.chip_text)
+            .bg(fill)
+            .add_modifier(Modifier::BOLD),
+    )
+}
+
+/// `render_pane_usage`'s card: green "🙂 this pane is fine", yellow
+/// "😐 this pane: context filling up · 72%", red "😵 this pane: very heavy
+/// on RAM · xcodebuild 2.1 GB".
+fn pane_health(
+    snapshot: &ClientShellSnapshot,
+    usage: &crate::orcha_usage::Usage,
+    t: &super::super::brutal::Brutal,
+) -> Vec<(String, Style)> {
+    use crate::orcha_usage::{bytes, tokens, Health};
+    let Some(pane) = snapshot
+        .focused_pane_id
+        .as_deref()
+        .and_then(|focused| usage.panes.get(focused))
+    else {
+        return Vec::new();
+    };
+    let (face, reason, fill) = match pane.health() {
+        Health::Good => return vec![card("🙂 this pane is fine", t.green, t)],
+        Health::Watch(reason) => ("😐", reason, t.yellow),
+        Health::Trouble(reason) => ("😵", reason, t.red),
+    };
+    // the number behind the verdict
+    let detail = if reason.contains("RAM") {
+        match &pane.heaviest {
+            Some((name, heaviest)) => format!("{name} {}", bytes(*heaviest)),
+            None => bytes(pane.memory.unwrap_or(0)),
+        }
+    } else {
+        pane.context
+            .map_or_else(String::new, |context| match context.percent() {
+                Some(percent) => format!("{percent}%"),
+                None => format!("{} tokens", tokens(context.used)),
+            })
+    };
+    let text = if detail.is_empty() {
+        format!("{face} this pane: {reason}")
+    } else {
+        format!("{face} this pane: {reason} · {detail}")
+    };
+    vec![card(&text, fill, t)]
+}
+
+/// Everything orcha runs, against the machine, as a card: "orcha total
+/// 3.4 GB of 16 GB", green under half the RAM, yellow under three
+/// quarters, red past that.
+fn orcha_total(
+    usage: &crate::orcha_usage::Usage,
+    t: &super::super::brutal::Brutal,
+) -> Vec<(String, Style)> {
+    use crate::orcha_usage::bytes;
+    let Some(total) = usage.total_memory() else {
+        return Vec::new();
+    };
+    let fill = match usage.physical {
+        Some(ram) if total.saturating_mul(4) >= ram.saturating_mul(3) => t.red,
+        Some(ram) if total.saturating_mul(2) >= ram => t.yellow,
+        _ => t.green,
+    };
+    let text = match usage.physical {
+        Some(ram) => format!("orcha total {} of {}", bytes(total), bytes(ram)),
+        None => format!("orcha total {}", bytes(total)),
+    };
+    vec![card(&text, fill, t)]
 }
 
 pub(crate) fn tab_bar_status_width(snapshot: &ClientShellSnapshot) -> u16 {

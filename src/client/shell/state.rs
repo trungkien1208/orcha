@@ -165,6 +165,11 @@ pub(crate) struct OrchaUiState {
     pub(super) update_check: Option<BackgroundJob<Option<crate::orcha_app::Release>>>,
     /// When the newer-release lookup last started.
     pub(super) update_checked_at: Option<std::time::Instant>,
+    /// What each pane costs (memory, context): the last read, the read
+    /// running, and when it started.
+    pub(super) usage: Option<crate::orcha_usage::Usage>,
+    pub(super) usage_check: Option<BackgroundJob<Option<crate::orcha_usage::Usage>>>,
+    pub(super) usage_checked_at: Option<std::time::Instant>,
     /// The "what's new" of this build, looked up after an update.
     pub(super) whats_new_check: Option<BackgroundJob<Option<crate::orcha_app::Release>>>,
     /// Looking for a plugin to offer, off the input path.
@@ -274,8 +279,11 @@ pub(crate) struct OrchaUiState {
 impl OrchaUiState {
     /// A project shows its agents in the sidebar: it is selected or was
     /// opened by hand, and was not folded on purpose.
-    pub(super) fn project_expanded(&self, id: &str, focused: bool) -> bool {
-        !self.folded_projects.contains(id) && (focused || self.open_projects.contains(id))
+    /// Whether a project shows its panes. `by_default` (selected, or an
+    /// agent in it working or waiting for you) opens it; folding it by hand
+    /// wins over that, opening it by hand keeps it open.
+    pub(super) fn project_expanded(&self, id: &str, by_default: bool) -> bool {
+        !self.folded_projects.contains(id) && (by_default || self.open_projects.contains(id))
     }
 
     /// Opens or folds a project in the sidebar, on purpose (kept across
@@ -2324,6 +2332,7 @@ impl ClientShellState {
             || ui.project_folder_picker.is_some()
             || ui.import_scan.is_some()
             || ui.update_check.is_some()
+            || ui.usage_check.is_some()
             || ui.whats_new_check.is_some()
             || ui.plugin_offer_check.is_some()
             || ui.plugin_add_run.is_some()

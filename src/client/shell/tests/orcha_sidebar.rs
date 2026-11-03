@@ -141,17 +141,18 @@ fn idle_projects_fit_without_boxes_or_repeated_shell_paths() {
     assert!(!sidebar.contains('□') && !sidebar.contains('■'));
     assert!(!sidebar.contains("Shell ORCHA"));
     let header = state.hits.workspaces[0].rect.y as usize;
-    // selected project: header, branch, one pane; no blank rows between projects
-    assert_eq!(state.hits.workspaces[15].rect.y as usize, header + 17);
+    // selected project: header and its one shell (shells have no lines of
+    // their own); no blank rows between projects
+    assert_eq!(state.hits.workspaces[15].rect.y as usize, header + 16);
     let rows = frame_rows(&frame);
     assert!(
-        rows[header + 3].contains("TAGGLE-SUPERAPP-V2"),
+        rows[header + 2].contains("TAGGLE-SUPERAPP-V2"),
         "the next project follows right away"
     );
     assert!(
-        !rows[header + 3].contains("idle"),
+        !rows[header + 2].contains("idle"),
         "idle projects say nothing: {}",
-        rows[header + 3]
+        rows[header + 2]
     );
 }
 
@@ -232,25 +233,31 @@ fn collapsed_project_shows_active_agent_logos_and_selected_project_can_fold() {
 }
 
 #[test]
-fn branch_does_not_compete_with_project_name_and_shell_row_keeps_its_target() {
+fn the_branch_shows_under_its_agent_and_never_on_the_project_row() {
     let mut state = sidebar_state(1, false);
     state.snapshot.as_mut().expect("snapshot").workspaces[0].label = "TAGGLE-SUPERAPP-V2".into();
     state.snapshot.as_mut().expect("snapshot").workspaces[0].branch =
         Some("feature/a-long-branch-name".into());
+    state.snapshot.as_mut().expect("snapshot").workspaces[0].git_ahead_behind = Some((2, 1));
+    add_agent(&mut state, 0, "Claude", AgentStatus::Idle);
     let frame = state.compose(120, 42).expect("frame");
     let y = state.hits.workspaces[0].rect.y as usize;
     let rows = frame_rows(&frame);
     assert!(rows[y].contains("TAGGLE-SUPERAPP-V2"));
     assert!(!rows[y].contains("feature/"));
-    assert!(rows[y + 1].contains("⎇ feature/"));
-    let (rect, id) = state
+    // the agent right under its project, then its model and branch
+    assert_eq!(agent_row_hit(&state, "pane_1").y as usize, y + 1);
+    assert!(
+        rows[y + 2].contains("⎇ feature") && rows[y + 2].contains("↑2↓1"),
+        "{}",
+        rows[y + 2]
+    );
+    // every line of the agent clicks to it
+    assert!(state
         .hits
         .agents
         .iter()
-        .find(|(_, id)| id == "pane_1")
-        .expect("shell hit");
-    assert_eq!(id, "pane_1");
-    assert_eq!(rect.y as usize, y + 2);
+        .any(|(rect, id)| id == "pane_1" && rect.y as usize == y + 2));
 }
 
 #[test]
@@ -396,14 +403,15 @@ fn project_panes_show_as_a_tree_numbered_by_tab() {
     add_agent(&mut state, 0, "Claude", AgentStatus::Working);
     let frame = state.compose(120, 42).expect("frame");
     let rows = frame_rows(&frame);
-    let first = rows
-        .iter()
-        .position(|row| row.contains("1 ▌✳"))
-        .expect("the first tab's number sits before its agent, the open pane's bar between");
+    let first = rows.iter().position(|row| row.contains("1 ┣━✳")).expect(
+        "the first tab's number sits before its agent, the open pane's heavy branch between",
+    );
+    // the agent's line hangs under it, the trunk going on to the next pane
+    assert!(rows[first + 1].contains("│ ┗"), "{}", rows[first + 1]);
     assert!(
-        rows[first + 1].contains("2  ›_ Shell"),
+        rows[first + 2].contains("2 └ ›_ Shell"),
         "the second tab follows: {}",
-        rows[first + 1]
+        rows[first + 2]
     );
 }
 
@@ -693,12 +701,7 @@ fn every_agent_row_names_its_state_and_the_open_pane_is_marked() {
     let frame = state.compose(120, 42).expect("frame");
     let rows = frame_rows(&frame);
     let row_of = |pane: &str| {
-        let (rect, _) = state
-            .hits
-            .agents
-            .iter()
-            .find(|(rect, id)| id == pane && rect.y < state.hits.workspace_body.bottom())
-            .expect("agent row");
+        let rect = agent_row_hit(&state, pane);
         rows[rect.y as usize].clone()
     };
     assert!(
@@ -721,9 +724,9 @@ fn every_agent_row_names_its_state_and_the_open_pane_is_marked() {
         "{}",
         row_of("pane_4")
     );
-    // pane_1 is the open pane: only its row carries the bar
-    assert!(row_of("pane_1").contains("▌✳"), "{}", row_of("pane_1"));
-    assert!(!row_of("pane_2").contains("▌◎"), "{}", row_of("pane_2"));
+    // pane_1 is the open pane: only its branch of the tree is heavy
+    assert!(row_of("pane_1").contains("┣━✳"), "{}", row_of("pane_1"));
+    assert!(!row_of("pane_2").contains('┣'), "{}", row_of("pane_2"));
 }
 
 /// Drawing is pure: the scroll is reconciled before the frame is drawn,
@@ -783,15 +786,22 @@ fn fuel_account(
 }
 
 /// The text of `pane`'s sidebar row.
-fn agent_row_text(state: &ClientShellState, frame: &FrameData, pane: &str) -> String {
-    let rows = frame_rows(frame);
-    let (rect, _) = state
+/// The agent's own row: of its clicks, the leftmost and topmost (its lines
+/// below and a "→ continued" note click to it too).
+fn agent_row_hit(state: &ClientShellState, pane: &str) -> Rect {
+    state
         .hits
         .agents
         .iter()
-        .rev()
-        .find(|(rect, id)| id == pane && rect.y < state.hits.workspace_body.bottom())
-        .expect("agent row");
+        .filter(|(rect, id)| id == pane && rect.y < state.hits.workspace_body.bottom())
+        .map(|(rect, _)| *rect)
+        .min_by_key(|rect| (rect.x, rect.y))
+        .expect("agent row")
+}
+
+fn agent_row_text(state: &ClientShellState, frame: &FrameData, pane: &str) -> String {
+    let rows = frame_rows(frame);
+    let rect = agent_row_hit(state, pane);
     rows[rect.y as usize].trim_end().to_owned()
 }
 
@@ -852,14 +862,7 @@ fn a_hand_off_shows_on_the_old_row_until_the_old_pane_is_focused_again() {
     let frame = state.compose(120, 42).expect("frame");
     let row = agent_row_text(&state, &frame, "pane_1");
     assert!(row.ends_with("→ continued"), "{row}");
-    let row_y = state
-        .hits
-        .agents
-        .iter()
-        .rev()
-        .find(|(_, id)| id == "pane_1")
-        .map(|(rect, _)| rect.y)
-        .expect("old row");
+    let row_y = agent_row_hit(&state, "pane_1").y;
     let (link, _) = state
         .hits
         .agents
@@ -964,15 +967,7 @@ fn narrow_agent_rows_keep_their_logo_and_name_when_a_chat_moves() {
         let row = agent_row_text(&state, &frame, "pane_1");
         assert!(row.contains('✳'), "width {width}: {row}");
         assert!(row.contains("Clau"), "width {width}: {row}");
-        let y = state
-            .hits
-            .agents
-            .iter()
-            .rev()
-            .find(|(_, id)| id == "pane_1")
-            .expect("row")
-            .0
-            .y;
+        let y = agent_row_hit(&state, "pane_1").y;
         for (hit, _) in state.hits.agents.iter().filter(|(hit, _)| hit.y == y) {
             assert!(
                 hit.x < width && hit.right() <= width,
@@ -980,4 +975,172 @@ fn narrow_agent_rows_keep_their_logo_and_name_when_a_chat_moves() {
             );
         }
     }
+}
+
+/// Fake costs for `busy_sidebar_state`: the open Claude pane on a big
+/// context, a Codex pane nearly full and very heavy on RAM.
+fn with_usage(state: &mut ClientShellState) -> (String, String) {
+    use crate::orcha_usage::{Branch, Context, PaneUsage, Usage};
+    const MIB: u64 = 1024 * 1024;
+    let data = state.snapshot.as_deref_mut().expect("snapshot");
+    let open = data
+        .agents
+        .iter()
+        .find(|agent| agent.focused)
+        .expect("an open agent")
+        .pane_id
+        .clone();
+    let codex = data
+        .agents
+        .iter()
+        .find(|agent| agent.agent.as_deref() == Some("codex"))
+        .expect("a codex agent")
+        .pane_id
+        .clone();
+    data.focused_pane_id = Some(open.clone());
+    let mut usage = Usage {
+        orcha: Some(60 * MIB),
+        physical: Some(16 * 1024 * MIB),
+        ..Usage::default()
+    };
+    usage.panes.insert(
+        open.clone(),
+        PaneUsage {
+            memory: Some(812 * MIB),
+            context: Some(Context {
+                used: 225_000,
+                window: None,
+            }),
+            quiet_for: Some(12 * 60),
+            branch: Some(Branch {
+                name: "orcha".into(),
+                worktree: false,
+            }),
+            ..PaneUsage::default()
+        },
+    );
+    usage.panes.insert(
+        codex.clone(),
+        PaneUsage {
+            memory: Some(2600 * MIB),
+            context: Some(Context {
+                used: 430_000,
+                window: Some(475_000),
+            }),
+            heaviest: Some(("xcodebuild".into(), 2100 * MIB)),
+            branch: Some(Branch {
+                name: "feature/42".into(),
+                worktree: true,
+            }),
+            ..PaneUsage::default()
+        },
+    );
+    state.orcha_ui.usage = Some(usage);
+    state.config.status_bar = true;
+    (open, codex)
+}
+
+#[test]
+fn the_status_bar_tells_the_open_panes_health_and_each_agent_gets_a_cost_line() {
+    let mut state = busy_sidebar_state();
+    let (open, codex) = with_usage(&mut state);
+    let frame = state.compose(140, 46).expect("frame");
+    let rows = frame_rows(&frame);
+    let bar = rows
+        .iter()
+        .find(|row| row.contains("this pane"))
+        .expect("a health line");
+    // a face, the problem and its number; orcha's total says it is a total
+    for part in [
+        "😐",
+        "this pane: big context · 225k tokens",
+        "orcha total 3.4 GB of 16 GB",
+    ] {
+        assert!(bar.contains(part), "{part:?} missing from {bar:?}");
+    }
+    assert!(!bar.contains("812"), "the sidebar has the rest: {bar:?}");
+    // an agent's two lines: model and branch, then what it costs; never
+    // squeezed onto the agent's own row
+    let lines = |pane: &str| -> (String, String, String) {
+        let y = agent_row_hit(&state, pane).y as usize;
+        (rows[y].clone(), rows[y + 1].clone(), rows[y + 2].clone())
+    };
+    let (row, who, cost) = lines(&codex);
+    assert!(!row.contains("ctx") && !row.contains("context"), "{row}");
+    assert!(who.contains("◇ feature/42"), "{who}");
+    assert!(
+        cost.contains("90% · RAM 2.5G") && !cost.contains("xcode"),
+        "{cost}"
+    );
+    let (row, who, cost) = lines(&open);
+    assert!(row.contains("┣━") && row.contains("idle 12m"), "{row}");
+    assert!(who.contains("Opus 5.5 · ⎇ orcha"), "{who}");
+    assert!(cost.contains("225k") && cost.contains("812M"), "{cost}");
+    // wide enough, the long words
+    state.config.sidebar_max_width = 60;
+    state.sidebar_width = 50;
+    let rows = frame_rows(&state.compose(140, 46).expect("frame"));
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("└ context 90% · RAM 2.5G")),
+        "{rows:#?}"
+    );
+}
+
+/// `ORCHA_HEALTH_PREVIEW_OUT=/path cargo nextest run orcha_health_preview
+/// --run-ignored all`: the busy sidebar with fake costs, as text.
+#[test]
+#[ignore = "writes a preview for people to look at"]
+fn orcha_health_preview() {
+    let Ok(path) = std::env::var("ORCHA_HEALTH_PREVIEW_OUT") else {
+        return;
+    };
+    let mut state = busy_sidebar_state();
+    with_usage(&mut state);
+    let frame = state.compose(140, 46).expect("frame");
+    std::fs::write(path, frame_rows(&frame).join("\n")).expect("preview");
+}
+
+#[test]
+fn a_project_with_a_working_agent_opens_until_folded_by_hand() {
+    let mut state = sidebar_state(3, false);
+    add_agent(&mut state, 1, "Codex", AgentStatus::Working);
+    let frame = state.compose(120, 42).expect("frame");
+    let shown = |state: &ClientShellState| {
+        state
+            .hits
+            .agents
+            .iter()
+            .any(|(rect, id)| id == "pane_2" && rect.y < state.hits.workspace_body.bottom())
+    };
+    assert!(shown(&state), "its agent shows without a click");
+    // open, the agents tell their state: the project row stays quiet
+    let header = state
+        .hits
+        .workspaces
+        .iter()
+        .find(|hit| hit.workspace_id == "ws_2")
+        .expect("project")
+        .rect
+        .y;
+    let rows = frame_rows(&frame);
+    assert!(
+        !rows[header as usize].contains("running"),
+        "{}",
+        rows[header as usize]
+    );
+    // folded by hand: stays folded while it works, and says so itself
+    let (rect, _) = state
+        .hits
+        .orcha
+        .project_toggles
+        .iter()
+        .find(|(_, id)| id == "ws_2")
+        .cloned()
+        .expect("toggle");
+    let mut outcome = ClientShellInput::default();
+    assert!(state.handle_orcha_click((rect.x, rect.y), &mut outcome));
+    let frame = state.compose(120, 42).expect("frame");
+    assert!(!shown(&state));
+    assert!(frame_rows(&frame)[header as usize].contains("running"));
 }

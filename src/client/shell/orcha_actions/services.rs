@@ -119,6 +119,29 @@ impl ClientShellState {
         changed
     }
 
+    /// Reads what each pane costs (memory, context) every few seconds, off
+    /// the input path. Only for orcha's own server: another machine's
+    /// process ids mean nothing here. True when the answer changed.
+    pub(in crate::client::shell) fn poll_usage(&mut self) -> bool {
+        const EVERY: std::time::Duration = std::time::Duration::from_secs(4);
+        // tests never look at this machine's processes
+        if cfg!(test) || self.active_endpoint_id != ClientEndpointId::Local {
+            return false;
+        }
+        let ui = &mut self.orcha_ui;
+        let mut changed = false;
+        if let Some(Ok(usage)) = BackgroundJob::take_finished(&mut ui.usage_check) {
+            changed = ui.usage != usage;
+            ui.usage = usage;
+        }
+        let due = ui.usage_checked_at.is_none_or(|at| at.elapsed() >= EVERY);
+        if due && ui.usage_check.is_none() {
+            ui.usage_checked_at = Some(std::time::Instant::now());
+            ui.usage_check = BackgroundJob::spawn("orcha-usage", crate::orcha_usage::read);
+        }
+        changed
+    }
+
     /// Asks (at most hourly, off the input path) whether a newer orcha is out.
     pub(super) fn start_update_check(&mut self) {
         self.orcha_ui.update_checked_at = Some(std::time::Instant::now());

@@ -1309,6 +1309,7 @@ mod tests {
             tokens: HashMap::new(),
             agent_session: None,
             scroll,
+            shell_pid: None,
             revision: 0,
         }
     }

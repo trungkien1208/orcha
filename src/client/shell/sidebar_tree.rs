@@ -325,6 +325,11 @@ enum ProjectActivity {
 }
 
 impl ProjectActivity {
+    /// An agent is working or waiting for you: its project opens by itself.
+    fn busy(self) -> bool {
+        matches!(self, Self::Running | Self::NeedsYou)
+    }
+
     fn from_status(status: AgentStatus) -> Self {
         match status {
             AgentStatus::Blocked => Self::NeedsYou,
@@ -472,6 +477,14 @@ pub(super) struct ProcessView<'a> {
     visible: usize,
     total: usize,
     blocked: usize,
+}
+
+/// A project with an agent working or waiting for you opens by itself.
+pub(super) fn project_busy(snapshot: &ClientShellSnapshot, workspace_id: &str) -> bool {
+    snapshot.agents.iter().any(|agent| {
+        agent.workspace_id == workspace_id
+            && ProjectActivity::from_status(agent.agent_status).busy()
+    })
 }
 
 pub(super) fn process_view(snapshot: &ClientShellSnapshot, folded: bool) -> ProcessView<'_> {
@@ -652,14 +665,19 @@ pub(super) fn layout_sidebar_tree<'a>(
         let project = rows_by_workspace
             .get(workspace.workspace_id.as_str())
             .unwrap_or(&empty);
-        let expanded = ui.project_expanded(&workspace.workspace_id, workspace.focused);
+        let expanded = ui.project_expanded(
+            &workspace.workspace_id,
+            workspace.focused || project.activity.busy(),
+        );
         heights.push(if !expanded {
             1
         } else {
             // No blank rows: the indent shows where a project ends.
-            let branch = shown_branch(workspace, focused_git).is_some();
-            1u16.saturating_add(u16::from(branch))
-                .saturating_add(u16::try_from(project.rows.len()).unwrap_or(u16::MAX))
+            project.rows.iter().fold(1u16, |height, (_, row)| {
+                height
+                    .saturating_add(1)
+                    .saturating_add(sub_lines(row, ui.usage.as_ref()))
+            })
         });
         items.push((workspace, expanded));
     }
@@ -776,6 +794,7 @@ pub(crate) fn render_sidebar_tree(
         low_fuel: &list.low_fuel,
         handing_off: state.orcha_ui.handoff_source.as_deref(),
         continued: &state.orcha_ui.continued,
+        usage: state.orcha_ui.usage.as_ref(),
     };
     let mut y = body.y;
     for (index, (workspace, expanded)) in list.items.iter().enumerate().skip(list.scroll) {
@@ -798,7 +817,7 @@ pub(crate) fn render_sidebar_tree(
             buffer,
             Rect::new(x, y, row_width, height),
             workspace,
-            shown_branch(workspace, list.focused_git),
+            project_git(workspace, list.focused_git),
             icon,
             project,
             *expanded,
@@ -832,6 +851,189 @@ pub(crate) fn render_sidebar_tree(
 /// The right panel's read, only when it is about the focused pane's folder.
 /// Right after a switch it can still hold the previous project's read;
 /// the server's branch is right in the meantime.
+/// What orcha read about an agent's pane (`orcha_usage`), if anything.
+fn pane_usage<'u>(
+    agent: &ClientShellAgent,
+    usage: Option<&'u crate::orcha_usage::Usage>,
+) -> Option<&'u crate::orcha_usage::PaneUsage> {
+    usage?.panes.get(agent.pane_id.as_str())
+}
+
+/// The lines under a pane row. An agent has its model and branch, then,
+/// once read, its context and memory; a shell has none. Layout and drawing
+/// both ask here, so the heights always match.
+fn sub_lines(row: &ProjectRow<'_>, usage: Option<&crate::orcha_usage::Usage>) -> u16 {
+    match row {
+        ProjectRow::Agent(agent) => {
+            let cost = pane_usage(agent, usage)
+                .is_some_and(|cost| cost.context.is_some() || cost.memory.is_some());
+            1 + u16::from(cost)
+        }
+        ProjectRow::Shell(_) => 0,
+    }
+}
+
+/// Picks the long form of a line when it fits `room`, else the short one.
+fn fitting(
+    long: Vec<(String, Style)>,
+    room: u16,
+    short: impl FnOnce() -> Vec<(String, Style)>,
+) -> Vec<(String, Style)> {
+    let width: u16 = long.iter().map(|(text, _)| display_width(text)).sum();
+    if width <= room {
+        long
+    } else {
+        short()
+    }
+}
+
+/// An agent's first line: its model, then the branch of the folder it is
+/// in (`◇` in a linked worktree). The project's counts (commits to push
+/// and pull, files changed) join only when the agent is on the project's
+/// own branch, so they never describe a checkout they weren't read from.
+fn who_parts(
+    agent: &ClientShellAgent,
+    cost: Option<&crate::orcha_usage::PaneUsage>,
+    git: &ProjectGit<'_>,
+    room: u16,
+    t: &Brutal,
+    bg: Color,
+) -> Vec<(String, Style)> {
+    let quiet = Style::default().fg(t.muted).bg(bg);
+    let count = |color: Color| {
+        Style::default()
+            .fg(t.text(color, bg))
+            .bg(bg)
+            .add_modifier(Modifier::BOLD)
+    };
+    let model = row_name(&brutal::agent_label(agent));
+    let model_width = display_width(&model);
+    let mut parts = vec![(model, Style::default().fg(t.ink).bg(bg))];
+    // the agent's own folder when read, else the project's
+    let (name, worktree) = match cost.and_then(|cost| cost.branch.as_ref()) {
+        Some(branch) => (Some(branch.name.as_str()), branch.worktree),
+        None => (git.branch, git.worktree),
+    };
+    let Some(name) = name else {
+        return parts;
+    };
+    // the counts go after the branch; a long branch name gives way first
+    let mut counts: Vec<(String, Style)> = Vec::new();
+    if git.branch == Some(name) {
+        if git.ahead > 0 || git.behind > 0 {
+            counts.push((" ".to_owned(), quiet));
+        }
+        if git.ahead > 0 {
+            counts.push((format!("↑{}", git.ahead), count(t.green)));
+        }
+        if git.behind > 0 {
+            counts.push((format!("↓{}", git.behind), count(t.blue)));
+        }
+        if let Some(dirty) = git.dirty.filter(|dirty| *dirty > 0) {
+            counts.push((format!(" ±{dirty}"), count(t.yellow)));
+        }
+    }
+    let counts_width: u16 = counts.iter().map(|(text, _)| display_width(text)).sum();
+    // "model · ⎇ " before the name
+    let name_room = room.saturating_sub(model_width + 5 + counts_width).max(4);
+    let mark = if worktree { "◇" } else { "⎇" };
+    parts.push((" · ".to_owned(), quiet));
+    parts.push((
+        format!("{mark} {}", brutal::clip(name, usize::from(name_room))),
+        Style::default().fg(t.text(t.pink, bg)).bg(bg),
+    ));
+    parts.extend(counts);
+    parts
+}
+
+/// An agent's second line: `context 636k · RAM 1.3G`. The numbers are
+/// bold: green while fine, yellow when worth a look, red when too much.
+/// `ctx` for `context` when the long word doesn't fit.
+fn cost_parts(
+    cost: &crate::orcha_usage::PaneUsage,
+    room: u16,
+    t: &Brutal,
+    bg: Color,
+) -> Vec<(String, Style)> {
+    let quiet = Style::default().fg(t.muted).bg(bg);
+    let count = |color: Color| {
+        Style::default()
+            .fg(t.text(color, bg))
+            .bg(bg)
+            .add_modifier(Modifier::BOLD)
+    };
+    let build = |long: bool| {
+        let mut parts = Vec::new();
+        if let Some(context) = cost.context {
+            let color = match context.percent() {
+                Some(percent) => t.context(percent),
+                None if context.heavy() => t.yellow,
+                None => t.green,
+            };
+            parts.push((if long { "context " } else { "ctx " }.to_owned(), quiet));
+            parts.push((context.short(), count(color)));
+        }
+        if let Some(memory) = cost.memory {
+            if cost.context.is_some() {
+                parts.push((" · ".to_owned(), quiet));
+            }
+            parts.push(("RAM ".to_owned(), quiet));
+            parts.push((
+                crate::orcha_usage::short_bytes(memory),
+                count(t.memory(memory).unwrap_or(t.green)),
+            ));
+        }
+        parts
+    };
+    fitting(build(true), room, || build(false))
+}
+
+/// A project's git, as its agents' lines tell it.
+#[derive(Debug, Clone, Copy, Default)]
+struct ProjectGit<'a> {
+    branch: Option<&'a str>,
+    worktree: bool,
+    ahead: usize,
+    behind: usize,
+    /// Files changed: only read for the open project.
+    dirty: Option<usize>,
+}
+
+/// The open project's git comes from the git panel's read of its pane
+/// (when that read is about this project), the others' from the server.
+fn project_git<'a>(
+    workspace: &'a ClientShellWorkspace,
+    git: Option<&'a super::git_panel::GitPanelData>,
+) -> ProjectGit<'a> {
+    let worktree = workspace
+        .worktree
+        .as_ref()
+        .is_some_and(|worktree| worktree.is_linked_worktree);
+    match git.filter(|_| workspace.focused) {
+        Some(data) => ProjectGit {
+            branch: Some(if data.branch.is_empty() {
+                "(no branch)"
+            } else {
+                data.branch.as_str()
+            }),
+            worktree,
+            ahead: data.ahead,
+            behind: data.behind,
+            dirty: Some(data.files.len()),
+        },
+        None => {
+            let (ahead, behind) = workspace.git_ahead_behind.unwrap_or((0, 0));
+            ProjectGit {
+                branch: workspace.branch.as_deref(),
+                worktree,
+                ahead,
+                behind,
+                dirty: None,
+            }
+        }
+    }
+}
+
 fn focused_pane_git<'a>(
     snapshot: &ClientShellSnapshot,
     git_panel: Option<&'a super::git_panel::GitPanelData>,
@@ -858,20 +1060,6 @@ fn same_or_inside(folder: &str, root: &str) -> bool {
 /// The branch under the focused project: the right panel's read of the
 /// focused pane's checkout when it has one, else the workspace's own branch
 /// (its first pane's folder), which the server keeps fresh.
-fn shown_branch<'a>(
-    workspace: &'a ClientShellWorkspace,
-    git: Option<&'a super::git_panel::GitPanelData>,
-) -> Option<&'a str> {
-    if !workspace.focused {
-        return None;
-    }
-    match git {
-        Some(data) if data.branch.is_empty() => Some("(no branch)"),
-        Some(data) => Some(data.branch.as_str()),
-        None => workspace.branch.as_deref(),
-    }
-}
-
 /// Cells kept for a project's icon, so every name starts in the same column.
 const ICON_WIDTH: u16 = 2;
 
@@ -885,11 +1073,12 @@ enum HandoffMark<'a> {
 }
 
 /// What agent rows show besides their state: fuel running low on their
-/// account, and hand-offs.
+/// account, hand-offs, and what each pane costs (context, memory).
 struct RowMarks<'a> {
     low_fuel: &'a HashMap<&'a str, super::accounts::FuelMark>,
     handing_off: Option<&'a str>,
     continued: &'a HashMap<String, super::ContinuedPane>,
+    usage: Option<&'a crate::orcha_usage::Usage>,
 }
 
 impl<'a> RowMarks<'a> {
@@ -911,7 +1100,7 @@ fn render_project(
     buffer: &mut Buffer,
     rect: Rect,
     workspace: &ClientShellWorkspace,
-    branch: Option<&str>,
+    git: ProjectGit<'_>,
     icon: Option<&str>,
     project: &ProjectRows<'_>,
     expanded: bool,
@@ -939,7 +1128,8 @@ fn render_project(
         rect.x + 1,
         rect.y,
         1,
-        if expanded { "▾" } else { "▸" },
+        // the full-size triangles: the small ones read as dots
+        if expanded { "▼" } else { "▶" },
         Style::default().fg(t.muted).bg(fill),
     );
     // the click area is wider than the arrow: the edge column counts too
@@ -949,32 +1139,33 @@ fn render_project(
     ));
 
     let icon_x = rect.x + 3;
-    let name_x = icon_x + ICON_WIDTH + 1;
+    // no icon: the name moves up to where it would be
+    let name_x = if icon.is_some() {
+        icon_x + ICON_WIDTH + 1
+    } else {
+        icon_x
+    };
     let right = rect.right().saturating_sub(1);
-    match icon {
-        Some(icon) => put_text(
+    if let Some(icon) = icon {
+        put_text(
             buffer,
             icon_x,
             rect.y,
             ICON_WIDTH,
             icon,
             Style::default().bg(fill),
-        ),
-        // a quiet stand-in keeps the name in line with the others
-        None => put_text(
-            buffer,
-            icon_x,
-            rect.y,
-            1,
-            "·",
-            Style::default().fg(t.muted).bg(fill),
-        ),
+        );
     }
 
     // Right side: logos (folded only) then the word. At most half the row,
     // so the name keeps its room.
     let budget = right.saturating_sub(name_x) / 2;
-    let word = project.activity.label(budget);
+    // open, its agents say how they are doing; folded, the project does
+    let word = if expanded {
+        None
+    } else {
+        project.activity.label(budget)
+    };
     let word_width = word.map_or(0, display_width);
     let mut logo_count = 0usize;
     let mut logos_width = 0u16;
@@ -1047,23 +1238,14 @@ fn render_project(
         return;
     }
 
-    let content_width = right.saturating_sub(name_x);
+    // Panes hang off the project like a tree: `├`/`└` in the connector
+    // column, the open pane's branch heavy and yellow (`┣━`). Under each
+    // agent, its model and branch, then what it costs.
+    let tree_x = icon_x;
+    let logo_x = tree_x + 2;
     let mut y = rect.y + 1;
-    if let Some(branch) = branch {
-        if y < rect.bottom() {
-            put_text(
-                buffer,
-                name_x,
-                y,
-                content_width,
-                &brutal::clip(&format!("⎇ {branch}"), usize::from(content_width)),
-                Style::default().fg(t.muted).bg(fill),
-            );
-            y += 1;
-        }
-    }
-    // Tab numbers sit in the icon column, on each tab's first pane, and
-    // only when the project has more than one tab.
+    // Tab numbers sit left of the tree, on each tab's first pane, and only
+    // when the project has more than one tab.
     let numbered = project.tabs > 1;
     // the open tab's number stands out like the open pane
     let open_tab = project
@@ -1074,22 +1256,37 @@ fn render_project(
             ProjectRow::Shell(pane) => pane.focused,
         })
         .map(|(tab, _)| *tab);
+    let last = project.rows.len().saturating_sub(1);
+    let quiet = Style::default().fg(t.muted).bg(fill);
+    let lit = Style::default()
+        .fg(t.mark(t.yellow, fill))
+        .bg(fill)
+        .add_modifier(Modifier::BOLD);
     for (index, (tab, project_row)) in project.rows.iter().enumerate() {
         if y >= rect.bottom() {
             break;
         }
+        let is_last = index == last;
         let first_in_tab = index == 0 || project.rows[index - 1].0 != *tab;
-        let (focused, pane_id, name, task, status, logo, color, shell) = match project_row {
-            ProjectRow::Agent(agent) => (
-                agent.focused,
-                agent.pane_id.as_str(),
-                Cow::Owned(row_name(&brutal::agent_label(agent))),
-                brutal::agent_task(agent),
-                agent.agent_status,
-                brutal::agent_logo(agent.agent.as_deref(), icon_font),
-                agent_color(agent, t),
-                false,
-            ),
+        let (focused, pane_id, title, status, logo, color, shell) = match project_row {
+            ProjectRow::Agent(agent) => {
+                // what it works on, else which model it is
+                let task = brutal::agent_task(agent);
+                let title = if task.trim().is_empty() {
+                    row_name(&brutal::agent_label(agent))
+                } else {
+                    task
+                };
+                (
+                    agent.focused,
+                    agent.pane_id.as_str(),
+                    Cow::Owned(title),
+                    agent.agent_status,
+                    brutal::agent_logo(agent.agent.as_deref(), icon_font),
+                    agent_color(agent, t),
+                    false,
+                )
+            }
             ProjectRow::Shell(pane) => (
                 pane.focused,
                 pane.pane_id.as_str(),
@@ -1099,28 +1296,18 @@ fn render_project(
                         .filter(|label| !label.is_empty())
                         .unwrap_or("Shell"),
                 ),
-                String::new(),
                 AgentStatus::Idle,
                 "›_",
                 t.muted,
                 true,
             ),
         };
-        // the pane in the open tab: a tinted row, one cell of padding before it
-        let row = Rect::new(
-            name_x.saturating_sub(1),
-            y,
-            right.saturating_sub(name_x) + 1,
-            1,
-        );
-        let row_bg = if focused { t.frame } else { fill };
-        buffer.set_style(row, Style::default().bg(row_bg));
         if numbered && first_in_tab && *tab != usize::MAX {
             put_text(
                 buffer,
-                icon_x,
+                rect.x + 1,
                 y,
-                ICON_WIDTH,
+                2,
                 &tab.to_string(),
                 if open_tab == Some(*tab) {
                     Style::default()
@@ -1128,16 +1315,29 @@ fn render_project(
                         .bg(fill)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(t.muted).bg(fill)
+                    quiet
                 },
             );
         }
-        let active = matches!(status, AgentStatus::Working | AgentStatus::Blocked);
-        let logo_width = display_width(logo);
-        let icon_style = Style::default().fg(t.mark(color, row_bg)).bg(row_bg);
+        let branch = match (focused, is_last) {
+            (true, _) => "┣━",
+            (false, true) => "└",
+            (false, false) => "├",
+        };
         put_text(
             buffer,
-            name_x,
+            tree_x,
+            y,
+            2,
+            branch,
+            if focused { lit } else { quiet },
+        );
+        let active = matches!(status, AgentStatus::Working | AgentStatus::Blocked);
+        let logo_width = display_width(logo);
+        let icon_style = Style::default().fg(t.mark(color, fill)).bg(fill);
+        put_text(
+            buffer,
+            logo_x,
             y,
             logo_width,
             logo,
@@ -1147,101 +1347,100 @@ fn render_project(
                 icon_style
             },
         );
-        let text_x = name_x + logo_width + 1;
-        // Every agent names its state on the right; shells have none. The
-        // long word unless it would squeeze the name. A hand-off under way
-        // or done says so in its place.
+        let text_x = logo_x + logo_width + 1;
+        let cost = match project_row {
+            ProjectRow::Agent(agent) => pane_usage(agent, marks.usage),
+            ProjectRow::Shell(_) => None,
+        };
+        // Every agent names its state on the right (and, when it isn't
+        // working, for how long); shells have none. The long word unless
+        // it would squeeze the title. A hand-off under way or done says so
+        // in its place.
         let state = ProjectActivity::from_status(status);
         let room = right
             .saturating_sub(text_x)
-            .saturating_sub(display_width(&name).min(8) + 1);
+            .saturating_sub(display_width(&title).min(8) + 1);
         let handoff = if shell { None } else { marks.handoff(pane_id) };
-        let (note, note_color, note_bold) = match handoff {
+        let (note, note_color, note_bold): (Cow<'_, str>, Color, bool) = match handoff {
             Some(HandoffMark::Running) => (
-                if room >= 12 {
+                Cow::Borrowed(if room >= 12 {
                     "handing off…"
                 } else if room >= 7 {
                     "handoff"
                 } else {
                     ""
-                },
+                }),
                 t.blue,
                 false,
             ),
             Some(HandoffMark::Continued(_)) => (
-                if room >= 11 {
+                Cow::Borrowed(if room >= 11 {
                     "→ continued"
                 } else if room >= 7 {
                     "→ moved"
                 } else {
                     ""
-                },
+                }),
                 t.blue,
                 true,
             ),
-            None if shell => ("", t.muted, false),
-            None => (
-                state.word(room),
-                state.color(t),
-                state == ProjectActivity::NeedsYou,
-            ),
+            None if shell => (Cow::Borrowed(""), t.muted, false),
+            None => {
+                let word = state.word(room);
+                let since = cost
+                    .and_then(|cost| cost.quiet_for)
+                    .filter(|_| status != AgentStatus::Working)
+                    .and_then(crate::orcha_usage::age)
+                    .map(|age| format!("{word} {age}"))
+                    .filter(|long| !word.is_empty() && display_width(long) <= room);
+                (
+                    since.map_or(Cow::Borrowed(word), Cow::Owned),
+                    state.color(t),
+                    state == ProjectActivity::NeedsYou,
+                )
+            }
         };
-        let note_width = display_width(note);
-        // an account low on fuel: its percent left of the note, red when
-        // orcha would offer a switch, yellow when only low
-        let fuel = if shell {
-            None
-        } else {
-            marks.low_fuel.get(pane_id).and_then(|mark| {
-                let long = format!("fuel {}%", mark.left);
-                let text = if note_width + 1 + display_width(&long) <= room {
-                    long
-                } else {
-                    format!("{}%", mark.left)
-                };
-                (display_width(&text) + 1 + note_width <= room)
-                    .then_some((text, if mark.empty { t.red } else { t.yellow }))
-            })
-        };
+        let note_width = display_width(&note);
+        // left of the note, while it fits: fuel running low on the account
+        // (red when orcha would offer a switch)
+        let mut fuel: Option<(String, Color)> = None;
+        if let Some(mark) = marks.low_fuel.get(pane_id).filter(|_| !shell) {
+            let color = if mark.empty { t.red } else { t.yellow };
+            let fits = |text: &str| note_width + display_width(text) < room;
+            let long = format!("fuel {}%", mark.left);
+            let short = format!("{}%", mark.left);
+            if fits(&long) {
+                fuel = Some((long, color));
+            } else if fits(&short) {
+                fuel = Some((short, color));
+            }
+        }
         let fuel_width = fuel.as_ref().map_or(0, |(text, _)| display_width(text) + 1);
         let marks_width = note_width + u16::from(note_width > 0) + fuel_width;
-        let text_width = right.saturating_sub(text_x + marks_width);
-        let name_width = display_width(&name).min(text_width);
+        let title_width = display_width(&title).min(right.saturating_sub(text_x + marks_width));
         // shells step back so agents stand out, unless one is open
-        let name_style = Style::default()
+        let title_style = Style::default()
             .fg(if shell && !focused { t.muted } else { t.ink })
-            .bg(row_bg);
+            .bg(fill);
         put_text(
             buffer,
             text_x,
             y,
-            name_width,
-            &brutal::clip(&name, usize::from(name_width)),
+            title_width,
+            &brutal::clip(&title, usize::from(title_width)),
             if active || focused {
-                name_style.add_modifier(Modifier::BOLD)
+                title_style.add_modifier(Modifier::BOLD)
             } else {
-                name_style
+                title_style
             },
         );
-        // Two spaces keep the agent's name apart from its task.
-        let task_width = text_width.saturating_sub(name_width + 2);
-        if task_width > 0 && !task.is_empty() {
-            put_text(
-                buffer,
-                text_x + name_width + 2,
-                y,
-                task_width,
-                &brutal::clip(&task, usize::from(task_width)),
-                Style::default().fg(t.muted).bg(row_bg),
-            );
-        }
         if note_width > 0 {
-            let style = Style::default().fg(t.text(note_color, row_bg)).bg(row_bg);
+            let style = Style::default().fg(t.text(note_color, fill)).bg(fill);
             put_right_text(
                 buffer,
                 Rect::new(text_x, y, right.saturating_sub(text_x), 1),
                 y,
-                note,
+                &note,
                 if note_bold {
                     style.add_modifier(Modifier::BOLD)
                 } else {
@@ -1257,20 +1456,9 @@ fn render_project(
                 y,
                 text,
                 Style::default()
-                    .fg(t.text(*color, row_bg))
-                    .bg(row_bg)
+                    .fg(t.text(*color, fill))
+                    .bg(fill)
                     .add_modifier(Modifier::BOLD),
-            );
-        }
-        // the open pane: an ink bar on its left edge, like the open tab
-        if focused {
-            put_text(
-                buffer,
-                row.x,
-                y,
-                1,
-                "▌",
-                Style::default().fg(t.ink).bg(row_bg),
             );
         }
         // "→ continued" goes to the new pane; listed first, so it wins
@@ -1282,10 +1470,59 @@ fn render_project(
             ));
         }
         hits.agents.push((
-            Rect::new(icon_x, y, right.saturating_sub(icon_x), 1),
+            Rect::new(tree_x, y, right.saturating_sub(tree_x), 1),
             pane_id.to_owned(),
         ));
         y += 1;
+
+        // the agent's own lines: part of the same pane (same click)
+        let ProjectRow::Agent(agent) = project_row else {
+            continue;
+        };
+        let room = right.saturating_sub(logo_x + 2);
+        let who = who_parts(agent, cost, &git, room, t, fill);
+        let costs = cost
+            .filter(|cost| cost.context.is_some() || cost.memory.is_some())
+            .map(|cost| cost_parts(cost, room, t, fill));
+        let lines = [Some(who), costs];
+        let count = lines.iter().flatten().count();
+        for (line, parts) in lines.into_iter().flatten().enumerate() {
+            if y >= rect.bottom() {
+                break;
+            }
+            if !is_last {
+                put_text(buffer, tree_x, y, 1, "│", quiet);
+            }
+            let end = line + 1 == count;
+            let (glyph, style) = match (focused, end) {
+                (true, true) => ("┗", lit),
+                (true, false) => ("┣", lit),
+                (false, true) => ("└", quiet),
+                (false, false) => ("├", quiet),
+            };
+            put_text(buffer, logo_x, y, 1, glyph, style);
+            let mut x = logo_x + 2;
+            for (text, style) in parts {
+                let width = display_width(&text).min(right.saturating_sub(x));
+                if width == 0 {
+                    break;
+                }
+                put_text(
+                    buffer,
+                    x,
+                    y,
+                    width,
+                    &brutal::clip(&text, usize::from(width)),
+                    style,
+                );
+                x += width;
+            }
+            hits.agents.push((
+                Rect::new(tree_x, y, right.saturating_sub(tree_x), 1),
+                pane_id.to_owned(),
+            ));
+            y += 1;
+        }
     }
 }
 
@@ -1336,14 +1573,14 @@ mod tests {
         let here = read("/repo");
         let git = focused_pane_git(&snapshot, Some(&here));
         assert_eq!(
-            shown_branch(&snapshot.workspaces[0], git),
+            project_git(&snapshot.workspaces[0], git).branch,
             Some("panel-branch")
         );
         // a read left over from another project: the server's branch shows
         let elsewhere = read("/other-project");
         let git = focused_pane_git(&snapshot, Some(&elsewhere));
         assert_eq!(
-            shown_branch(&snapshot.workspaces[0], git),
+            project_git(&snapshot.workspaces[0], git).branch,
             Some("server-branch")
         );
     }

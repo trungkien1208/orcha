@@ -816,6 +816,19 @@ pub(crate) fn begin_cli_output() {}
 #[cfg(not(unix))]
 pub(crate) fn end_cli_output() {}
 
+/// One process with its parent and the memory it holds, for adding up what
+/// runs under a pane (`orcha_process_memory`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProcessMemory {
+    pub pid: u32,
+    pub ppid: u32,
+    /// Its short name ("node", "xcodebuild"), to say what weighs on a pane.
+    pub name: String,
+    /// Bytes: the footprint Activity Monitor shows on macOS (resident size
+    /// misses what macOS compressed or swapped out), resident elsewhere.
+    pub memory: u64,
+}
+
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
@@ -1076,6 +1089,19 @@ fn child_exit_classification_only_checkpoints_interruptions() {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn the_process_table_holds_this_process_and_its_memory() {
+        let table = orcha_process_memory();
+        let me = table
+            .iter()
+            .find(|process| process.pid == std::process::id())
+            .expect("this process");
+        assert!(me.memory > 0);
+        assert!(table.iter().any(|process| process.pid == me.ppid));
+        assert!(orcha_physical_memory().is_some_and(|ram| ram > me.memory));
+    }
 
     #[cfg(target_os = "linux")]
     #[test]

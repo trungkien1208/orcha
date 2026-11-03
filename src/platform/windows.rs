@@ -1533,6 +1533,19 @@ pub(crate) fn orcha_cursor_token() -> Option<String> {
     super::orcha_cursor_token_file()
 }
 
+/// Not read here yet: orcha shows no memory on this system.
+pub(crate) fn orcha_process_memory() -> Vec<super::ProcessMemory> {
+    Vec::new()
+}
+
+pub(crate) fn orcha_physical_memory() -> Option<u64> {
+    None
+}
+
+pub(crate) fn orcha_process_exe(_pid: u32) -> Option<std::path::PathBuf> {
+    None
+}
+
 /// Windows does not let one process read another's environment cheaply;
 /// callers fall back to the default sign-in.
 pub(crate) fn orcha_process_env_var(_pid: u32, _name: &str) -> Option<String> {

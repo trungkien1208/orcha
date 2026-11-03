@@ -533,6 +533,9 @@ pub struct PaneInfo {
     pub agent_session: Option<AgentSessionInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scroll: Option<PaneScrollInfo>,
+    /// The pane's shell process, so tools can look at what runs under it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell_pid: Option<u32>,
     pub revision: u64,
 }
 

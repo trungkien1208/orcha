@@ -429,6 +429,61 @@ pub(crate) fn orcha_cursor_token() -> Option<String> {
     super::orcha_cursor_token_file()
 }
 
+/// Every process this user may read, with its parent and resident memory
+/// from `/proc/<pid>/stat`.
+pub(crate) fn orcha_process_memory() -> Vec<super::ProcessMemory> {
+    let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    let page = u64::try_from(page)
+        .ok()
+        .filter(|page| *page > 0)
+        .unwrap_or(4096);
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let pid = entry.file_name().to_str()?.parse().ok()?;
+            let stat = std::fs::read_to_string(entry.path().join("stat")).ok()?;
+            proc_stat_memory(pid, &stat, page)
+        })
+        .collect()
+}
+
+/// The name (field 2), parent (field 4) and resident pages (field 24) of a
+/// `stat` line. The name in parentheses may hold spaces, so fields count
+/// from its end.
+fn proc_stat_memory(pid: u32, stat: &str, page: u64) -> Option<super::ProcessMemory> {
+    let close = stat.rfind(')')?;
+    let name = stat[..close].split_once('(').map_or("", |(_, name)| name);
+    let fields: Vec<&str> = stat[close + 1..].split_whitespace().collect();
+    Some(super::ProcessMemory {
+        pid,
+        name: name.to_owned(),
+        ppid: fields.get(1)?.parse().ok()?,
+        memory: fields.get(21)?.parse::<u64>().ok()?.saturating_mul(page),
+    })
+}
+
+/// The file a process runs, when this user may see it.
+pub(crate) fn orcha_process_exe(pid: u32) -> Option<std::path::PathBuf> {
+    std::fs::read_link(format!("/proc/{pid}/exe")).ok()
+}
+
+/// The machine's RAM in bytes (`MemTotal` in `/proc/meminfo`).
+pub(crate) fn orcha_physical_memory() -> Option<u64> {
+    let info = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let kib: u64 = info
+        .lines()
+        .find_map(|line| line.strip_prefix("MemTotal:"))?
+        .trim()
+        .trim_end_matches("kB")
+        .trim()
+        .parse()
+        .ok()?;
+    Some(kib.saturating_mul(1024))
+}
+
 /// One variable of another process's environment, as that process sees it.
 pub(crate) fn orcha_process_env_var(pid: u32, name: &str) -> Option<String> {
     if pid == 0 {
@@ -2396,5 +2451,20 @@ mod tests {
         assert_eq!(argv[1], "-c");
         assert!(argv[2].contains("EDITOR:-vi"));
         assert!(argv[2].contains("/tmp/herdr scrollback.txt"));
+    }
+}
+
+#[cfg(test)]
+mod process_memory_tests {
+    #[test]
+    fn stat_lines_give_parent_and_resident_bytes_even_with_spaces_in_the_name() {
+        let stat = "4242 (my (odd) cmd) S 17 4242 4242 0 -1 4194560 120 0 0 0 3 1 0 0 20 0 1 0 900 12345678 300 18446744073709551615";
+        let memory = super::proc_stat_memory(4242, stat, 4096).expect("parsed");
+        assert_eq!(
+            (memory.pid, memory.ppid, memory.memory),
+            (4242, 17, 300 * 4096)
+        );
+        assert_eq!(memory.name, "my (odd) cmd");
+        assert_eq!(super::proc_stat_memory(1, "1 (init) S", 4096), None);
     }
 }

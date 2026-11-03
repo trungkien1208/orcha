@@ -1097,6 +1097,15 @@
                 }
               ]
             },
+            "shell_pid": {
+              "description": "The pane's shell process, so tools can look at what runs under it.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "state_labels": {
               "additionalProperties": {
                 "type": "string"
@@ -9938,6 +9947,15 @@
                 {
                   "type": "null"
                 }
+              ]
+            },
+            "shell_pid": {
+              "description": "The pane's shell process, so tools can look at what runs under it.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
               ]
             },
             "state_labels": {

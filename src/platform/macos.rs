@@ -400,6 +400,94 @@ pub(crate) fn orcha_cursor_token() -> Option<String> {
     keychain_read("cursor-access-token").map(|token| token.trim().to_owned())
 }
 
+/// Every process this user may read, with its parent and its memory
+/// footprint (what Activity Monitor shows: resident size alone misses what
+/// macOS compressed or swapped out). One pass over the process list, a few
+/// milliseconds for 600 processes.
+pub(crate) fn orcha_process_memory() -> Vec<super::ProcessMemory> {
+    all_pids()
+        .into_iter()
+        .filter_map(|pid| {
+            let mut bsd: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+            let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+            let read = unsafe {
+                libc::proc_pidinfo(
+                    pid as libc::c_int,
+                    libc::PROC_PIDTBSDINFO,
+                    0,
+                    &mut bsd as *mut _ as *mut libc::c_void,
+                    size,
+                )
+            };
+            if read != size {
+                return None;
+            }
+            let mut usage: libc::rusage_info_v2 = unsafe { std::mem::zeroed() };
+            let read = unsafe {
+                libc::proc_pid_rusage(
+                    pid as libc::c_int,
+                    libc::RUSAGE_INFO_V2,
+                    &mut usage as *mut libc::rusage_info_v2 as *mut libc::rusage_info_t,
+                )
+            };
+            // the long name when there is one, else the 16-byte one
+            let mut name = c_name(&bsd.pbi_name);
+            if name.is_empty() {
+                name = c_name(&bsd.pbi_comm);
+            }
+            (read == 0).then_some(super::ProcessMemory {
+                pid,
+                ppid: bsd.pbi_ppid,
+                name,
+                memory: usage.ri_phys_footprint,
+            })
+        })
+        .collect()
+}
+
+/// The file a process runs, when this user may see it.
+pub(crate) fn orcha_process_exe(pid: u32) -> Option<std::path::PathBuf> {
+    let mut buffer = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    let len = unsafe {
+        libc::proc_pidpath(
+            pid as libc::c_int,
+            buffer.as_mut_ptr().cast::<libc::c_void>(),
+            buffer.len() as u32,
+        )
+    };
+    let len = usize::try_from(len).ok().filter(|len| *len > 0)?;
+    buffer.truncate(len);
+    Some(std::path::PathBuf::from(
+        String::from_utf8_lossy(&buffer).into_owned(),
+    ))
+}
+
+/// A fixed C string field as text, up to its first NUL.
+fn c_name(field: &[libc::c_char]) -> String {
+    let bytes: Vec<u8> = field
+        .iter()
+        .take_while(|byte| **byte != 0)
+        .map(|byte| *byte as u8)
+        .collect();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// The machine's RAM in bytes.
+pub(crate) fn orcha_physical_memory() -> Option<u64> {
+    let mut bytes: u64 = 0;
+    let mut len = std::mem::size_of::<u64>();
+    let read = unsafe {
+        libc::sysctlbyname(
+            c"hw.memsize".as_ptr(),
+            &mut bytes as *mut u64 as *mut libc::c_void,
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    (read == 0 && bytes > 0).then_some(bytes)
+}
+
 /// One variable of another process's environment, as that process sees it.
 pub(crate) fn orcha_process_env_var(pid: u32, name: &str) -> Option<String> {
     if pid == 0 {

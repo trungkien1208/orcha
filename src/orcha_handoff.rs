@@ -239,7 +239,7 @@ fn newest(paths: Vec<PathBuf>) -> Option<PathBuf> {
     })
 }
 
-fn claude_file(session: &str, home: &Path) -> Option<PathBuf> {
+pub(crate) fn claude_file(session: &str, home: &Path) -> Option<PathBuf> {
     let name = format!("{session}.jsonl");
     let mut found = Vec::new();
     for folder in crate::orcha_accounts::claude_config_folders(home) {
@@ -257,7 +257,7 @@ fn claude_file(session: &str, home: &Path) -> Option<PathBuf> {
 }
 
 /// `~/.codex/sessions/YYYY/MM/DD/rollout-…-<session>.jsonl`.
-fn codex_file(session: &str, home: &Path) -> Option<PathBuf> {
+pub(crate) fn codex_file(session: &str, home: &Path) -> Option<PathBuf> {
     fn walk(dir: &Path, depth: usize, session: &str, found: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;

@@ -45,6 +45,7 @@ mod orcha_office;
 mod orcha_plugin_updates;
 mod orcha_rules;
 mod orcha_state;
+mod orcha_usage;
 mod pane;
 use ghostty_vt::pane_graphics_files;
 mod persist;

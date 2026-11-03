@@ -185,6 +185,7 @@ mod tests {
             tokens: HashMap::new(),
             agent_session: None,
             scroll: None,
+            shell_pid: None,
             revision: 0,
         }
     }
