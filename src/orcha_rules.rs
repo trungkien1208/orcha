@@ -159,6 +159,22 @@ pub(crate) const SKILLS: &[Skill] = &[
         skills: &["design-taste-frontend"],
     },
     Skill {
+        name: "i-have-adhd",
+        title: "I have ADHD",
+        summary: "answers lead with the next step, number the work and skip tangents",
+        group: "Talk",
+        source: "ayghri/i-have-adhd",
+        skills: &["i-have-adhd"],
+    },
+    Skill {
+        name: "caveman",
+        title: "Caveman",
+        summary: "short answers, same facts: far fewer words and tokens",
+        group: "Talk",
+        source: "JuliusBrussee/caveman",
+        skills: &["caveman", "caveman-commit", "caveman-review"],
+    },
+    Skill {
         name: "humanizer",
         title: "Humanizer",
         summary: "rewrites text so it stops sounding like AI",

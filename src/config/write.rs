@@ -20,6 +20,13 @@ pub(crate) enum ConfigEdit<'a> {
     Process(super::ProcessPlacement),
     /// orcha: the project sidebar's side.
     SidebarSide(super::SidebarSide),
+    /// Follow the terminal's light or dark appearance (`[theme] auto_switch`).
+    ThemeAutoSwitch(bool),
+    /// Ask before closing a workspace (`[ui] confirm_close`).
+    ConfirmClose(bool),
+    /// orcha: how Ctrl+clicked files of one extension open
+    /// (`[orcha.open_with]`); None forgets the choice, so orcha asks again.
+    OpenWith(&'a str, Option<&'a str>),
 }
 
 impl ConfigEdit<'_> {
@@ -38,6 +45,9 @@ impl ConfigEdit<'_> {
             Self::Icons(_) => "logo setting",
             Self::Process(_) => "process placement",
             Self::SidebarSide(_) => "sidebar side",
+            Self::ThemeAutoSwitch(_) => "light and dark setting",
+            Self::ConfirmClose(_) => "close confirmation",
+            Self::OpenWith(..) => "open-with choice",
         }
     }
 
@@ -111,6 +121,21 @@ impl ConfigEdit<'_> {
                     super::SidebarSide::Right => "\"right\"",
                 };
                 super::upsert_section_value(content, "orcha", "sidebar_side", value)
+            }
+            Self::ThemeAutoSwitch(on) => {
+                super::upsert_section_bool(content, "theme", "auto_switch", on)
+            }
+            Self::ConfirmClose(on) => {
+                super::upsert_section_bool(content, "ui", "confirm_close", on)
+            }
+            Self::OpenWith(extension, Some(choice)) => super::upsert_section_value(
+                content,
+                "orcha.open_with",
+                extension,
+                &format!("\"{}\"", choice.replace('\\', "\\\\").replace('"', "\\\"")),
+            ),
+            Self::OpenWith(extension, None) => {
+                super::remove_section_key(content, "orcha.open_with", extension)
             }
         }
     }
@@ -231,5 +256,23 @@ mod tests {
             toml::from_str::<toml::Value>(&written).is_ok(),
             "written config is not valid TOML: {written:?}"
         );
+    }
+
+    #[test]
+    fn open_with_choices_are_written_and_forgotten() {
+        let content = ConfigEdit::OpenWith("png", Some("folder")).apply("");
+        assert!(content.contains("[orcha.open_with]"), "{content}");
+        assert!(content.contains("png = \"folder\""), "{content}");
+        let content = ConfigEdit::OpenWith("md", Some("editor:zed \"{path}\"")).apply(&content);
+        assert!(
+            content.contains(r#"md = "editor:zed \"{path}\"""#),
+            "{content}"
+        );
+        let content = ConfigEdit::OpenWith("png", None).apply(&content);
+        assert!(!content.contains("png ="), "{content}");
+        let content = ConfigEdit::ThemeAutoSwitch(true).apply(&content);
+        assert!(content.contains("auto_switch = true"), "{content}");
+        let content = ConfigEdit::ConfirmClose(false).apply(&content);
+        assert!(content.contains("confirm_close = false"), "{content}");
     }
 }

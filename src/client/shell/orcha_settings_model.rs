@@ -121,6 +121,31 @@ fn option(value: &str, label: &str) -> Value {
     json!({"value": value, "label": label})
 }
 
+/// The file types orcha remembers how to open (Ctrl+click), A to Z: each one
+/// can switch app or be forgotten, so orcha asks again next time.
+fn open_with_fields(open_with: &std::collections::HashMap<String, String>) -> Vec<Value> {
+    let mut extensions: Vec<_> = open_with.iter().collect();
+    extensions.sort();
+    extensions
+        .into_iter()
+        .map(|(extension, choice)| {
+            let mut options = vec![
+                option("system", "default app"),
+                option("folder", "show in folder"),
+                option("editor", "editor"),
+            ];
+            if choice.starts_with("editor:") {
+                options.push(option(choice, &format!("editor: {}", &choice[7..])));
+            }
+            options.push(option("forget", "ask me next time"));
+            let mut out = select(&format!("open_with.{extension}"), choice, options);
+            out["label"] = json!(format!(".{extension} files"));
+            out["help"] = json!("what a Ctrl+click on one opens");
+            out
+        })
+        .collect()
+}
+
 /// One setting as the page draws it, in the words WORDS has for `key`;
 /// `extra` (an object) adds the options or a slider's bounds.
 fn field(key: &str, kind: &str, value: impl Into<Value>, extra: Value) -> Value {
@@ -393,13 +418,14 @@ fn config_fields(config: &Config) -> Vec<Value> {
         .iter()
         .map(|(name, _)| option(name, name))
         .collect();
-    vec![
+    let mut fields = vec![
         field(
             "theme",
             "themes",
             config.theme.name.as_deref().unwrap_or("orcha"),
             json!({"options": theme_cards()}),
         ),
+        toggle("theme_auto", config.theme.auto_switch),
         field("accent", "swatches", accent, json!({"options": accents})),
         choice("sidebar_side", orcha.sidebar_side),
         select("sidebar_width", width, widths),
@@ -408,6 +434,7 @@ fn config_fields(config: &Config) -> Vec<Value> {
         choice("process", orcha.process),
         choice("icons", orcha.icons),
         toggle("pane_paper", orcha.pane_paper),
+        toggle("confirm_close", ui.confirm_close),
         choice("status_indicators", ui.status_indicators),
         toggle("sound", ui.sound.enabled),
         choice("toast", ui.toast.delivery),
@@ -429,7 +456,9 @@ fn config_fields(config: &Config) -> Vec<Value> {
         choice("switch_mode", orcha.switch_mode),
         text("checklist_file", &orcha.checklist_file),
         toggle("update_plugins", orcha.update_plugins),
-    ]
+    ];
+    fields.extend(open_with_fields(&orcha.open_with));
+    fields
 }
 
 /// The apps that open a project's folder and its repository: the ones
@@ -509,7 +538,7 @@ const GROUPS: &[(&str, &str, &str, &[Group])] = &[
         "Look & colors",
         "Colors and font for orcha and the terminal inside it.",
         &[
-            ("orcha", &["theme", "accent"]),
+            ("orcha", &["theme", "theme_auto", "accent"]),
             ("Terminal", &["palette", "font", "font_size", "ligatures"]),
         ],
     ),
@@ -542,6 +571,7 @@ const GROUPS: &[(&str, &str, &str, &[Group])] = &[
                 "Getting your attention",
                 &["status_indicators", "sound", "toast"],
             ),
+            ("Closing", &["confirm_close"]),
             (
                 "When an account runs low",
                 &[
@@ -559,6 +589,7 @@ const GROUPS: &[(&str, &str, &str, &[Group])] = &[
         "Apps, branch rules and language. You set these once.",
         &[
             ("Apps", &["ide", "git_gui"]),
+            ("Opening files", &["open_with.*"]),
             (
                 "Branches & tasks",
                 &[
@@ -583,6 +614,16 @@ const WORDS: &[(&str, &str, &str)] = &[
         "theme",
         "App colors",
         "orcha's panels, its sidebar and this page",
+    ),
+    (
+        "theme_auto",
+        "Follow light and dark",
+        "switch to the light or dark version of these colors with your terminal",
+    ),
+    (
+        "confirm_close",
+        "Ask before closing a project",
+        "one last check before a project and its agents close",
     ),
     (
         "accent",
@@ -745,6 +786,8 @@ fn regroup(fields: &[Value]) -> Vec<Value> {
 /// Settings whose out-of-the-box value is orcha's (config.toml); the
 /// orcha-config ones have their own defaults.
 const DEFAULT_KEYS: &[&str] = &[
+    "theme_auto",
+    "confirm_close",
     "accent",
     "sidebar_side",
     "sidebar_width",
@@ -1112,10 +1155,32 @@ enum Change<'a> {
     Json(&'a str),
 }
 
+/// A remembered file type's new app, or forgetting it.
+fn open_with_change<'a>(extension: &'a str, value: &'a Value) -> Result<Change<'a>, String> {
+    if extension.is_empty()
+        || !extension
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    {
+        return Err(format!("unknown file type: {extension}"));
+    }
+    let choice = value.as_str().ok_or("expected a choice")?;
+    let choice = match choice {
+        "forget" => None,
+        "system" | "folder" | "editor" => Some(choice),
+        _ if choice.starts_with("editor:") && choice.len() > 7 => Some(choice),
+        _ => return Err(format!("unknown choice: {choice}")),
+    };
+    Ok(Change::Edit(ConfigEdit::OpenWith(extension, choice)))
+}
+
 /// Checks the value the page sent for `key` and says what saving it
 /// changes. Nothing is written here.
-fn change_for<'a>(key: &str, value: &'a Value) -> Result<Change<'a>, String> {
+fn change_for<'a>(key: &'a str, value: &'a Value) -> Result<Change<'a>, String> {
     use ConfigEdit as Edit;
+    if let Some(extension) = key.strip_prefix("open_with.") {
+        return open_with_change(extension, value);
+    }
     let change = match key {
         "theme" => Change::Edit(Edit::Theme(one_of(value, crate::config::THEME_NAMES)?)),
         "accent" => Change::Edit(Edit::Accent(named(value, &ACCENTS)?)),
@@ -1128,6 +1193,8 @@ fn change_for<'a>(key: &str, value: &'a Value) -> Result<Change<'a>, String> {
         "toast" => Change::Edit(Edit::ToastDelivery(Choice::parse(value)?)),
         "right_panel" => Change::Edit(Edit::RightPanel(flag(value)?)),
         "pane_paper" => Change::Edit(Edit::PanePaper(flag(value)?)),
+        "theme_auto" => Change::Edit(Edit::ThemeAutoSwitch(flag(value)?)),
+        "confirm_close" => Change::Edit(Edit::ConfirmClose(flag(value)?)),
         "update_plugins" => Change::Edit(Edit::UpdatePlugins(flag(value)?)),
         "sound" => Change::Edit(Edit::Sound(flag(value)?)),
         "checklist_percent" => Change::Orcha(percent(value, &CHECKLIST_PERCENT)?.to_string()),
@@ -1537,6 +1604,32 @@ mod tests {
         assert!(change_for("toast", &json!("pigeon")).is_err());
         assert!(change_for("sidebar_width", &json!("huge")).is_err());
         assert!(change_for("accent", &json!("plaid")).is_err());
+        assert!(matches!(
+            change_for("theme_auto", &json!(true)),
+            Ok(Change::Edit(ConfigEdit::ThemeAutoSwitch(true)))
+        ));
+        assert!(matches!(
+            change_for("confirm_close", &json!(false)),
+            Ok(Change::Edit(ConfigEdit::ConfirmClose(false)))
+        ));
+        assert!(matches!(
+            change_for("open_with.png", &json!("folder")),
+            Ok(Change::Edit(ConfigEdit::OpenWith("png", Some("folder"))))
+        ));
+        assert!(matches!(
+            change_for("open_with.md", &json!("forget")),
+            Ok(Change::Edit(ConfigEdit::OpenWith("md", None)))
+        ));
+        assert!(matches!(
+            change_for("open_with.md", &json!("editor:zed {path}")),
+            Ok(Change::Edit(ConfigEdit::OpenWith(
+                "md",
+                Some("editor:zed {path}")
+            )))
+        ));
+        assert!(change_for("open_with.md", &json!("browser")).is_err());
+        assert!(change_for("open_with.../x", &json!("system")).is_err());
+        assert!(change_for("open_with.", &json!("system")).is_err());
     }
 
     /// Every variant of an enum, through a match with no wildcard: a variant
