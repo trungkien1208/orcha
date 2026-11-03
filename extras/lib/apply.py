@@ -42,8 +42,8 @@ KEYS = [  # (ghostty key, herdr key, script, popup?, width, height, description 
     ("super+o", "i", "open-in.sh ide", False, None, None, "k_ide"),
     ("super+shift+o", "m", "open-in.sh git", False, None, None, "k_git"),
     ("super+u", "u", "usage-picker.sh", True, "90%", "85%", "k_quota"),
-    # Cmd+, is "settings" on macOS: orcha's menu (Ghostty's own config is orcha's now)
-    ("super+comma", ",", "../bin/orcha", True, "70%", "75%", "k_settings"),
+    # Cmd+, is "settings" on macOS: orcha's settings page (Ghostty's own config is orcha's now)
+    ("super+comma", ",", "settings.sh", False, None, None, "k_settings"),
 ]
 
 
