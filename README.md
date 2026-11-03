@@ -7,6 +7,7 @@
 
 <p align="center">
   <a href="#install"><b>Install</b></a> ·
+  <a href="#prefer-a-window-orcha-for-the-herdr-desktop-app">Desktop app</a> ·
   <a href="https://trungkien1208.github.io/orcha/">Website</a> ·
   <a href="#why-orcha-and-not-orca-or-herdr">Why orcha</a> ·
   <a href="#easy-job-a-pixel-art-office-for-your-agents">Easy Job</a> ·
@@ -47,6 +48,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 ```
 
 </details>
+
+### Prefer a window? orcha for the Herdr desktop app
+
+Same cockpit, in a real window: [**orcha-app**](https://github.com/trungkien1208/orcha-app) dresses up the [Herdr desktop app](https://github.com/herdrdev/herdr-app) with orcha's look, fuel, accounts, hand-off and more. Two lines on macOS:
+
+```sh
+# 1. the Herdr desktop app (skip if you have it)
+curl -fsSL https://releases.herdr.dev/app/install.sh | sh
+
+# 2. orcha's look for it
+curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha-app/HEAD/install.sh | sh
+```
+
+Then open Herdr, press `⌘⇧P`, run `layout.switch` and pick **orcha**. Keep the terminal orcha too: FUEL and ACCOUNTS use its accounts. More in the [orcha-app guide](https://github.com/trungkien1208/orcha-app#readme).
 
 ## Get started
 
