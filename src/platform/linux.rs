@@ -368,6 +368,15 @@ pub(crate) fn orcha_installer_instruction_platform(
     unix_command
 }
 
+/// Only macOS blocks folders by privacy setting.
+pub(crate) fn folder_blocked_by_privacy(_folder: &std::path::Path) -> bool {
+    false
+}
+
+pub(crate) fn privacy_settings_url() -> Option<&'static str> {
+    None
+}
+
 pub(crate) fn open_orcha_target_platform(
     target: super::OrchaOpenTarget,
     path: &std::path::Path,

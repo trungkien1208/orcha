@@ -104,3 +104,11 @@ pub struct WorkspaceWorktreeInfo {
     pub checkout_path: String,
     pub is_linked_worktree: bool,
 }
+
+/// A project folder the server cannot read because of an operating system
+/// privacy setting (macOS Full Disk Access), so shells there fail.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct BlockedFolder {
+    pub workspace_id: String,
+    pub path: String,
+}

@@ -1783,3 +1783,65 @@ fn configured_prefix_binding_hides_the_overridden_orcha_shortcut() {
     assert!(matches!(state.overlay, Some(ClientShellOverlay::Help(_))));
     assert!(state.orcha_ui.popup.is_none());
 }
+
+/// FOLDER ACCESS: blocked folders from the server show once, after other
+/// popups, and "Not now" closes the popup for good this run.
+#[test]
+fn blocked_folders_ask_once_for_full_disk_access() {
+    use crate::api::schema::{BlockedFolder, ResponseResult};
+    use crate::client::shell::orcha_popup::OrchaPopup;
+    let mut state = orcha_state(true, true);
+    let blocked = || {
+        Ok(ResponseResult::FolderAccess {
+            blocked: vec![
+                BlockedFolder {
+                    workspace_id: "w1".into(),
+                    path: "/Users/me/Desktop/app".into(),
+                },
+                BlockedFolder {
+                    workspace_id: "w2".into(),
+                    path: "/Users/me/Documents/site".into(),
+                },
+            ],
+        })
+    };
+    state.complete_folder_access(blocked());
+    state.complete_folder_access(blocked());
+    assert_eq!(state.orcha_ui.folder_access_blocked.len(), 2, "no repeats");
+
+    // waits while another popup is up
+    state.orcha_ui.popup = Some(OrchaPopup::WhatsNew {
+        release: crate::orcha_app::Release {
+            version: "1.0.0".into(),
+            notes: Vec::new(),
+        },
+    });
+    state.check_folder_access(&mut ClientShellInput::default());
+    assert!(matches!(
+        state.orcha_ui.popup,
+        Some(OrchaPopup::WhatsNew { .. })
+    ));
+    state.orcha_ui.popup = None;
+
+    let mut outcome = ClientShellInput::default();
+    state.check_folder_access(&mut outcome);
+    assert!(outcome.repaint);
+    assert!(matches!(
+        &state.orcha_ui.popup,
+        Some(OrchaPopup::FolderAccess { folders, .. }) if folders.len() == 2
+    ));
+    let frame = state.compose(140, 40).expect("frame");
+    let rows = popup_rows(&frame, state.hits.orcha.popup.area).join("\n");
+    assert!(rows.contains("FOLDER ACCESS"));
+    assert!(
+        rows.contains("macOS blocks /Users/me/Desktop/app +1"),
+        "{rows}"
+    );
+    assert!(rows.contains("Open Full Disk Access"));
+
+    state.activate_folder_access(Some(1));
+    assert!(state.orcha_ui.popup.is_none());
+    state.complete_folder_access(blocked());
+    state.check_folder_access(&mut ClientShellInput::default());
+    assert!(state.orcha_ui.popup.is_none(), "not asked again this run");
+}

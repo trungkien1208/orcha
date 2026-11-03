@@ -1075,6 +1075,9 @@ impl App {
                 return self.handle_session_snapshot(request.id, params)
             }
             Method::WorkspaceList(_) => return self.handle_workspace_list(request.id),
+            Method::WorkspaceFolderAccess(_) => {
+                return self.handle_workspace_folder_access(request.id)
+            }
             Method::WorkspaceGet(target) => return self.handle_workspace_get(request.id, target),
             Method::WorkspaceCreate(params) => {
                 return self.handle_workspace_create(request.id, params);

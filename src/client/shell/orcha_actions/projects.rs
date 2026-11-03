@@ -3,6 +3,102 @@
 use super::*;
 
 impl ClientShellState {
+    /// macOS keeps its folder permissions per orcha build, so an update can
+    /// leave the server unable to read Desktop or Documents projects, and
+    /// shells there fail ("Operation not permitted"). Ask the server which
+    /// project folders it cannot read when it starts or projects change, then
+    /// explain how to give access back.
+    pub(crate) fn check_folder_access(&mut self, outcome: &mut ClientShellInput) {
+        use std::hash::{Hash, Hasher};
+
+        if !self.orcha_ui.folder_access_blocked.is_empty()
+            && self.orcha_ui.popup.is_none()
+            && self.overlay.is_none()
+        {
+            let folders = std::mem::take(&mut self.orcha_ui.folder_access_blocked);
+            self.orcha_ui.popup = Some(super::super::orcha_popup::OrchaPopup::FolderAccess {
+                selected: 0,
+                folders,
+            });
+            outcome.repaint = true;
+        }
+        // Settings can only be opened on this machine.
+        if !crate::orcha_app::is_orcha()
+            || self.active_endpoint_id != ClientEndpointId::Local
+            || crate::platform::privacy_settings_url().is_none()
+        {
+            return;
+        }
+        let Some(snapshot) = self.snapshot.as_deref() else {
+            return;
+        };
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        snapshot.boot_id.hash(&mut hasher);
+        for workspace in &snapshot.workspaces {
+            workspace.workspace_id.hash(&mut hasher);
+        }
+        let key = hasher.finish();
+        if self.orcha_ui.folder_access_asked == Some(key) {
+            return;
+        }
+        // Optional: never probe a server without the method, never a notice.
+        let offered = self
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == self.active_endpoint_id)
+            .and_then(|endpoint| endpoint.methods.as_ref())
+            .is_some_and(|methods| {
+                methods
+                    .iter()
+                    .any(|method| method == "workspace.folder_access")
+            });
+        if !offered || !self.endpoint_is_online(&self.active_endpoint_id) {
+            return;
+        }
+        self.orcha_ui.folder_access_asked = Some(key);
+        self.push_endpoint_method_with_kind(
+            crate::api::schema::Method::WorkspaceFolderAccess(crate::api::schema::EmptyParams {}),
+            PendingEndpointKind::FolderAccess,
+            outcome,
+        );
+    }
+
+    /// Keeps the blocked folders not shown yet; `check_folder_access` shows them.
+    pub(in crate::client::shell) fn complete_folder_access(
+        &mut self,
+        result: Result<crate::api::schema::ResponseResult, ClientShellEndpointError>,
+    ) -> bool {
+        let Ok(crate::api::schema::ResponseResult::FolderAccess { blocked }) = result else {
+            return false;
+        };
+        let ui = &mut self.orcha_ui;
+        for folder in blocked {
+            if ui.folder_access_seen.insert(folder.path.clone()) {
+                ui.folder_access_blocked.push(folder.path);
+            }
+        }
+        false
+    }
+
+    /// FOLDER ACCESS: open Full Disk Access (row 0), or not now.
+    pub(in crate::client::shell) fn activate_folder_access(&mut self, row: Option<usize>) {
+        self.orcha_ui.popup = None;
+        if row != Some(0) {
+            return;
+        }
+        let Some(url) = crate::platform::privacy_settings_url() else {
+            return;
+        };
+        if let Err(err) = crate::platform::open_url(url) {
+            self.show_failure(format!("Could not open System Settings: {err}"));
+            return;
+        }
+        self.show_lasting_notice(
+            "Turn orcha on, then run: orcha server stop, and open orcha again".to_owned(),
+            NoticeClick::Dismiss,
+        );
+    }
+
     /// A project just added by hand gets one question about working rules,
     /// once nothing else is on screen and only when it has none yet.
     pub(in crate::client::shell) fn offer_project_rules(&mut self) -> bool {

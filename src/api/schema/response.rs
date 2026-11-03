@@ -331,6 +331,9 @@ pub enum ResponseResult {
     PaneLinkResolved {
         regions: Vec<super::panes::PaneLinkRegion>,
     },
+    FolderAccess {
+        blocked: Vec<super::workspaces::BlockedFolder>,
+    },
     PaneLinkActivated {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         url: Option<String>,

@@ -159,6 +159,13 @@ pub(crate) struct OrchaUiState {
         Option<std::sync::mpsc::Receiver<std::io::Result<Option<std::path::PathBuf>>>>,
     /// The project orcha was started in was opened (or found open) already.
     pub(super) launch_project_done: bool,
+    /// The projects (server boot and project ids, hashed) last asked about
+    /// macOS folder access; asked again when they change.
+    pub(super) folder_access_asked: Option<u64>,
+    /// Folders macOS blocks the server from reading, waiting for a free screen.
+    pub(super) folder_access_blocked: Vec<String>,
+    /// Blocked folders already shown, not shown again until orcha restarts.
+    pub(super) folder_access_seen: std::collections::HashSet<String>,
     /// Projects other tools know about, being looked up off the input path.
     pub(super) import_scan: Option<BackgroundJob<Vec<crate::orcha_import::ImportSource>>>,
     /// A newer orcha release (being looked up, then its version).
@@ -951,6 +958,8 @@ pub(super) enum PendingEndpointKind {
     PaneLinkResolve {
         target: super::link_hover::LinkHoverTarget,
     },
+    /// Which project folders macOS blocks the server from reading.
+    FolderAccess,
     PaneLinkActivate {
         pane_id: String,
         inner_rect: Rect,

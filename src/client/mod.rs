@@ -2358,6 +2358,7 @@ async fn run_client_loop(
                             | shell.tick_git_panel(now)
                             | shell.tick_orcha(now);
                         shell.open_launch_project(&mut outcome);
+                        shell.check_folder_access(&mut outcome);
                         let frame = outcome
                             .repaint
                             .then(|| shell.compose(state.reported_size.0, state.reported_size.1))

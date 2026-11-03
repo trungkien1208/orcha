@@ -20,6 +20,22 @@ impl App {
         )
     }
 
+    /// Project folders this server cannot read because of an OS privacy
+    /// setting. Runs on request only: one directory open per project.
+    pub(super) fn handle_workspace_folder_access(&mut self, id: String) -> String {
+        let mut seen = std::collections::HashSet::new();
+        let blocked = (0..self.state.workspaces.len())
+            .filter_map(|index| Some((index, self.seed_cwd_from_workspace(index)?)))
+            .filter(|(_, path)| seen.insert(path.clone()))
+            .filter(|(_, path)| crate::platform::folder_blocked_by_privacy(path))
+            .map(|(index, path)| crate::api::schema::BlockedFolder {
+                workspace_id: self.public_workspace_id(index),
+                path: path.to_string_lossy().into_owned(),
+            })
+            .collect();
+        encode_success(id, ResponseResult::FolderAccess { blocked })
+    }
+
     pub(super) fn handle_workspace_get(&mut self, id: String, target: WorkspaceTarget) -> String {
         let Some(index) = self.parse_workspace_id(&target.workspace_id) else {
             return workspace_not_found(id, &target.workspace_id);
@@ -653,6 +669,27 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn folder_access_reports_only_folders_blocked_by_privacy() {
+        let mut app = app_with_worktree_group();
+        let readable = std::env::temp_dir();
+        app.state.workspaces[0].identity_cwd = readable.clone();
+        app.state.workspaces[1].identity_cwd = readable;
+        let response = app.handle_api_request(
+            serde_json::from_value(serde_json::json!({
+                "id": "req",
+                "method": "workspace.folder_access",
+                "params": {}
+            }))
+            .unwrap(),
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert!(
+            matches!(success.result, ResponseResult::FolderAccess { ref blocked } if blocked.is_empty()),
+            "{response}"
+        );
     }
 
     #[test]

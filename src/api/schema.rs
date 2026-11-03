@@ -62,6 +62,7 @@ operations::define_operations! {
     SessionSnapshot(SessionSnapshotParams) => "session.snapshot", false, false;
     WorkspaceCreate(WorkspaceCreateParams) => "workspace.create", true, true;
     WorkspaceList(EmptyParams) => "workspace.list", false, false;
+    WorkspaceFolderAccess(EmptyParams) => "workspace.folder_access", false, true;
     WorkspaceGet(WorkspaceTarget) => "workspace.get", false, false;
     WorkspaceFocus(WorkspaceTarget) => "workspace.focus", true, true;
     WorkspaceRename(WorkspaceRenameParams) => "workspace.rename", true, true;

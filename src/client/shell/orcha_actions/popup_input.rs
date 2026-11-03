@@ -55,6 +55,7 @@ impl ClientShellState {
             Some(super::super::orcha_popup::OrchaPopup::Update { .. }) => 3,
             Some(super::super::orcha_popup::OrchaPopup::PluginUpdate { .. }) => 2,
             Some(super::super::orcha_popup::OrchaPopup::PluginRemove { .. }) => 2,
+            Some(super::super::orcha_popup::OrchaPopup::FolderAccess { .. }) => 2,
             Some(super::super::orcha_popup::OrchaPopup::Checklist { .. }) => 2,
             Some(super::super::orcha_popup::OrchaPopup::RulesOffer { .. }) => 4,
             Some(super::super::orcha_popup::OrchaPopup::SwitchAccount { .. }) => 3,

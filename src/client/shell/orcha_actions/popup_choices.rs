@@ -54,6 +54,7 @@ impl ClientShellState {
                 left,
                 ..
             } => self.activate_checklist(row, pane, kind, file, left),
+            OrchaPopup::FolderAccess { .. } => self.activate_folder_access(row),
             OrchaPopup::PluginRemove {
                 plugin_id, name, ..
             } => {

@@ -118,6 +118,12 @@ pub(crate) enum OrchaPopup {
         left: u8,
         file: String,
     },
+    /// macOS blocks the server from these project folders: open Full Disk
+    /// Access, or not now.
+    FolderAccess {
+        selected: usize,
+        folders: Vec<String>,
+    },
     /// Remove a plugin? Keep is preselected.
     PluginRemove {
         selected: usize,
@@ -284,6 +290,7 @@ impl OrchaPopup {
             | Self::Update { selected, .. }
             | Self::PluginUpdate { selected, .. }
             | Self::PluginRemove { selected, .. }
+            | Self::FolderAccess { selected, .. }
             | Self::Checklist { selected, .. }
             | Self::RulesOffer { selected, .. }
             | Self::PluginOffer { selected, .. }
@@ -310,6 +317,7 @@ impl OrchaPopup {
             | Self::Update { selected, .. }
             | Self::PluginUpdate { selected, .. }
             | Self::PluginRemove { selected, .. }
+            | Self::FolderAccess { selected, .. }
             | Self::Checklist { selected, .. }
             | Self::RulesOffer { selected, .. }
             | Self::PluginOffer { selected, .. }
@@ -528,6 +536,23 @@ pub(super) fn render_popup(
                 *selected,
                 "CHECKLIST",
                 &format!("{left}% left · ask {kind} for a hand-off checklist?"),
+                &rows,
+                &t,
+                &mut hits,
+            );
+        }
+        OrchaPopup::FolderAccess { selected, folders } => {
+            let rows = folder_access_rows();
+            let first = tilde(folders.first().map_or("", String::as_str));
+            let more = match folders.len() {
+                0 | 1 => String::new(),
+                count => format!(" +{}", count - 1),
+            };
+            let _ = render_choice_rows(
+                buffer,
+                *selected,
+                "FOLDER ACCESS",
+                &format!("macOS blocks {first}{more}"),
                 &rows,
                 &t,
                 &mut hits,

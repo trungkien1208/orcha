@@ -519,6 +519,9 @@ impl ClientShellState {
         if let PendingEndpointKind::PaneLinkResolve { target } = pending.kind {
             return self.complete_link_hover(target, result);
         }
+        if matches!(pending.kind, PendingEndpointKind::FolderAccess) {
+            return (self.complete_folder_access(result), Vec::new());
+        }
         if result.is_ok() {
             let timeout_key = ClientEndpointNoticeKey {
                 boot_id: boot_id.to_owned(),
@@ -571,7 +574,9 @@ impl ClientShellState {
         }
         match pending.kind {
             PendingEndpointKind::Generic => {}
-            PendingEndpointKind::PaneLinkResolve { .. } => unreachable!("handled above"),
+            PendingEndpointKind::PaneLinkResolve { .. } | PendingEndpointKind::FolderAccess => {
+                unreachable!("handled above")
+            }
             PendingEndpointKind::ProductAnnouncementDismiss { version, id } => {
                 return match result {
                     Ok(_) => (false, Vec::new()),

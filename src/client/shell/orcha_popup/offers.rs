@@ -214,6 +214,35 @@ pub(in crate::client::shell) fn checklist_rows(
     ]
 }
 
+/// `path` with the home folder written as `~`.
+pub(in crate::client::shell) fn tilde(path: &str) -> String {
+    match std::env::var("HOME") {
+        Ok(home) if !home.is_empty() && path.starts_with(&home) => {
+            format!("~{}", &path[home.len()..])
+        }
+        _ => path.to_owned(),
+    }
+}
+
+/// Give orcha back its folder access, or not now.
+pub(in crate::client::shell) fn folder_access_rows() -> [(String, String, &'static str); 2] {
+    let orcha = std::env::current_exe()
+        .map(|path| tilde(&path.to_string_lossy()))
+        .unwrap_or_else(|_| "orcha".to_owned());
+    [
+        (
+            "Open Full Disk Access".to_owned(),
+            format!("add {orcha}, then restart orcha's server"),
+            "OPEN",
+        ),
+        (
+            "Not now".to_owned(),
+            "shells in these folders fail until orcha can read them".to_owned(),
+            "NOT NOW",
+        ),
+    ]
+}
+
 /// Remove, or keep it (the safe default).
 pub(in crate::client::shell) fn plugin_remove_rows(
     name: &str,

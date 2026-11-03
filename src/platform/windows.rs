@@ -1458,6 +1458,15 @@ pub(crate) fn expand_orcha_home_command_platform(command: &str) -> String {
     format!("{invoke}{}", &rest[end..])
 }
 
+/// Only macOS blocks folders by privacy setting.
+pub(crate) fn folder_blocked_by_privacy(_folder: &std::path::Path) -> bool {
+    false
+}
+
+pub(crate) fn privacy_settings_url() -> Option<&'static str> {
+    None
+}
+
 pub(crate) fn open_orcha_target_platform(
     target: super::OrchaOpenTarget,
     path: &std::path::Path,

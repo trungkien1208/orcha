@@ -263,6 +263,18 @@ pub(crate) fn orcha_installer_instruction_platform(
     unix_command
 }
 
+/// True when macOS privacy settings keep this process from reading `folder`.
+/// Privacy blocks fail with EPERM ("Operation not permitted"); ordinary Unix
+/// permissions fail with EACCES, which Full Disk Access would not fix.
+pub(crate) fn folder_blocked_by_privacy(folder: &Path) -> bool {
+    matches!(std::fs::read_dir(folder), Err(err) if err.raw_os_error() == Some(libc::EPERM))
+}
+
+/// System Settings, opened at Full Disk Access.
+pub(crate) fn privacy_settings_url() -> Option<&'static str> {
+    Some("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+}
+
 pub(crate) fn open_orcha_target_platform(
     target: super::OrchaOpenTarget,
     path: &std::path::Path,

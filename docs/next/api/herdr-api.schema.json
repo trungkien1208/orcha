@@ -5931,6 +5931,22 @@
         {
           "properties": {
             "method": {
+              "const": "workspace.folder_access",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "workspace.get",
               "type": "string"
             },
@@ -8608,6 +8624,22 @@
             "unknown"
           ],
           "type": "string"
+        },
+        "BlockedFolder": {
+          "description": "A project folder the server cannot read because of an operating system\nprivacy setting (macOS Full Disk Access), so shells there fail.",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace_id",
+            "path"
+          ],
+          "type": "object"
         },
         "ClientWindowTitleReason": {
           "enum": [
@@ -12746,6 +12778,25 @@
               "required": [
                 "type",
                 "regions"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "blocked": {
+                  "items": {
+                    "$ref": "#/schemas/success_response/$defs/BlockedFolder"
+                  },
+                  "type": "array"
+                },
+                "type": {
+                  "const": "folder_access",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "blocked"
               ],
               "type": "object"
             },
