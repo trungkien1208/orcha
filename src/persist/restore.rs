@@ -593,6 +593,10 @@ fn restore_tab(
             let terminal_id = TerminalId::alloc();
             let mut terminal = TerminalState::new(terminal_id.clone(), cwd.clone())
                 .with_pending_agent_resume_plan(plan);
+            // the resumed chat keeps its topic until the agent sets a new one
+            if let Some(title) = saved_agent_session.and_then(|session| session.title.clone()) {
+                let _ = terminal.set_terminal_title(Some(title));
+            }
             if let Some(label) = saved_label {
                 terminal.set_manual_label(label);
             }
@@ -1176,6 +1180,7 @@ mod tests {
             agent: "pi".into(),
             kind: crate::agent_resume::AgentSessionRefKind::Path,
             value: pi_session_path.clone(),
+            title: None,
         };
 
         assert!(restore_plan_for_snapshot(&session, false).is_none());
@@ -1189,6 +1194,7 @@ mod tests {
             agent: "claude".into(),
             kind: crate::agent_resume::AgentSessionRefKind::Path,
             value: test_session_path("claude-session"),
+            title: None,
         };
         assert!(restore_plan_for_snapshot(&unsupported_path, true).is_none());
     }
@@ -1201,6 +1207,7 @@ mod tests {
             agent: "pi".into(),
             kind: crate::agent_resume::AgentSessionRefKind::Path,
             value: pi_session_path.clone(),
+            title: None,
         };
         let mut resumed = HashSet::new();
 
@@ -1223,6 +1230,7 @@ mod tests {
             agent: "pi".into(),
             kind: crate::agent_resume::AgentSessionRefKind::Path,
             value: test_session_path("pi-session.jsonl"),
+            title: None,
         };
         let history = super::super::snapshot::PaneHistorySnapshot {
             ansi: "RESTORED_HISTORY\r\n".into(),
@@ -1254,6 +1262,7 @@ mod tests {
             agent: "pi".into(),
             kind: crate::agent_resume::AgentSessionRefKind::Path,
             value: test_session_path("pi-session.jsonl"),
+            title: None,
         };
         let history = super::super::snapshot::PaneHistorySnapshot {
             ansi: "RESTORED_HISTORY\r\n".into(),
@@ -1294,6 +1303,7 @@ mod tests {
             agent: "pi".into(),
             kind: crate::agent_resume::AgentSessionRefKind::Path,
             value: test_session_path("pi-session.jsonl"),
+            title: None,
         };
         let resume = super::super::snapshot::PaneAgentResumeSnapshot {
             source: "herdr:pi".into(),
@@ -1367,6 +1377,7 @@ mod tests {
             agent: "pi".into(),
             kind: crate::agent_resume::AgentSessionRefKind::Path,
             value: test_session_path("pi-session.jsonl"),
+            title: None,
         };
         let history = super::super::snapshot::PaneHistorySnapshot {
             ansi: "RESTORED_HISTORY\r\n".into(),
@@ -1399,6 +1410,7 @@ mod tests {
             agent: "hermes".into(),
             kind: crate::agent_resume::AgentSessionRefKind::Id,
             value: "hermes-session".into(),
+            title: None,
         };
 
         let preserved = restored_terminal_agent_session(Some(&session), false)
@@ -1415,6 +1427,7 @@ mod tests {
             agent: "pi".into(),
             kind: crate::agent_resume::AgentSessionRefKind::Path,
             value: test_session_path("pi-session.jsonl"),
+            title: None,
         };
         let mut resumed = HashSet::new();
         assert!(take_restore_plan_for_snapshot(&session, true, &mut resumed).is_some());
@@ -1457,6 +1470,7 @@ mod tests {
                 agent: "opencode".into(),
                 kind: crate::agent_resume::AgentSessionRefKind::Id,
                 value: "keep-my-session".into(),
+                title: None,
             });
             let (events, _rx) = mpsc::channel(32);
             let (workspaces, terminals, runtimes) = restore(
@@ -1551,6 +1565,7 @@ mod tests {
                                 agent: "opencode".into(),
                                 kind: crate::agent_resume::AgentSessionRefKind::Id,
                                 value: "opencode-session".into(),
+                                title: Some("✳ Review the API".into()),
                             }),
                             agent_resume: None,
                             launch_argv: None,
@@ -1594,6 +1609,10 @@ mod tests {
         );
         assert_eq!(terminal.agent_name, None);
         assert_eq!(terminal.manual_label.as_deref(), Some("reviewer"));
+        assert_eq!(
+            terminal.terminal_title, None,
+            "a chat that is not resumed does not bring back its topic"
+        );
         let session = terminal
             .persisted_agent_session
             .as_ref()
@@ -1715,6 +1734,7 @@ mod tests {
                 agent: "codex".into(),
                 kind: crate::agent_resume::AgentSessionRefKind::Id,
                 value: "codex-session".into(),
+                title: None,
             }),
             agent_resume: None,
             launch_argv: None,
@@ -1867,6 +1887,7 @@ mod tests {
                                 agent: "codex".into(),
                                 kind: crate::agent_resume::AgentSessionRefKind::Id,
                                 value: "codex-session".into(),
+                                title: Some("✳ Fix the login form".into()),
                             }),
                             agent_resume: None,
                             launch_argv: None,
@@ -1907,6 +1928,11 @@ mod tests {
         assert!(
             terminal.pending_agent_resume_plan.is_some(),
             "restored native agent panes should defer resume until client terminal context is known"
+        );
+        assert_eq!(
+            terminal.terminal_title_stripped().as_deref(),
+            Some("Fix the login form"),
+            "the resumed chat keeps its topic in the sidebar"
         );
         assert!(
             !terminal.respawn_shell_on_exit,

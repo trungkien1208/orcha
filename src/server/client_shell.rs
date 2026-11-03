@@ -159,20 +159,30 @@ pub(super) fn snapshot_with_completions(
             let mut tokens = agent.tokens.into_iter().collect::<Vec<_>>();
             // PROCESS reads its station from `stage`; a reporter's own wins,
             // else what Herdr sees the agent doing in its transcript.
+            let terminal = app
+                .parse_pane_id(&pane_id)
+                .and_then(|(workspace_index, pane)| {
+                    let pane = app
+                        .state
+                        .workspaces
+                        .get(workspace_index)?
+                        .pane_state(pane)?;
+                    app.state.terminals.get(&pane.attached_terminal_id)
+                });
             if !tokens.iter().any(|(key, _)| key == "stage") {
-                let station = app
-                    .parse_pane_id(&pane_id)
-                    .and_then(|(workspace_index, pane)| {
-                        let pane = app
-                            .state
-                            .workspaces
-                            .get(workspace_index)?
-                            .pane_state(pane)?;
-                        app.state.terminals.get(&pane.attached_terminal_id)
-                    })
-                    .and_then(crate::app::activity_station);
-                if let Some(station) = station {
+                if let Some(station) = terminal.and_then(crate::app::activity_station) {
                     tokens.push(("stage".to_owned(), station.to_owned()));
+                }
+            }
+            // The model a reporter names wins, else the one Herdr read from
+            // the agent's transcript, so it shows again soon after a restart.
+            if !tokens.iter().any(|(key, _)| key == "model") {
+                if let Some(model) = terminal
+                    .and_then(|terminal| terminal.agent_model.as_ref())
+                    .and_then(|(_, observed)| observed.model.clone())
+                    .filter(|model| !model.trim().is_empty())
+                {
+                    tokens.push(("model".to_owned(), model));
                 }
             }
             tokens.sort_by(|left, right| left.0.cmp(&right.0));
@@ -733,6 +743,51 @@ mod tests {
             .terminal_runtimes
             .values()
             .all(|runtime| runtime.test_scroll_metrics_reads() == 1));
+    }
+
+    #[test]
+    fn agent_model_token_falls_back_to_the_observed_model() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("project")];
+        app.state.active = Some(0);
+        app.state.ensure_test_terminals();
+        let terminal = app.state.terminals.values_mut().next().unwrap();
+        terminal.set_detected_state(
+            Some(crate::detect::Agent::Claude),
+            crate::detect::AgentState::Idle,
+        );
+        terminal.agent_model = Some((
+            String::new(),
+            crate::agent_models::ObservedModel {
+                model: Some("claude-opus-5-5".into()),
+                effort: None,
+                fast: None,
+            },
+        ));
+        let model = |app: &crate::app::App| {
+            snapshot(app, "boot", 1, None, None).agents[0]
+                .tokens
+                .iter()
+                .find(|(key, _)| key == "model")
+                .map(|(_, value)| value.clone())
+        };
+        assert_eq!(model(&app).as_deref(), Some("claude-opus-5-5"));
+
+        // a reporter's model wins
+        let terminal = app.state.terminals.values_mut().next().unwrap();
+        terminal.metadata_tokens.patch(
+            std::collections::HashMap::from([("model".to_owned(), Some("sonnet".to_owned()))]),
+            None,
+            std::time::Instant::now(),
+        );
+        assert_eq!(model(&app).as_deref(), Some("sonnet"));
     }
 
     #[test]

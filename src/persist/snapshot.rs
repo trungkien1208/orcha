@@ -126,6 +126,10 @@ pub struct PaneAgentSessionSnapshot {
     pub agent: String,
     pub kind: crate::agent_resume::AgentSessionRefKind,
     pub value: String,
+    /// The terminal title the agent last set (its chat's topic), shown
+    /// again when this session resumes until the agent sets a new one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -358,6 +362,7 @@ fn capture_tab(
                         agent: authority.agent_label.clone(),
                         kind: session_ref.kind,
                         value: session_ref.value.clone(),
+                        title: terminal.terminal_title.clone(),
                     });
                 }
             }
@@ -369,6 +374,7 @@ fn capture_tab(
                     agent: session.agent.clone(),
                     kind: session.session_ref.kind,
                     value: session.session_ref.value.clone(),
+                    title: terminal.terminal_title.clone(),
                 })
         });
         let agent_resume = terminal
@@ -1289,6 +1295,7 @@ mod tests {
             crate::agent_resume::AgentSessionRef::path(session_path.clone()),
             Some(20),
         );
+        let _ = terminal.set_terminal_title(Some("✳ Fix the login form".into()));
 
         let snapshot = capture_from_state(&state);
         let agent_session = snapshot.workspaces[0].tabs[0].panes[&root.raw()]
@@ -1303,6 +1310,7 @@ mod tests {
             crate::agent_resume::AgentSessionRefKind::Path
         );
         assert_eq!(agent_session.value, session_path);
+        assert_eq!(agent_session.title.as_deref(), Some("✳ Fix the login form"));
     }
 
     #[test]
