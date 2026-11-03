@@ -374,7 +374,6 @@ impl ProjectActivity {
 struct ProjectRows<'a> {
     // Each pane with its tab number, in tab order.
     rows: Vec<(usize, ProjectRow<'a>)>,
-    tabs: usize,
     activity: ProjectActivity,
     // At most three logos, one per kind of agent. Busier agents win a slot.
     logos: [Option<&'a ClientShellAgent>; 3],
@@ -460,12 +459,6 @@ fn project_rows_by_workspace<'a>(
     for project in rows_by_workspace.values_mut() {
         // Stable: panes keep their order inside a tab.
         project.rows.sort_by_key(|(tab, _)| *tab);
-        project.tabs = project
-            .rows
-            .iter()
-            .enumerate()
-            .filter(|(index, (tab, _))| *index == 0 || project.rows[index - 1].0 != *tab)
-            .count();
     }
     rows_by_workspace
 }
@@ -1244,30 +1237,17 @@ fn render_project(
     let tree_x = icon_x;
     let logo_x = tree_x + 2;
     let mut y = rect.y + 1;
-    // Tab numbers sit left of the tree, on each tab's first pane, and only
-    // when the project has more than one tab.
-    let numbered = project.tabs > 1;
-    // the open tab's number stands out like the open pane
-    let open_tab = project
-        .rows
-        .iter()
-        .find(|(_, row)| match row {
-            ProjectRow::Agent(agent) => agent.focused,
-            ProjectRow::Shell(pane) => pane.focused,
-        })
-        .map(|(tab, _)| *tab);
     let last = project.rows.len().saturating_sub(1);
     let quiet = Style::default().fg(t.muted).bg(fill);
     let lit = Style::default()
         .fg(t.mark(t.yellow, fill))
         .bg(fill)
         .add_modifier(Modifier::BOLD);
-    for (index, (tab, project_row)) in project.rows.iter().enumerate() {
+    for (index, (_, project_row)) in project.rows.iter().enumerate() {
         if y >= rect.bottom() {
             break;
         }
         let is_last = index == last;
-        let first_in_tab = index == 0 || project.rows[index - 1].0 != *tab;
         let (focused, pane_id, title, status, logo, color, shell) = match project_row {
             ProjectRow::Agent(agent) => {
                 // what it works on, else which model it is
@@ -1302,23 +1282,6 @@ fn render_project(
                 true,
             ),
         };
-        if numbered && first_in_tab && *tab != usize::MAX {
-            put_text(
-                buffer,
-                rect.x + 1,
-                y,
-                2,
-                &tab.to_string(),
-                if open_tab == Some(*tab) {
-                    Style::default()
-                        .fg(t.ink)
-                        .bg(fill)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    quiet
-                },
-            );
-        }
         let branch = match (focused, is_last) {
             (true, _) => "┣━",
             (false, true) => "└",

@@ -385,46 +385,38 @@ fn orcha_sidebar_preview() {
 }
 
 #[test]
-fn project_panes_show_as_a_tree_numbered_by_tab() {
+fn project_panes_show_as_a_tree_without_tab_numbers() {
     let mut state = sidebar_state(1, false);
     {
         let data = state.snapshot.as_mut().expect("snapshot");
         let mut tab = data.tabs[0].clone();
-        tab.tab_id = "tab_2".into();
-        tab.number = 2;
+        tab.tab_id = "tab_4".into();
+        tab.number = 4;
         tab.focused = false;
         data.tabs.push(tab);
         let mut pane = data.panes[0].clone();
         pane.pane_id = "pane_2".into();
-        pane.tab_id = "tab_2".into();
+        pane.tab_id = "tab_4".into();
         pane.focused = false;
         data.panes.push(pane);
     }
     add_agent(&mut state, 0, "Claude", AgentStatus::Working);
     let frame = state.compose(120, 42).expect("frame");
     let rows = frame_rows(&frame);
-    let first = rows.iter().position(|row| row.contains("1 ┣━✳")).expect(
-        "the first tab's number sits before its agent, the open pane's heavy branch between",
-    );
+    // Tab numbers had gaps once tabs closed (1, 4), so panes carry none.
+    let first = rows
+        .iter()
+        .position(|row| row.contains("┣━✳"))
+        .expect("the open pane's heavy branch");
+    assert!(!rows[first].contains("1 ┣━"), "{}", rows[first]);
     // the agent's line hangs under it, the trunk going on to the next pane
     assert!(rows[first + 1].contains("│ ┗"), "{}", rows[first + 1]);
     assert!(
-        rows[first + 2].contains("2 └ ›_ Shell"),
-        "the second tab follows: {}",
+        rows[first + 2].contains("└ ›_ Shell"),
+        "{}",
         rows[first + 2]
     );
-}
-
-#[test]
-fn single_tab_project_hides_tab_numbers() {
-    let mut state = sidebar_state(1, false);
-    let frame = state.compose(120, 42).expect("frame");
-    let rows = frame_rows(&frame);
-    let row = rows
-        .iter()
-        .find(|row| row.contains("›_"))
-        .expect("pane row");
-    assert!(!row.contains("1  ›_"), "one tab needs no number: {row}");
+    assert!(!rows[first + 2].contains("4 └"), "{}", rows[first + 2]);
 }
 
 /// A busy real-world sidebar: many projects, some open, icons, idle and
