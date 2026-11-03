@@ -119,8 +119,9 @@ impl ClientShellState {
         changed
     }
 
-    /// Asks (at most daily, off the input path) whether a newer orcha is out.
+    /// Asks (at most hourly, off the input path) whether a newer orcha is out.
     pub(super) fn start_update_check(&mut self) {
+        self.orcha_ui.update_checked_at = Some(std::time::Instant::now());
         self.orcha_ui.update_check =
             BackgroundJob::spawn("orcha-update-check", crate::orcha_app::newer_release);
         let automatic = self.config.orcha.update_plugins;
@@ -243,6 +244,19 @@ impl ClientShellState {
             });
             return true;
         }
+        // an app left open asks again: a release can come out after it started
+        let due = ui
+            .update_checked_at
+            .is_some_and(|at| at.elapsed() >= crate::orcha_app::RELEASE_CHECK_EVERY);
+        if due
+            && ui.update_check.is_none()
+            && ui.update_run.is_none()
+            && ui.update_available.is_none()
+        {
+            ui.update_checked_at = Some(std::time::Instant::now());
+            ui.update_check =
+                BackgroundJob::spawn("orcha-update-check", crate::orcha_app::newer_release);
+        }
         changed
     }
 
@@ -256,6 +270,8 @@ impl ClientShellState {
             BackgroundJob::spawn("orcha-update", || crate::orcha_app::run_installer(true));
         if self.orcha_ui.update_run.is_some() {
             self.orcha_ui.update_available = None;
+            // installed (or failed) once: no more reminders until reopened
+            self.orcha_ui.update_checked_at = None;
             self.orcha_ui.update_note = Some("⬆ updating…".to_owned());
         }
     }

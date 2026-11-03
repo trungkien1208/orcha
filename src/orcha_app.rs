@@ -18,8 +18,11 @@ const INSTALL_COMMAND_UNIX: &str =
     "curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.sh | sh";
 /// The first-install line on Windows (see install.ps1).
 const INSTALL_COMMAND_WINDOWS: &str = "Invoke-Expression ((Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.ps1').Content)";
-/// The newest release seen and its notes, checked at most once a day.
+/// The newest release seen and its notes, checked at most once an hour.
 const RELEASE_CACHE: &str = ".latest-release.json";
+/// How long the newest release seen holds before GitHub is asked again; a
+/// running app asks again this often too. GitHub allows 60 calls an hour.
+pub(crate) const RELEASE_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 /// A release the user chose to skip: no reminder until a newer one.
 const SKIPPED_RELEASE: &str = ".skipped-release";
 /// The release the update popup already offered.
@@ -399,13 +402,13 @@ fn cached_release() -> Option<CachedRelease> {
     crate::orcha_state::load_or_default(&crate::config::config_dir().join(RELEASE_CACHE))
 }
 
-/// The newest release (from the daily cache, else GitHub). Blocking.
+/// The newest release (from the hourly cache, else GitHub). Blocking.
 fn latest_release() -> Option<Release> {
     let cache = crate::config::config_dir().join(RELEASE_CACHE);
     let now = crate::orcha_state::now_secs();
     let cached = cached_release();
     if let Some(cached) = cached.as_ref() {
-        if now.saturating_sub(cached.at) < 24 * 60 * 60 {
+        if now.saturating_sub(cached.at) < RELEASE_CHECK_EVERY.as_secs() {
             return Some(cached.release());
         }
     }
@@ -439,7 +442,7 @@ fn latest_release() -> Option<Release> {
 }
 
 /// A release newer than this build that the user has not skipped. Asks
-/// GitHub at most once a day. Blocking: call it off the input path.
+/// GitHub at most once an hour. Blocking: call it off the input path.
 pub(crate) fn newer_release() -> Option<Release> {
     let release = latest_release()?;
     let skipped = std::fs::read_to_string(crate::config::config_dir().join(SKIPPED_RELEASE))

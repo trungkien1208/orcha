@@ -163,6 +163,8 @@ pub(crate) struct OrchaUiState {
     pub(super) import_scan: Option<BackgroundJob<Vec<crate::orcha_import::ImportSource>>>,
     /// A newer orcha release (being looked up, then its version).
     pub(super) update_check: Option<BackgroundJob<Option<crate::orcha_app::Release>>>,
+    /// When the newer-release lookup last started.
+    pub(super) update_checked_at: Option<std::time::Instant>,
     /// The "what's new" of this build, looked up after an update.
     pub(super) whats_new_check: Option<BackgroundJob<Option<crate::orcha_app::Release>>>,
     /// Looking for a plugin to offer, off the input path.
