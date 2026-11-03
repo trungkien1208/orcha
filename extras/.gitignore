@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.DS_Store
+.claude-plugin/types/
+claude-plugin/.claude-plugin/types/

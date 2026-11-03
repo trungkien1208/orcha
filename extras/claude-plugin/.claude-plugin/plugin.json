@@ -1,0 +1,6 @@
+{
+  "name": "orcha",
+  "version": "0.1.0",
+  "description": "orcha for Claude Code: task card (GitHub / Azure DevOps), branches pane, /pr-link, /standup, little cheers",
+  "types": "./types/index.d.ts"
+}

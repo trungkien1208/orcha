@@ -2,8 +2,8 @@
 # orcha in one line (macOS, Apple Silicon or Intel):
 #   curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha/HEAD/install.sh | sh
 # Installs the orcha app to ~/.local/bin/orcha and its extras (fuel and
-# account scripts, hand-off, theme, logo font) to ~/.orcha. Run it again to
-# update.
+# account scripts, hand-off, theme, logo font; extras/ in this repository)
+# to ~/.orcha. Run it again to update.
 #
 # One question, asked once: add Easy Job, a pixel-art office for your
 # agents? Default no. `sh -s -- --office` answers yes, `--no-office` no; a
@@ -32,7 +32,6 @@ case "$(uname -m)" in
   x86_64) ASSET=orcha-macos-x86_64 ;;
   *) echo "orcha has no ready-made build for $(uname -m) yet."; exit 1 ;;
 esac
-command -v git >/dev/null 2>&1 || { echo "orcha needs git first: xcode-select --install"; exit 1; }
 
 BIN="$HOME/.local/bin"
 EXTRAS="${ORCHA_DIR:-$HOME/.orcha}"
@@ -73,9 +72,11 @@ mkdir -p "$BIN"
 # the system temporary directory is on another filesystem.
 tmp=$(mktemp "$BIN/.orcha-install.XXXXXX")
 sums=
+extras_tmp=
 cleanup() {
   rm -f "$tmp"
   [ -z "$sums" ] || rm -f "$sums"
+  [ -z "$extras_tmp" ] || rm -f "$extras_tmp"
 }
 trap cleanup EXIT
 sums=$(mktemp)
@@ -94,18 +95,37 @@ mv -f "$tmp" "$BIN/orcha"
 xattr -d com.apple.quarantine "$BIN/orcha" 2>/dev/null || true
 
 echo "→ setting up the extras"
-if [ -d "$EXTRAS/.git" ]; then
-  # an old or diverged copy cannot be updated in place: keep it aside, start fresh
-  if ! git -C "$EXTRAS" pull --ff-only --quiet origin main 2>/dev/null; then
-    old="$EXTRAS.old-$(date +%Y%m%d%H%M%S)"
-    mv "$EXTRAS" "$old"
-    echo "  (old extras kept at $old)"
-    git clone --depth 1 --quiet https://github.com/trungkien1208/orcha-config "$EXTRAS"
-  fi
+# The extras (themes, fonts, scripts) come with the same release as the app,
+# checked against the same SHA256SUMS.txt. Releases before 0.14.1 have none.
+extras_expected=$(awk '$2 == "orcha-extras.tar.gz" || $2 == "*orcha-extras.tar.gz" { print $1; exit }' "$sums")
+if [ -z "$extras_expected" ]; then
+  echo "  (this release has no extras; the app works without them)"
 else
-  git clone --depth 1 --quiet https://github.com/trungkien1208/orcha-config "$EXTRAS"
+  extras_tmp=$(mktemp)
+  extras_new="$EXTRAS.new.$$"
+  curl -fsSL -o "$extras_tmp" "$BASE/orcha-extras.tar.gz"
+  if [ "$(sha256_of "$extras_tmp")" != "$extras_expected" ]; then
+    rm -f "$extras_tmp"
+    echo "The extras did not match the release's checksum, so they were not changed."
+    exit 1
+  fi
+  rm -rf "$extras_new"
+  mkdir -p "$extras_new"
+  tar -xzf "$extras_tmp" -C "$extras_new"
+  rm -f "$extras_tmp"
+  # Swap folders: the scripts other apps link to keep their path.
+  if [ -e "$EXTRAS" ]; then
+    rm -rf "$EXTRAS.old"
+    mv "$EXTRAS" "$EXTRAS.old"
+  fi
+  mv "$extras_new" "$EXTRAS"
+  rm -rf "$EXTRAS.old"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -I "$EXTRAS/lib/setup.py" --app
+  else
+    echo "  (python3 is missing: run 'orcha setup' after xcode-select --install)"
+  fi
 fi
-python3 -I "$EXTRAS/lib/setup.py" --app
 
 # Easy Job: only when the question is still open (not answered, not added)
 if "$BIN/orcha" __offer-easy-job pending 2>/dev/null; then

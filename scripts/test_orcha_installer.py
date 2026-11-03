@@ -28,7 +28,7 @@ class OrchaInstallerTests(unittest.TestCase):
         self.payload.write_text("#!/bin/sh\nexit 1\n")
         self.sums = self.root / "SHA256SUMS.txt"
         self.sums.write_text(hashlib.sha256(self.payload.read_bytes()).hexdigest() + "  orcha-macos-arm64\n")
-        for name in ("awk", "cat", "chmod", "cp", "cut", "mkdir", "mktemp", "rm", "shasum"):
+        for name in ("awk", "cat", "chmod", "cp", "cut", "mkdir", "mktemp", "rm", "shasum", "tar", "gzip"):
             command = shutil.which(name)
             self.assertIsNotNone(command, name)
             (self.bin / name).symlink_to(command)
@@ -46,6 +46,7 @@ printf '%s\\n' "$url" >> "$REQUESTS"
 case "$url" in
   */SHA256SUMS.txt) cp "$SUMS" "$out" ;;
   */orcha-macos-arm64) cp "$PAYLOAD" "$out" ;;
+  */orcha-extras.tar.gz) cp "$EXTRAS_TAR" "$out" ;;
   *) exit 7 ;;
 esac
 ''')
@@ -56,6 +57,11 @@ exec '{real_mv}' "$@"
 ''')
         self.extras = self.root / "extras"
         (self.extras / ".git").mkdir(parents=True)
+        source = self.root / "extras-source"
+        (source / "lib").mkdir(parents=True)
+        (source / "lib/setup.py").write_text("# setup\n")
+        self.extras_tar = self.root / "orcha-extras.tar.gz"
+        subprocess.run(["tar", "-czf", str(self.extras_tar), "-C", str(source), "."], check=True)
 
     def script(self, name, contents):
         path = self.bin / name
@@ -68,6 +74,7 @@ exec '{real_mv}' "$@"
             env={**os.environ, "PATH": str(self.bin), "HOME": str(self.home),
                  "ORCHA_DIR": str(self.extras), "ORCHA_INSTALL_TAG": "orcha-0.13.0",
                  "PAYLOAD": str(self.payload), "SUMS": str(self.sums),
+                 "EXTRAS_TAR": str(self.extras_tar),
                  "REQUESTS": str(self.root / "requests"), **extra},
             capture_output=True, text=True, timeout=10,
         )
@@ -97,6 +104,28 @@ exec '{real_mv}' "$@"
                 self.assertIn("checksum", result.stdout)
                 self.assertEqual(self.installed.read_bytes(), b"previous app")
                 self.assertEqual(list(self.installed.parent.glob(".orcha-install.*")), [])
+
+    def with_extras(self, digest=None):
+        digest = digest or hashlib.sha256(self.extras_tar.read_bytes()).hexdigest()
+        self.sums.write_text(self.sums.read_text() + f"{digest}  orcha-extras.tar.gz\n")
+
+    def test_release_extras_replace_the_old_checkout_in_place(self):
+        self.with_extras()
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.extras / "lib/setup.py").is_file())
+        self.assertFalse((self.extras / ".git").exists())
+        self.assertEqual(sorted(p.name for p in self.root.glob("extras*")), ["extras", "extras-source"])
+        requests = (self.root / "requests").read_text().splitlines()
+        self.assertTrue(any(url.endswith("/orcha-extras.tar.gz") for url in requests))
+
+    def test_bad_extras_checksum_keeps_the_existing_extras(self):
+        self.with_extras("0" * 64)
+        result = self.run_installer()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("checksum", result.stdout)
+        self.assertTrue((self.extras / ".git").is_dir())
+        self.assertEqual(sorted(p.name for p in self.root.glob("extras*")), ["extras", "extras-source"])
 
 
 if __name__ == "__main__":

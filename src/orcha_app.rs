@@ -242,7 +242,7 @@ pub(crate) fn maybe_run_config_tool(args: &[String]) -> Option<i32> {
     }
     let Some(tool) = config_tool() else {
         eprintln!(
-            "orcha {command}: orcha-config is not installed (github.com/trungkien1208/orcha-config)"
+            "orcha {command}: orcha's extras are not installed; run the installer again (README: Install)"
         );
         return Some(2);
     };

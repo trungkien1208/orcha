@@ -1,0 +1,54 @@
+// Cursor trail + soft glow for Ghostty (custom-shader), in your accent color.
+// When the cursor jumps, a streak follows it and fades in ~0.3s;
+// a faint glow sits around the cursor while the window is focused.
+// Turn off: orcha setup → widgets → cursor trail.
+
+const vec3 TRAIL = vec3({{TRAIL_RGB}});   // {{TRAIL_HEX}}
+const float DURATION = 0.30;                   // trail fade, seconds
+const float TRAIL_ALPHA = 0.55;
+const float GLOW_ALPHA = 0.18;
+const float GLOW_SIZE = 10.0;                  // px
+
+float sdSegment(vec2 p, vec2 a, vec2 b) {
+    vec2 pa = p - a, ba = b - a;
+    float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0);
+    return length(pa - ba * h);
+}
+
+float sdBox(vec2 p, vec2 center, vec2 half_size) {
+    vec2 d = abs(p - center) - half_size;
+    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+}
+
+// iCurrentCursor.xy is the cursor's left/top corner (y up), .zw its size.
+vec2 centerOf(vec4 c) { return c.xy + vec2(c.z, -c.w) * 0.5; }
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    vec4 base = texture(iChannel0, fragCoord / iResolution.xy);
+    vec3 col = base.rgb;
+
+    vec2 cur = centerOf(iCurrentCursor);
+    vec2 prev = centerOf(iPreviousCursor);
+    bool hasCursor = iCurrentCursor.z > 0.0 && iCurrentCursor.w > 0.0;
+
+    if (hasCursor && iFocus > 0) {
+        // trail: a rounded streak from the old spot to the new, thinning as it fades
+        float t = clamp((iTime - iTimeCursorChange) / DURATION, 0.0, 1.0);
+        float fade = (1.0 - t) * (1.0 - t);
+        float moved = length(cur - prev);
+        if (fade > 0.0 && moved > iCurrentCursor.w * 0.6) {
+            float radius = iCurrentCursor.w * 0.35 * fade + 0.5;
+            // the tail end catches up with the cursor as time passes
+            vec2 tail = mix(prev, cur, t);
+            float d = sdSegment(fragCoord, tail, cur) - radius;
+            float a = (1.0 - smoothstep(0.0, 1.5, d)) * TRAIL_ALPHA * fade;
+            col = mix(col, TRAIL, a);
+        }
+
+        // glow: soft halo around the cursor cell
+        float g = sdBox(fragCoord, cur, iCurrentCursor.zw * 0.5);
+        if (g > 0.0) col = mix(col, TRAIL, exp(-g / GLOW_SIZE) * GLOW_ALPHA);
+    }
+
+    fragColor = vec4(col, base.a);
+}

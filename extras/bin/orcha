@@ -1,0 +1,25 @@
+#!/bin/sh
+# orcha: a calm cup of terminal for your coding agents. `orcha help` for commands.
+self=$0
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case $link in /*) self=$link ;; *) self=$(dirname "$self")/$link ;; esac
+done
+ORCHA_HOME=$(cd "$(dirname "$self")/.." && pwd)
+PY="python3 -I"
+case $1 in
+  setup)  exec $PY "$ORCHA_HOME/lib/setup.py" ;;
+  edit)
+    f="${XDG_CONFIG_HOME:-$HOME/.config}/orcha/config.json"
+    ${EDITOR:-vi} "$f" && exec $PY "$ORCHA_HOME/lib/cli.py" apply ;;
+  logos)  exec "$ORCHA_HOME/fonts/build.sh" ;;
+  plugin)
+    claude plugin marketplace add "$ORCHA_HOME" && exec claude plugin install orcha@orcha --scope user ;;
+  "")     exec $PY "$ORCHA_HOME/lib/menu.py" ;;
+  menu)   exec $PY "$ORCHA_HOME/lib/menu.py" ;;
+  help|-h|--help)
+    $PY "$ORCHA_HOME/lib/cli.py" help
+    printf '%s\n' "  orcha logos              build the Claude / Codex / Cursor logo font" \
+      "  orcha plugin             install the Claude Code plugin" ;;
+  *)      exec $PY "$ORCHA_HOME/lib/cli.py" "$@" ;;
+esac

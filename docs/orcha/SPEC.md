@@ -196,7 +196,7 @@ FUEL placement option: right panel (default) or status bar, never both.
 - Animated: the train chugs forward and back inside its current leg and shakes
   (a repaint tick only while trains are running).
 - Station comes from the pane's `stage` token, else from agent status:
-  - Claude: hook `orcha-stage.sh` (✅ in orcha-config): prompt / Read / Grep →
+  - Claude: hook `orcha-stage.sh` (✅ in extras/): prompt / Read / Grep →
     thinking, Edit / Write → coding, test / typecheck / lint commands → testing.
   - Codex: same through its notify/hook support ⬜.
 - Model name comes from a `model` token the hooks report ⬜, else the agent name.
