@@ -73,8 +73,8 @@ pub(super) fn render_new_workspace(
     Some(())
 }
 
-/// HAND OFF: the other agents, each with the whole conversation or a
-/// summary first.
+/// HAND OFF: the other agents, each with the whole conversation or its
+/// latest part.
 pub(super) fn render_handoff(
     buffer: &mut Buffer,
     selected: usize,
@@ -129,8 +129,8 @@ pub(super) fn render_handoff(
             let cursor = index == selected;
             let label = handoff_label(kind, mode);
             let detail = match mode {
-                HandoffMode::Summary => "a short summary opens the new chat",
-                HandoffMode::Full => "the whole conversation is replayed",
+                HandoffMode::Summary => "reads the end, sums up, waits for you",
+                HandoffMode::Full => "reads it all, sums up, waits for you",
             };
             let action = if cursor { "CONTINUE ↵" } else { "CONTINUE" };
             let row = ChoiceRow {

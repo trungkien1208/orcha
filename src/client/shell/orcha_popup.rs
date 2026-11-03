@@ -329,9 +329,9 @@ pub(super) const NEW_AGENT_EXTRA_ROWS: usize = 2;
 /// How a hand-off carries the chat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum HandoffMode {
-    /// The whole conversation is replayed.
+    /// The notes carry the whole conversation.
     Full,
-    /// A short summary opens the new chat.
+    /// The notes carry only its latest part.
     Summary,
 }
 
@@ -346,7 +346,8 @@ impl HandoffMode {
 }
 
 /// Every hand-off HAND OFF can offer: each agent that takes one
-/// (`AgentKind::handoff`), with the whole conversation or a summary first.
+/// (`AgentKind::handoff`), with the whole conversation or its latest part.
+/// Either way the new agent sums it up and waits for the user.
 /// `OrchaPopup::Handoff::targets` index this list.
 pub(super) fn handoff_targets() -> Vec<(&'static brutal::AgentKind, HandoffMode)> {
     brutal::AGENT_KINDS
@@ -356,11 +357,11 @@ pub(super) fn handoff_targets() -> Vec<(&'static brutal::AgentKind, HandoffMode)
         .collect()
 }
 
-/// "Codex · whole conversation".
+/// "Codex · whole chat".
 pub(super) fn handoff_label(kind: &brutal::AgentKind, mode: HandoffMode) -> String {
     match mode {
-        HandoffMode::Full => format!("{} · whole conversation", kind.name),
-        HandoffMode::Summary => format!("{} · summarize first, then continue", kind.name),
+        HandoffMode::Full => format!("{} · whole chat", kind.name),
+        HandoffMode::Summary => format!("{} · latest part", kind.name),
     }
 }
 

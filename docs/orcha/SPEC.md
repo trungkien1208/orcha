@@ -216,7 +216,7 @@ FUEL placement option: right panel (default) or status bar, never both.
   - the recommended account: `BEST` badge, raised green `CONTINUE ↵`.
   - not signed in: `SIGN IN`.
   - footer keys: `↵` continue this chat · `⌥↵` open in a new pane for the
-    same agent, or hand off with a summary to another agent · `h` hand off ·
+    same agent, or hand off only the latest part to another agent · `h` hand off ·
     `d` remove · `i` find accounts · `r` refresh. ADD ACCOUNT sits below the list.
 
 ### 3.3 Switch account, same conversation — ✅ (native)
@@ -245,8 +245,10 @@ For when every account of one agent is out of fuel (Claude → Codex …).
   agent: the first goal, the last turns, files changed and git diff, test
   state, task `#id`.
 - Opens the new agent in the same tab with the pack as its first prompt.
-- Two modes: **full** (the whole history) and **summary** (the new agent
-  summarizes first, then continues).
+  The new agent sums up where the work stands (goal, done, left, open
+  questions, next step) and waits for the user before changing anything.
+- Two modes: **full** (the whole history) and **summary** (only the latest
+  part, so the notes read faster).
 - While it runs, the old pane's sidebar row says `handing off…`; afterwards
   `→ continued`, a link to the new pane, until the old pane is focused again
   or closed.

@@ -98,10 +98,10 @@ pub(super) fn render_accounts(
         Some((account, left)) => format!("{context} · ⚠ {} {left}% left", account.label),
         None => context,
     };
-    // alt ↵ hands a chat to another agent with a summary first, and opens
-    // another account of the same agent in a new pane
+    // alt ↵ hands a chat to another agent with only its latest part, and
+    // opens another account of the same agent in a new pane
     let alternate = match (accounts.get(selected), current_kind) {
-        (Some(account), Some(kind)) if !brutal::same_agent(&account.kind, kind) => "summarize",
+        (Some(account), Some(kind)) if !brutal::same_agent(&account.kind, kind) => "latest part",
         _ => "new pane",
     };
     let frame = popup_frame(

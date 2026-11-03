@@ -7,7 +7,8 @@
 //! else from the pane's recent screen (Cursor keeps its chats in SQLite),
 //! plus the folder's git state. They are written to
 //! `~/.cache/orcha/handoff/` (owner-only, kept two weeks) and the new agent
-//! opens next to the old one, told to read them.
+//! opens next to the old one, told to read them, sum up where the work
+//! stands and wait for the user before going on.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -32,9 +33,9 @@ pub(crate) fn can_hand_off_to(kind: &str) -> bool {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Mode {
-    /// The whole conversation.
+    /// The notes carry the whole conversation.
     Full,
-    /// The new agent summarizes the notes first, then continues.
+    /// The notes carry only its latest part, so they read faster.
     Summary,
 }
 
@@ -420,25 +421,24 @@ fn build_notes(inputs: &Inputs) -> String {
         format!("# Hand-off: {title}"),
         String::new(),
         format!(
-            "You are continuing work another coding agent ({source}) started in `{}`.",
+            "You are taking over work another coding agent ({source}) started in `{}`.",
             inputs.cwd
         ),
         "It stopped (usually out of plan limits), not because the work is done.".to_owned(),
         String::new(),
+        "Read these notes and check the repository state yourself. Then sum up where the \
+         work stands in five bullets: goal, what is done, what is left, open questions, the \
+         next step you suggest."
+            .to_owned(),
+        String::new(),
+        "**Do not continue the work yet.** Change no files and run nothing that changes \
+         state until the user tells you to go on."
+            .to_owned(),
+        String::new(),
     ];
-    lines.push(match mode {
-        Mode::Summary => "**First** summarize these notes in five bullets (goal, what is done, \
-                          what is left, open questions, next step). **Then** continue with the \
-                          next step."
-            .to_owned(),
-        Mode::Full => "Read these notes, check the repository state yourself, then continue \
-                       where it stopped. Do not redo finished steps."
-            .to_owned(),
-    });
-    lines.push(String::new());
     if let Some(checklist) = &inputs.checklist {
         lines.push(format!(
-            "The previous agent left a checklist in `{checklist}`: read it first and tick items off as you go."
+            "The previous agent left a checklist in `{checklist}`: read it too."
         ));
         lines.push(String::new());
     }
@@ -547,7 +547,7 @@ fn build_notes(inputs: &Inputs) -> String {
             lines.push("## Conversation".to_owned());
             lines.push(String::new());
             lines.push(
-                "(the old agent's conversation could not be read; work from the repository \
+                "(the old agent's conversation could not be read; sum up from the repository \
                  state and the task above)"
                     .to_owned(),
             );
@@ -703,9 +703,9 @@ pub(crate) fn send_prompt(pane: &str, text: &str) -> bool {
 }
 
 /// Builds the notes for `pane`, opens `target` next to it and tells it to
-/// read them. Blocking (runs off the input thread). `claude_dir` starts a
-/// Claude target in that account's sign-in folder. Ok is (message, the new
-/// pane's id); Err says what went wrong.
+/// read them and sum them up, then wait. Blocking (runs off the input
+/// thread). `claude_dir` starts a Claude target in that account's sign-in
+/// folder. Ok is (message, the new pane's id); Err says what went wrong.
 pub(crate) fn hand_off_to(
     pane: &str,
     target: &str,
@@ -810,7 +810,7 @@ pub(crate) fn hand_off_to(
         .ok_or("could not open a pane next to it")?
         .to_owned();
     let prompt = format!(
-        "Read the hand-off notes in {} and continue the work they describe.",
+        "Read the hand-off notes in {}, sum up where the work stands, then wait for me before changing anything.",
         path.display()
     );
     // double quotes read the same in sh, zsh, fish, PowerShell and cmd
@@ -821,7 +821,10 @@ pub(crate) fn hand_off_to(
     if !ran {
         return Err(format!("{target_name} could not be started"));
     }
-    Ok((format!("{target_name} continues in the new pane"), new_pane))
+    Ok((
+        format!("{target_name} is summing up in the new pane"),
+        new_pane,
+    ))
 }
 
 #[cfg(test)]
@@ -931,11 +934,26 @@ mod tests {
         assert!(notes.contains("I updated the header."));
 
         let notes = build_notes(&inputs());
-        assert!(notes.contains("could not be read; work from the repository"));
+        assert!(notes.contains("could not be read; sum up from the repository"));
     }
 
     #[test]
-    fn summary_mode_asks_for_a_summary_first_and_cuts_long_conversations() {
+    fn every_hand_off_asks_for_a_summary_and_to_wait() {
+        for mode in [Mode::Full, Mode::Summary] {
+            let mut inputs = inputs();
+            inputs.mode = Some(mode);
+            let notes = build_notes(&inputs);
+            assert!(notes.contains("sum up where the work stands"), "{mode:?}");
+            assert!(
+                notes.contains("**Do not continue the work yet.**"),
+                "{mode:?}"
+            );
+            assert!(!notes.contains("then continue"), "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn summary_mode_cuts_long_conversations() {
         let mut inputs = inputs();
         inputs.mode = Some(Mode::Summary);
         let long = "é".repeat(SUMMARY_CHARS);
@@ -944,7 +962,6 @@ mod tests {
             files: Vec::new(),
         });
         let notes = build_notes(&inputs);
-        assert!(notes.contains("**First** summarize these notes"));
         assert!(notes.contains("…(earlier turns cut)…"));
         assert!(notes.len() < SUMMARY_CHARS + 2_000);
     }
