@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 
 pub(crate) const ORCHA_APP_ENV_VAR: &str = "ORCHA_APP";
 /// orcha's own version; its GitHub releases are tagged `orcha-<version>`.
-pub(crate) const ORCHA_VERSION: &str = "0.13.1";
+pub(crate) const ORCHA_VERSION: &str = "0.14.0";
 const RELEASES_API: &str = "https://api.github.com/repos/trungkien1208/orcha/releases/latest";
 /// The first-install line on Unix (see install.sh), shown when an update
 /// fails. `orcha update` itself runs the release's own checked installer.
