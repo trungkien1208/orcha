@@ -9,8 +9,11 @@
   limits.py login <id>    sign that account in (its own folder, email pre-filled)
   limits.py open <id>     open that account in a new herdr pane, continuing the last chat
   limits.py link <id>     link ~/.claude's shared files into a Claude account's folder
-  limits.py json          every account and its fuel as JSON (orcha's FUEL and accounts popup)
+  limits.py json [fresh]  every account and its fuel as JSON (orcha's FUEL and accounts popup);
+                          fresh: ask past the cache
   limits.py switch <id> <pane>   continue that pane's conversation on another account
+  limits.py switch-dir <id> <dir|->   the same for Claudes reading config folder <dir> (-: ~/.claude)
+  limits.py whoami <dir|->       the account Claudes reading config folder <dir> run on
   limits.py login-pane <id>      sign that account in, in a new pane
   limits.py add <name>           add a Claude account (oc <name>) and sign it in
   limits.py new <id> <workspace> <cwd>   start that account's agent in a new tab
@@ -430,23 +433,26 @@ def pane_account():
             return None
         info = json.loads(subprocess.run([HERDR, "pane", "process-info", "--pane", pane], capture_output=True,
                                          text=True, timeout=5).stdout)["result"]["process_info"]
-        found_raw = pane_config_dir(info)
-        found = os.path.realpath(os.path.expanduser(found_raw)) if found_raw else None
-        if found_raw:
-            owner = slot_owner(dir_service(found_raw))
-            if owner:
-                return owner
-        for a, cfg in ACCOUNTS.items():
-            if cfg["kind"] != "claude":
-                continue
-            d = o.claude_dir(cfg)
-            if found and d and os.path.realpath(d) == found:
-                return a
-        if not found:
-            return active_claude()
+        return dir_account(pane_config_dir(info))
     except Exception:
         pass
     return None
+
+
+def dir_account(found_raw):
+    """The account of the Claudes reading config folder `found_raw` (None: ~/.claude)."""
+    found = os.path.realpath(os.path.expanduser(found_raw)) if found_raw else None
+    if found_raw:
+        owner = slot_owner(dir_service(found_raw))
+        if owner:
+            return owner
+    for a, cfg in ACCOUNTS.items():
+        if cfg["kind"] != "claude":
+            continue
+        d = o.claude_dir(cfg)
+        if found and d and os.path.realpath(d) == found:
+            return a
+    return None if found else active_claude()
 
 
 # ---------- commands
@@ -563,6 +569,75 @@ def env_for(acct):
     return env
 
 
+def set_default_profile(acct):
+    """~/.claude.json shows who the default sign-in is."""
+    profile = claude_profile(acct)
+    if not profile:
+        return
+    claude_json = os.path.join(o.HOME, ".claude.json")
+    try:
+        with open(claude_json) as fh:
+            state = json.load(fh)
+        state["oauthAccount"] = profile
+        tmp = claude_json + ".orcha-tmp"
+        with open(tmp, "w") as fh:
+            json.dump(state, fh, indent=2)
+        os.replace(tmp, claude_json)
+    except (OSError, ValueError):
+        pass
+
+
+def prepare_sign_in(acct):
+    """Before `acct` signs in where Claude will write its sign-in: an account of
+    the default folder becomes the active one first (the sign-in there now,
+    another account's, is kept for it); an account whose folder another account
+    was switched into gets the folder back the same way (claude.rs prepare_sign_in)."""
+    cfg = ACCOUNTS[acct]
+    service = own_service(cfg)
+    if not o.claude_dir(cfg):
+        current = active_claude()
+        if current == acct:
+            return
+        live = kc_read(service)
+        if current and live:
+            kc_write(kept_service(current), kc_account(service), live)
+        os.makedirs(o.CONFIG_DIR, exist_ok=True)
+        with open(ACTIVE_FILE, "w") as fh:
+            fh.write(acct + "\n")
+        return
+    slots = read_slots()
+    owner = slots.get(service)
+    if owner and owner != acct:
+        live = kc_read(service)
+        slots.pop(service)
+        write_slots(slots)
+        if live:
+            kc_write(kept_service(owner), kc_account(service), live)
+
+
+def publish_sign_in(acct):
+    """Claude wrote the new sign-in in the account's own item. Fuel and chats may
+    read the account elsewhere (the default item when it is active, the copy
+    orcha kept when it is not): the new sign-in goes there too."""
+    own = own_service(ACCOUNTS[acct])
+    where = claude_service(acct)
+    fresh = kc_read(own)
+    if not fresh or where == own:
+        return
+    kc_write(where, kc_account(where), fresh)
+    d = o.claude_dir(ACCOUNTS[acct])
+    if where == DEFAULT_SERVICE:
+        # who signed in may be someone new: forget the profile kept for the account
+        try:
+            os.remove(os.path.join(PROFILE_DIR, acct + ".json"))
+        except OSError:
+            pass
+        set_default_profile(acct)
+        nudge_claude(None)
+    elif d:
+        nudge_claude(d)
+
+
 def cmd_login(acct):
     """Sign this account in, in its own folder, with its email filled in."""
     cfg = ACCOUNTS[acct]
@@ -573,12 +648,15 @@ def cmd_login(acct):
         d = o.claude_dir(cfg)
         if d:
             link_shared(d)
+        prepare_sign_in(acct)
         cmd = ["claude", "auth", "login"] + (["--email", cfg["email"]] if cfg.get("email") else [])
     elif cfg["kind"] == "codex":
         cmd = ["codex", "login"]
     else:
         cmd = ["cursor-agent", "login"]
-    subprocess.run(cmd, env=env_for(acct))
+    done = subprocess.run(cmd, env=env_for(acct))
+    if cfg["kind"] == "claude" and done.returncode == 0:
+        publish_sign_in(acct)
     try:
         os.remove(os.path.join(CACHE_DIR, acct + ".json"))
     except OSError:
@@ -628,14 +706,14 @@ def auth_needed(data):
     return any(word in err for word in ("sign-in", "sign in", "signed in", "đăng nhập", "hết hạn"))
 
 
-def cmd_json():
+def cmd_json(fresh=False):
     """[{id, kind, label, email, current, error, windows: [{key, label, left, reset}]}]
     `left` is the % left of the window; `current` is the focused agent's account
     (HERDR_ACTIVE_PANE_ID), else the one picked in the picker."""
     cur = pane_account() or selected()
     out = []
     for acct, cfg in ACCOUNTS.items():
-        d = get(acct)
+        d = get(acct, fresh)
         windows = []
         for key, _, _, _ in WINDOWS:
             if key in d:
@@ -677,6 +755,11 @@ def switch_claude_pane(acct, pane):
         d = pane_config_dir(info)
     except Exception:
         d = None
+    switch_claude_dir(acct, d)
+
+
+def switch_claude_dir(acct, d):
+    """Move the Claudes reading config folder `d` (None: the default) onto `acct`."""
     if not d:
         cmd_activate(acct)  # the default item: every default session moves
         nudge_claude(None)
@@ -885,7 +968,11 @@ def main():
     elif cmd == "list":
         cmd_list()
     elif cmd == "json":
-        cmd_json()
+        cmd_json(args[1:] == ["fresh"])
+    elif cmd == "whoami" and len(args) > 1:
+        print(dir_account(None if args[1] == "-" else args[1]) or "")
+    elif cmd == "switch-dir" and len(args) > 2 and args[1] in ACCOUNTS:
+        switch_claude_dir(args[1], None if args[2] == "-" else args[2])
     elif cmd == "activate" and len(args) > 1 and args[1] in ACCOUNTS:
         cmd_activate(args[1])
     elif cmd == "new" and len(args) > 3 and args[1] in ACCOUNTS:
