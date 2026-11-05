@@ -18,10 +18,13 @@
   limits.py add <name>           add a Claude account (oc <name>) and sign it in
   limits.py new <id> <workspace> <cwd>   start that account's agent in a new tab
   limits.py activate <id>        make that Claude account the one every Claude session uses
+  limits.py keychain             whether Claude's sign-ins can go in the Keychain (JSON)
+  limits.py keychain-move        put sign-ins Claude left in .credentials.json into the Keychain
 
 Accounts come from `accounts` in ~/.config/orcha/config.json.
 Claude: Anthropic's usage endpoint, with the account's own sign-in from the
-macOS Keychain (the same data as /usage). Codex: the rate limits Codex writes
+macOS Keychain, else the .credentials.json Claude keeps when it can't write
+there (the same data as /usage). Codex: the rate limits Codex writes
 into its newest session log. Cursor: the usage summary of cursor.com.
 Tokens are never printed or refreshed here, and reach curl on stdin only.
 """
@@ -72,10 +75,51 @@ def kept_service(acct):
     return f"orcha-claude-{acct}"
 
 
-def kc_read(service):
+def keychain_read(service):
     r = subprocess.run(["security", "find-generic-password", "-s", service, "-w"],
                        capture_output=True, text=True, timeout=10)
     return r.stdout.rstrip("\n") if r.returncode == 0 and r.stdout.strip() else None
+
+
+# When Claude can't write the Keychain (locked, a broken login keychain, a
+# managed Mac) it keeps the sign-in in `.credentials.json` in its config
+# folder instead. Fuel reads it there too; switching needs the Keychain
+# (`keychain` says how it stands, `keychain-move` puts the files back in).
+def cred_files():
+    """{Keychain item: the .credentials.json Claude keeps in its place}."""
+    out = {DEFAULT_SERVICE: os.path.join(o.HOME, ".claude", ".credentials.json")}
+    for c in ACCOUNTS.values():
+        d = c["kind"] == "claude" and o.claude_dir(c)
+        if d:
+            out[dir_service(d)] = os.path.join(os.path.expanduser(d), ".credentials.json")
+    return out
+
+
+def cred_file_read(service):
+    path = cred_files().get(service)
+    if not path:
+        return None
+    try:
+        with open(path) as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
+
+
+def expires_of(raw):
+    try:
+        return json.loads(raw)["claudeAiOauth"].get("expiresAt", 0)
+    except (TypeError, ValueError, KeyError):
+        return -1
+
+
+def kc_read(service):
+    """The sign-in in Keychain item `service`, or in the .credentials.json
+    Claude keeps in its place: whichever was refreshed last."""
+    kc, file = keychain_read(service), cred_file_read(service)
+    if not file or not kc:
+        return kc or file
+    return file if expires_of(file) > expires_of(kc) else kc
 
 
 def kc_account(service):
@@ -91,7 +135,56 @@ def kc_write(service, account, secret):
     cmd = f'add-generic-password -U -s "{service}" -a "{account}" -X {hexed}\n'
     r = subprocess.run(["security", "-i"], input=cmd, capture_output=True, text=True, timeout=10)
     if r.returncode != 0:
-        raise RuntimeError("keychain write failed")
+        raise RuntimeError(KEYCHAIN_WRITE_FAILED)
+
+
+KEYCHAIN_WRITE_FAILED = ("The macOS Keychain can't be written (locked or broken), so the sign-in "
+                         "can't move. ACCOUNTS shows how to fix it.")
+PROBE_SERVICE = "orcha-keychain-probe"
+
+
+def keychain_state():
+    """{state, why, files}: `ok`; `file-only` (writable, but Claude keeps a
+    sign-in in a .credentials.json the Keychain lacks); `locked`; `broken` (no default keychain,
+    or its password no longer matches the Mac's). A throwaway item is written
+    and removed to find out: reading alone can't tell."""
+    # only files the Keychain lacks or holds an older sign-in for: a stale
+    # one left behind changes nothing
+    files = []
+    for service, path in cred_files().items():
+        raw = cred_file_read(service)
+        if raw and path not in files and expires_of(raw) > expires_of(keychain_read(service)):
+            files.append(path)
+    try:
+        r = subprocess.run(["security", "add-generic-password", "-U", "-s", PROBE_SERVICE,
+                            "-a", "orcha", "-w", "probe"],
+                           capture_output=True, text=True, timeout=10)
+    except subprocess.TimeoutExpired:
+        # macOS is asking for the keychain's password in a dialog
+        return {"state": "locked", "why": "macOS is asking to unlock the Keychain", "files": files}
+    if r.returncode == 0:
+        subprocess.run(["security", "delete-generic-password", "-s", PROBE_SERVICE],
+                       capture_output=True, timeout=10)
+        return {"state": "file-only" if files else "ok", "why": None, "files": files}
+    why = ((r.stderr or r.stdout).strip().splitlines() or ["security failed"])[-1]
+    locked = any(w in why.lower() for w in ("interaction is not allowed", "locked"))
+    return {"state": "locked" if locked else "broken", "why": why, "files": files}
+
+
+def cmd_keychain_move():
+    """Each sign-in Claude left in a .credentials.json goes into its Keychain
+    item (unless the item holds a fresher one), checked, then the file goes:
+    Claude reads the Keychain from then on."""
+    for service, path in cred_files().items():
+        raw = cred_file_read(service)
+        if not raw:
+            continue
+        kc = keychain_read(service)
+        if not kc or expires_of(raw) > expires_of(kc):
+            kc_write(service, kc_account(service), raw)
+            if keychain_read(service) != raw:
+                raise RuntimeError(KEYCHAIN_WRITE_FAILED)
+        os.remove(path)
 
 
 def claude_accounts():
@@ -304,9 +397,7 @@ def iso_ts(s):
 def claude_limits(cfg):
     service = claude_service(cfg["id"])
     try:
-        raw = subprocess.run(["security", "find-generic-password", "-s", service, "-w"],
-                             capture_output=True, text=True, timeout=10).stdout
-        oauth = json.loads(raw)["claudeAiOauth"]
+        oauth = json.loads(kc_read(service))["claudeAiOauth"]
     except Exception:
         return {"error": T["lim_err_signin"]}
     if oauth.get("expiresAt", 0) / 1000 < time.time():
@@ -1050,6 +1141,10 @@ def main():
             link_shared(d)
     elif cmd == "add" and len(args) > 1:
         cmd_add(args[1])
+    elif cmd == "keychain":
+        print(json.dumps(keychain_state()))
+    elif cmd == "keychain-move":
+        cmd_keychain_move()
     elif cmd in ("show", "select", "login", "login-pane", "open") and len(args) > 1 and args[1] in ACCOUNTS:
         {"show": cmd_show, "select": cmd_select, "login": cmd_login, "login-pane": cmd_login_pane,
          "open": cmd_open}[cmd](args[1])
@@ -1058,4 +1153,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except RuntimeError as e:
+        sys.exit(str(e))

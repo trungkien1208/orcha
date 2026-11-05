@@ -456,7 +456,6 @@ fn orcha_secret_file(slot: &OrchaSecretSlot) -> Option<std::path::PathBuf> {
     }
 }
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn orcha_secret_file_read(slot: &OrchaSecretSlot) -> Option<String> {
     let text = std::fs::read_to_string(orcha_secret_file(slot)?).ok()?;
     let text = text.trim_end().to_owned();

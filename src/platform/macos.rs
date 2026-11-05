@@ -349,8 +349,25 @@ fn keychain_account(service: &str) -> String {
         .unwrap_or_else(fallback)
 }
 
+/// The Keychain item, else the `.credentials.json` Claude keeps in its
+/// config folder when it can't write the Keychain (locked, broken, a managed
+/// Mac): whichever was refreshed last.
 pub(crate) fn orcha_secret_read(slot: &super::OrchaSecretSlot) -> Option<String> {
-    keychain_read(&super::orcha_claude_service(slot))
+    let keychain = keychain_read(&super::orcha_claude_service(slot));
+    let file = match slot {
+        super::OrchaSecretSlot::Folder(_) => super::orcha_secret_file_read(slot),
+        _ => None,
+    };
+    let expires = |raw: &str| {
+        serde_json::from_str::<serde_json::Value>(raw)
+            .ok()
+            .and_then(|v| v["claudeAiOauth"]["expiresAt"].as_i64())
+            .unwrap_or(-1)
+    };
+    match (keychain, file) {
+        (Some(k), Some(f)) => Some(if expires(&f) > expires(&k) { f } else { k }),
+        (k, f) => k.or(f),
+    }
 }
 
 /// `security -i` reads its commands into a 4096-byte line buffer: a longer
