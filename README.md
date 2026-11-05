@@ -58,7 +58,7 @@ Same cockpit, in a real window: [**orcha-app**](https://github.com/trungkien1208
 curl -fsSL https://releases.herdr.dev/app/install.sh | sh
 
 # 2. orcha's look for it
-curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcha-app/HEAD/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/trungkien1208/orcherd/HEAD/install.sh | sh
 ```
 
 Then open Herdr, press `⌘⇧P`, run `layout.switch` and pick **orcha**. Keep the terminal orcha too: FUEL and ACCOUNTS use its accounts. More in the [orcha-app guide](https://github.com/trungkien1208/orcha-app#readme).

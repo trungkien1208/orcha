@@ -76,6 +76,7 @@
  "lim_now": "bây giờ",
  "lim_err_signin": "chưa đăng nhập — SIGN IN",
  "lim_err_expired": "hết hạn đăng nhập — SIGN IN",
+ "lim_err_idle": "đang nghỉ — mở chat là chạy lại",
  "lim_err_request": "không lấy được số liệu",
  "lim_err_nodata": "không có số liệu hạn mức",
  "lim_codex_note": "số liệu từ lần chạy Codex gần nhất:",

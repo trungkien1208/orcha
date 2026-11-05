@@ -76,6 +76,7 @@
  "lim_now": "now",
  "lim_err_signin": "not signed in — SIGN IN",
  "lim_err_expired": "sign-in expired — SIGN IN",
+ "lim_err_idle": "idle — wakes on its next chat",
  "lim_err_request": "usage request failed",
  "lim_err_nodata": "no limit data",
  "lim_codex_note": "from your last Codex run:",

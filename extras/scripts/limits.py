@@ -165,18 +165,68 @@ def slot_owner(service):
     return next((a for a in claude_accounts() if own_service(ACCOUNTS[a]) == service), None)
 
 
+def holders(acct):
+    """Every Keychain item that holds the account's sign-in: the default item
+    when active, folder items it was switched into, its own folder's item
+    (unless another account was switched into it) and the copy orcha kept."""
+    out = [DEFAULT_SERVICE] if acct == active_claude() else []
+    slots = read_slots()
+    out += [svc for svc, a in slots.items() if a == acct]
+    own = own_service(ACCOUNTS[acct])
+    if o.claude_dir(ACCOUNTS[acct]) and slots.get(own, acct) == acct:
+        out.append(own)
+    out.append(kept_service(acct))
+    return list(dict.fromkeys(out))
+
+
+def kc_oauth(service):
+    """(expiresAt, raw) of an item's sign-in, or (-1, None)."""
+    raw = kc_read(service)
+    try:
+        return json.loads(raw)["claudeAiOauth"].get("expiresAt", 0), raw
+    except (TypeError, ValueError, KeyError):
+        return -1, None
+
+
+def freshest(acct):
+    """(item, raw) of the account's most recently refreshed sign-in, or (None, None)."""
+    best = (-1, None, None)
+    for svc in holders(acct):
+        exp, raw = kc_oauth(svc)
+        if raw and exp > best[0]:
+            best = (exp, svc, raw)
+    return best[1], best[2]
+
+
 def claude_service(acct):
-    """Where an account's sign-in is now: the default item when active, else
-    a folder item it was switched into, else the copy orcha kept, else
-    Claude's own item for its folder."""
-    if acct == active_claude():
-        return DEFAULT_SERVICE
-    lent = next((svc for svc, a in read_slots().items() if a == acct), None)
-    if lent:
-        return lent
-    if kc_read(kept_service(acct)):
-        return kept_service(acct)
-    return own_service(ACCOUNTS[acct])
+    """Where the account's live sign-in is: its most recently refreshed item."""
+    return freshest(acct)[0] or own_service(ACCOUNTS[acct])
+
+
+def sync_claude(acct):
+    """Claude replaces the refresh token on every refresh, so a copy of a
+    sign-in left behind stops working: the freshest one goes to the copy
+    orcha kept and to items whose sign-in has run out, and the Claudes
+    reading them are nudged. An item still in date is left alone: it may be
+    a sign-in of its own, and two folders sharing one would fight over it."""
+    src, raw = freshest(acct)
+    if not src:
+        return
+    exp = json.loads(raw)["claudeAiOauth"].get("expiresAt", 0)
+    now = time.time() * 1000
+    folders = {dir_service(o.claude_dir(c)): o.claude_dir(c)
+               for c in ACCOUNTS.values() if c["kind"] == "claude" and o.claude_dir(c)}
+    for svc in holders(acct):
+        old, cur = kc_oauth(svc)
+        if svc == src or cur == raw or old >= exp:
+            continue
+        if svc != kept_service(acct) and old > now:
+            continue
+        kc_write(svc, kc_account(svc), raw)
+        if svc == DEFAULT_SERVICE:
+            nudge_claude(None)
+        elif svc in folders:
+            nudge_claude(folders[svc])
 CACHE_TTL = 120
 # a request that failed for a while (no network, a timeout): ask again after
 # this; rate limited (HTTP 429): wait longer. The last numbers stay meanwhile.
@@ -260,6 +310,9 @@ def claude_limits(cfg):
     except Exception:
         return {"error": T["lim_err_signin"]}
     if oauth.get("expiresAt", 0) / 1000 < time.time():
+        # Claude refreshes it on the next chat; until then the last numbers stay
+        if oauth.get("refreshToken"):
+            return {"error": T["lim_err_idle"], "transient": True}
         return {"error": T["lim_err_expired"]}
     # curl (system certs) with headers fed on stdin, so the token never shows in `ps`.
     curl_cfg = (f'header = "Authorization: Bearer {oauth["accessToken"]}"\n'
@@ -619,23 +672,16 @@ def publish_sign_in(acct):
     """Claude wrote the new sign-in in the account's own item. Fuel and chats may
     read the account elsewhere (the default item when it is active, the copy
     orcha kept when it is not): the new sign-in goes there too."""
-    own = own_service(ACCOUNTS[acct])
-    where = claude_service(acct)
-    fresh = kc_read(own)
-    if not fresh or where == own:
+    if not kc_read(own_service(ACCOUNTS[acct])):
         return
-    kc_write(where, kc_account(where), fresh)
-    d = o.claude_dir(ACCOUNTS[acct])
-    if where == DEFAULT_SERVICE:
+    sync_claude(acct)  # the new sign-in is the freshest: it reaches every copy
+    if acct == active_claude():
         # who signed in may be someone new: forget the profile kept for the account
         try:
             os.remove(os.path.join(PROFILE_DIR, acct + ".json"))
         except OSError:
             pass
         set_default_profile(acct)
-        nudge_claude(None)
-    elif d:
-        nudge_claude(d)
 
 
 def cmd_login(acct):
@@ -713,6 +759,12 @@ def cmd_json(fresh=False):
     cur = pane_account() or selected()
     out = []
     for acct, cfg in ACCOUNTS.items():
+        if cfg["kind"] == "claude":
+            try:
+                sync_claude(acct)
+                write_token(acct)
+            except (OSError, RuntimeError, subprocess.SubprocessError):
+                pass  # the Keychain is busy: next time
         d = get(acct, fresh)
         windows = []
         for key, _, _, _ in WINDOWS:
@@ -727,6 +779,19 @@ def cmd_json(fresh=False):
                     # expired tokens still sit in the keychain; fuel cannot use them
                     "signed_in": signed_in(acct) and not auth_needed(d)})
     print(json.dumps(out))
+
+
+def write_token(acct):
+    """<id>.token.json beside the fuel cache: when the account's access token
+    runs out (ms) and whether a refresh token is there to renew it, for
+    orcha's accounts to show. Never the token itself."""
+    exp, raw = kc_oauth(claude_service(acct))
+    refresh = bool(raw and json.loads(raw)["claudeAiOauth"].get("refreshToken"))
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    path = os.path.join(CACHE_DIR, acct + ".token.json")
+    with open(path + ".tmp", "w") as fh:
+        json.dump({"expires": max(exp, 0), "refresh": refresh}, fh)
+    os.replace(path + ".tmp", path)
 
 
 def nudge_claude(config_dir):
@@ -919,7 +984,7 @@ def cmd_activate(acct):
     current = active_claude()
     if current == acct:
         return
-    source = kc_read(kept_service(acct)) or kc_read(own_service(ACCOUNTS[acct]))
+    source = freshest(acct)[1]
     if not source:
         sys.exit(T["lim_err_signin"])
     account_attr = kc_account(DEFAULT_SERVICE)
